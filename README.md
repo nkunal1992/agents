@@ -12,6 +12,9 @@ defines the agent's behavior.
 This repo is the central home for agents that are useful across projects —
 copy them into any repo's `.github/agents/` directory to use them.
 
+Some agents also ship **prompt files** (`prompts/*.prompt.md`), which become
+slash commands such as `/cve-fix` once copied to `.github/prompts/`.
+
 ## Available agents
 
 | Agent | Description |
@@ -22,6 +25,7 @@ copy them into any repo's `.github/agents/` directory to use them.
 | [refactor](agents/refactor.agent.md) | Safe, incremental refactoring without behavior changes |
 | [docs-writer](agents/docs-writer.agent.md) | Writes and updates documentation from the code itself |
 | [java-modernizer](agents/java-modernizer.agent.md) | Senior-architect advisor for legacy Java — scopes analysis to the current change + collaborators, produces a prioritized modernization plan, applies approved items |
+| [cve-remediator](agents/cve-remediator.agent.md) | Fixes CVEs with the smallest safe upgrade and audits CVE whitelists for entries that can be removed — [guide](docs/cve-remediator.md) |
 
 ## Usage
 
@@ -39,15 +43,30 @@ Or copy to a specific repo:
 /path/to/agents/scripts/install.sh /path/to/target-repo
 ```
 
+Install only specific agents (plus their prompt files) with `--only`:
+
+```bash
+/path/to/agents/scripts/install.sh --only cve-remediator --only code-reviewer /path/to/target-repo
+```
+
+Existing files are never overwritten. Run `install.sh --help` for all options.
+
 ### Option 2: manual
 
 ```bash
-mkdir -p .github/agents
+mkdir -p .github/agents .github/prompts
 cp /path/to/agents/agents/*.agent.md .github/agents/
+cp /path/to/agents/prompts/*.prompt.md .github/prompts/
 ```
 
 Commit the files so they're available to anyone (and to Copilot coding agent)
 working in that repo.
+
+### Option 3: organization-wide
+
+Commit agent files to the `agents/` folder of your organization's `.github` or
+`.github-private` repository to make them available in every repository of the
+organization. Prompt files are not distributed this way; install them per repo.
 
 ## Adding a new agent
 
@@ -65,6 +84,9 @@ working in that repo.
 2. Keep instructions **repo-agnostic** — no project-specific paths, tools, or
    services. Agents should discover conventions from the repo they're running in.
 3. Add a row to the table above.
+4. Optional: add slash commands as `prompts/<name>.prompt.md` with
+   `agent: <agent-name>` in the frontmatter — `install.sh --only <agent-name>`
+   picks them up automatically.
 
 ## Writing tips
 
