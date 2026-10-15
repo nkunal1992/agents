@@ -26,6 +26,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [docs-writer](agents/docs-writer.agent.md) | Writes and updates documentation from the code itself |
 | [java-modernizer](agents/java-modernizer.agent.md) | Senior-architect advisor for legacy Java — scopes analysis to the current change + collaborators, produces a prioritized modernization plan, applies approved items |
 | [cve-remediator](agents/cve-remediator.agent.md) | Fixes CVEs with the smallest safe upgrade and audits CVE whitelists for entries that can be removed — [guide](docs/cve-remediator.md) |
+| [codebase-guide](agents/codebase-guide.agent.md) | Read-only codebase explainer — how/where/why answers and repo tours with file:line evidence, tuned for large repos — [guide](docs/codebase-guide.md) |
 
 ## Usage
 
