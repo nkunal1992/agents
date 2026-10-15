@@ -21,6 +21,7 @@ copy them into any repo's `.github/agents/` directory to use them.
 | [debugger](agents/debugger.agent.md) | Systematic root-cause debugging workflow |
 | [refactor](agents/refactor.agent.md) | Safe, incremental refactoring without behavior changes |
 | [docs-writer](agents/docs-writer.agent.md) | Writes and updates documentation from the code itself |
+| [java-modernizer](agents/java-modernizer.agent.md) | Senior-architect advisor for legacy Java — scopes analysis to the current change + collaborators, produces a prioritized modernization plan, applies approved items |
 
 ## Usage
 
