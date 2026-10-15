@@ -27,6 +27,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [java-modernizer](agents/java-modernizer.agent.md) | Senior-architect advisor for legacy Java — scopes analysis to the current change + collaborators, produces a prioritized modernization plan, applies approved items |
 | [cve-remediator](agents/cve-remediator.agent.md) | Fixes CVEs with the smallest safe upgrade and audits CVE whitelists for entries that can be removed — [guide](docs/cve-remediator.md) |
 | [codebase-guide](agents/codebase-guide.agent.md) | Read-only codebase explainer — how/where/why answers and repo tours with file:line evidence, tuned for large repos — [guide](docs/codebase-guide.md) |
+| [jira-ticket-writer](agents/jira-ticket-writer.agent.md) | Generates paste-ready JIRA ticket details from worktree diffs, commits, or ranges — [guide](docs/jira-ticket-writer.md) |
 
 ## Usage
 
