@@ -95,8 +95,10 @@ def prepare_models(home: Path) -> list[str]:
         dest.parent.mkdir(parents=True, exist_ok=True)
         snapshot_download(repo_id=repo, revision=rev, local_dir=dest,
                           allow_patterns=["*.json", "*.txt", "*.safetensors",
-                                          "*.onnx", "LICENSE*"],
-                          exclude_patterns=["*.bin", "*.msgpack", "*.h5"])
+                                          "*.onnx", "LICENSE*", "*.model",
+                                          "*.spm", "modules.json"],
+                          ignore_patterns=["*.bin", "*.msgpack", "*.h5",
+                                           "*.pt", "*.ot"])
         if not any(dest.glob("LICENSE*")):
             raise SetupError(f"{repo} license artifact missing — refusing to ship")
         out.append(f"prepared {repo}@{rev[:8]} (Apache-2.0)")
