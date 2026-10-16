@@ -29,9 +29,18 @@ first-run installation.
 
 ## Bootstrap mode (first run, or when status/connect are missing)
 
-Announce: "The Confluence service isn't installed on this machine yet — I'll
-set it up now. You'll approve each step." Then:
+Announce: "The Confluence service isn't responding — checking whether it's
+already installed." Then:
 
+0. **Already installed?** If `~/.confluence-knowledge/venv` (or
+   `%USERPROFILE%\.confluence-knowledge\venv`) exists, run its
+   `confluence-knowledge doctor` first:
+   - `configured: true` + models ready → the service is FINE; the MCP
+     registration is what is missing — jump straight to step 5 (write/show
+     the config block) + reload handoff. Never re-run install/prepare-models
+     on a healthy setup.
+   - `configured: false` or a model missing → run ONLY the missing step
+     (setup / prepare-models) — do not reinstall the package.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
    order and keep the first that prints ≥3.11: `python3`, `python`, `py`
    (Windows). Call the winner `$PY`. Then check `$PY -m pip --version` — do
