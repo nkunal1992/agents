@@ -64,6 +64,28 @@ def test_crawl_resumes_across_steps(tmp_path):
     assert r2["state"] == "done" and idx.stats()["pages"] == 3
 
 
+class _FakeEmbedder:
+    def __init__(self):
+        self.inputs = []
+
+    def embed(self, texts):
+        import numpy as np
+        self.inputs.extend(texts)
+        return np.ones((len(texts), 4), dtype=np.float32)
+
+
+def test_crawl_with_embedder_stores_vectors(tmp_path):
+    """Regression #70: the embedding path used a non-existent Chunk.heading."""
+    idx = Index(tmp_path / "s.db")
+    emb = _FakeEmbedder()
+    c = Crawler(_dc_client(), idx, "datacenter", embedder=emb)
+    job = c.start("1")
+    assert c.step(job, batch=10)["state"] == "done"
+    chunk_ids = [ch["chunk_id"] for ch in idx.active_chunks()]
+    assert chunk_ids and len(idx.vectors_for(chunk_ids)) == len(chunk_ids)
+    assert any("deep body" in t for t in emb.inputs)
+
+
 def test_out_of_subtree_page_skipped(tmp_path):
     # page 4 claims ancestry not containing root
     PAGES["4"] = dict(PAGES["3"], id="4", title="Outsider",

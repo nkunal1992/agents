@@ -56,6 +56,40 @@ def test_connect_then_crawl_does_not_lock(wired):
     assert r["pages_seen"] == 1
 
 
+class _FakeEmbedder:
+    def embed(self, texts):
+        import numpy as np
+        return np.ones((len(texts), 4), dtype=np.float32)
+
+
+class _FakeReranker:
+    def score(self, query, docs):
+        import numpy as np
+        return np.arange(len(docs), dtype=np.float32)
+
+
+def test_full_agent_flow_with_models(wired, monkeypatch):
+    """connect → crawl (embedding on) → search (rerank on) → evidence → citations."""
+    emb, rr = _FakeEmbedder(), _FakeReranker()
+    monkeypatch.setattr(server, "_embedder", lambda: emb)
+    monkeypatch.setattr(server, "_reranker", lambda: rr)
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    assert server.crawl_step(c["scope_handle"], job["job_id"])["state"] == "done"
+
+    res = server.search(c["scope_handle"], "text")
+    assert res["evidence"], res
+    top = res["evidence"][0]
+    assert top["page_title"] == "Root" and top["page_url"]
+
+    full = server.get_evidence(c["scope_handle"], [top["chunk_id"]])
+    assert "text" in full["chunks"][0]["text"]
+
+    ok = server.verify_citations(c["scope_handle"], res["evidence_set"], [
+        {"claim": "c", "chunk_id": top["chunk_id"], "quote": "text"}])
+    assert ok["ok"] is True
+
+
 def test_reconnect_after_crawl_sees_cache(wired):
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])

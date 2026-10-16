@@ -177,7 +177,7 @@ class Crawler:
             vecs = None
             if self.embedder is not None and chunks:
                 vecs = self.embedder.embed(
-                    [f"{c.heading}\n{c.text}" for c in chunks])
+                    [f"{c.heading_path}\n{c.text}" for c in chunks])
             self.index.upsert_page({
                 "page_id": pid, "parent_id": None, "title": page["title"],
                 "url": page["url"], "level": levels.get(pid, 0),
