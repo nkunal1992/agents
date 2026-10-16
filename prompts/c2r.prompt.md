@@ -14,9 +14,11 @@ Target output file(s) / sinks:
 
 ${input:outputs:Output file(s) the code produces}
 
-Run the full C2R pipeline: backward-slice from the outputs → exhaustive input
-discovery (including silent inputs: config files, env vars, DB lookups) → map
-every branch and negative path → trace sequential overrides → abstract
-transformations to input-only rules → run the verification loop → write
+Run the full C2R pipeline: check `.c2r_state.json` first (resume if present) →
+backward-slice from the outputs → exhaustive input discovery (including silent
+inputs: config files, env vars, DB lookups) → map every branch and negative path
+→ trace sequential overrides → abstract transformations to input-only rules →
+verification loop per field → update `.adoc` + state and checkpoint-commit on
+`docs/c2r-requirements` after each output field → deliver
 `docs/requirements/<name>.adoc` in formal "shall" language with FLD/TRNS IDs.
-Confirm before overwriting. Change nothing else.
+Confirm before overwriting; never touch source code.

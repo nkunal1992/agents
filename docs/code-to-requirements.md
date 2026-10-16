@@ -13,8 +13,11 @@ enough to rebuild the logic without ever seeing the source.
   with synthetic input → expected-output examples.
 - **Verified**: before writing, it dry-runs the code against synthetic inputs
   and corrects the spec where the two disagree.
-- **Write-disciplined**: writes only `docs/requirements/*.adoc`, confirms
-  before overwriting, never modifies code.
+- **Resumable**: progress lives in `.c2r_state.json` + checkpoint commits on a
+  dedicated `docs/c2r-requirements` branch — stop and restart across sessions
+  without losing a single analyzed transformation.
+- **Write-disciplined**: writes only `.c2r_state.json` + `docs/requirements/*.adoc`,
+  confirms before overwriting, never modifies code, never commits user work.
 
 ## Quick start
 
@@ -35,13 +38,24 @@ Or run `/c2r` and answer its prompts.
 ## The pipeline
 
 ```
-Slice from output sinks → input discovery (incl. silent inputs)
-→ path & state analysis (all branches, negative paths, pre-conditions)
-→ sequential lifecycle (first assignment → overrides)
-→ input-only abstract transformations
-→ verification loop (synthetic input → dry-run → reconcile)
-→ docs/requirements/<name>.adoc
+State check (resume if .c2r_state.json exists)
+→ for each pending output field:
+    slice from output sink → input discovery (incl. silent inputs)
+    → path & state analysis (all branches, negative paths, pre-conditions)
+    → sequential lifecycle (first assignment → overrides)
+    → input-only abstract transformation
+    → verify (synthetic input → dry-run → reconcile)
+    → update state + .adoc → checkpoint commit on docs/c2r-requirements
+→ final docs/requirements/<name>.adoc
 ```
+
+## Resuming
+
+State persists in `.c2r_state.json` (work-dir root) with checkpoint commits on
+the `docs/c2r-requirements` branch — only state and spec files are ever
+committed there, never your source changes. Re-open the agent any time: it
+reports progress ("analyzed 5 of 12 output fields") and offers **resume** or
+**restart fresh**.
 
 ## What you get
 
@@ -69,6 +83,8 @@ An `.adoc` file with:
 
 - The dry-run is a mental trace of the code path — if your repo has a runnable
   test harness, the agent will suggest using it to confirm.
+- `.c2r_state.json` is safe to commit (it's the checkpoint mechanism); add it to
+  `.gitignore` on branches where you don't want it.
 - Specs are only as complete as the slice; inputs the code never reads won't
   appear. The Coverage section says what wasn't traced.
 - Large programs: the agent documents at transformation level with `file:line`
