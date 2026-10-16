@@ -29,6 +29,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [codebase-guide](agents/codebase-guide.agent.md) | Read-only codebase explainer — how/where/why answers and repo tours with file:line evidence, tuned for large repos — [guide](docs/codebase-guide.md) |
 | [jira-ticket-writer](agents/jira-ticket-writer.agent.md) | Generates paste-ready JIRA ticket details from worktree diffs, commits, or ranges — [guide](docs/jira-ticket-writer.md) |
 | [architecture-mapper](agents/architecture-mapper.agent.md) | Maps repo/package architecture into mermaid diagrams + a self-contained explainer site — [guide](docs/architecture-mapper.md) |
+| [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
 
 ## Usage
 
