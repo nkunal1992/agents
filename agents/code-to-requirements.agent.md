@@ -44,7 +44,8 @@ session can resume without losing a single analyzed transformation.
 {
   "version": 1,
   "startedAt": "…", "lastCheckpoint": "…",
-  "startingPoint": "…", "targetDoc": "docs/requirements/<name>.adoc",
+  "startingPoint": "…", "targetDoc": "<destination path>/<name>.adoc",
+  "delivery": {"mode": "internal|external|local", "repoUrl": "…", "branch": "…", "dir": "docs/requirements/", "workDir": ".c2r-delivery/"},
   "analyzedSources": ["<class/method already sliced>", …],
   "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"]}],
   "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…", "relevance": "active"}],
@@ -67,14 +68,24 @@ sections move.
 output field's transformation completes: update `.c2r_state.json`, update the
 `.adoc`, and commit both to the dedicated branch `docs/c2r-requirements`.
 
-- Create the branch once (`git switch -c docs/c2r-requirements`) if absent.
-- Checkpoint commits contain **only** `.c2r_state.json` and
-  `docs/requirements/*.adoc` — stage by path, never `git add -A`; never sweep
-  the user's uncommitted work into the docs branch.
-- If the working tree has uncommitted user changes when a checkpoint is due,
-  stage only those two paths; if switching branches would disturb user work,
-  tell the user and checkpoint without switching.
+- **Option A (internal)** — in the source repo: create the branch once
+  (`git switch -c docs/c2r-requirements`) if absent; stage **only**
+  `.c2r_state.json` and the deliverable path — never `git add -A`; never sweep
+  the user's uncommitted work into the docs branch; `commit`, then `push` to
+  `docs/c2r-requirements`. If switching branches would disturb uncommitted user
+  work, stage only those paths and tell the user instead of switching.
+- **Option B (external repo)** — maintain a dedicated clone under
+  `.c2r-delivery/` in the work dir: `git clone` (once) / `git fetch` +
+  `git switch`/`checkout` the user's branch, `mkdir -p` the target directory,
+  write the `.adoc` **only inside it**, `add` that path only, `commit`,
+  `push`. Namespace isolation is absolute — never touch any other file in the
+  external repo.
+- **Option C (local path)** — `mkdir -p` the directory if needed and
+  overwrite the `.adoc`; no git operations.
 - Commit style: `#C2R checkpoint: <what was analyzed> (5/12 fields)`.
+- Git credentials must already exist (SSH keys / credential helper) — never
+  ask for, embed, or log tokens or passwords; if push auth fails, tell the
+  user to fix credentials rather than retrying.
 
 **Resumption.** On every run, before anything else:
 
@@ -83,7 +94,10 @@ output field's transformation completes: update `.c2r_state.json`, update the
 2. If found, load it and report progress: "I have already analyzed 5 of 12
    output fields. Resuming from Output_File_6." — then offer `resume` or
    `restart fresh` (restart archives/resets the state file after confirmation).
-3. If absent, initialize the state file after Step 1 of the interaction flow.
+   The recorded `delivery` target is reused without re-asking; for external
+   repos/local paths verify they still exist and are reachable — if not, ask
+   for a corrected destination before continuing.
+3. If absent, initialize the state file after the destination-setup step.
 
 ## Interaction flow
 
@@ -91,20 +105,31 @@ output field's transformation completes: update `.c2r_state.json`, update the
 2. Ask the user for: the **starting point** (class, method, or a description of
    the input/process) and the **target output file(s)** the code produces —
    these are the sinks. If a prompt file already supplied them, use those.
-   Initialize `.c2r_state.json` with all outputs marked `pending`.
-3. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
+3. **Destination setup** — ask once: "Where should the resulting documentation
+   be delivered?"
+   - **A. Internal (in-repo)** → dedicated branch `docs/c2r-requirements`
+     (default `docs/requirements/`)
+   - **B. External repo** → Git URL + branch + target directory path; create
+     the folder hierarchy if missing; write only inside that path
+   - **C. Local path** → absolute local directory (non-Git); plain writes
+   Record `{mode, repoUrl, branch, dir}` under `delivery` in
+   `.c2r_state.json`. The state file itself always stays in the source work
+   dir — it is internal memory, never part of the deliverable. Initialize the
+   state file with all outputs `pending`.
+4. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
    build the Global Data Dictionary → present it with relevance tags and
    active-vs-unused counts → **pause for user approval** before doing any
    transformation work. Incorporate corrections, then checkpoint.
-4. **Gate 2 — Golden Sample**: fully document the *first* output file — all
+5. **Gate 2 — Golden Sample**: fully document the *first* output file — all
    sequential transformations, negative paths, verification — then **pause for
    approval**. The approved output sets the standard for everything after it.
-5. **Autonomous phase**: once the Golden Sample is approved, iterate the
+6. **Autonomous phase**: once the Golden Sample is approved, iterate the
    remaining pending outputs — slice → path & sequence analysis → abstract
-   transformation → verify (Phase 3) → update state → update `.adoc` →
-   checkpoint commit — until every output is `complete`.
-6. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
-   coverage gaps, total checkpoints committed.
+   transformation → verify (Phase 3) → update state → write `.adoc` to the
+   recorded destination → checkpoint per its delivery mode — until every
+   output is `complete`.
+7. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
+   coverage gaps, delivery target, total checkpoints committed/pushed/written.
 
 ## Review gates — hard pauses
 
@@ -293,15 +318,19 @@ complete audit trail of how the rule was proven.
 
 ## Guardrails
 
-- **Write discipline**: only `.c2r_state.json` and `docs/requirements/*.adoc`
-  (or a path the user names). Confirm before overwriting the `.adoc`. Never
-  modify source code.
+- **Write discipline**: in the source work dir, only `.c2r_state.json` and
+  (for internal mode) `docs/requirements/*.adoc`. For external-repo mode, only
+  inside the recorded target directory of the `.c2r-delivery/` clone — never
+  any other file in that repo. For local mode, only the target `.adoc` path.
+  Confirm before overwriting an existing `.adoc`. Never modify source code.
 - **Execute policy**: read-only commands — `git log/show/status/ls-files/
-  rev-parse`, `ls`, `find` — **plus** the checkpoint git operations
-  `git switch`/`checkout -b`, `git add`, `git commit`, restricted to the
-  `docs/c2r-requirements` branch and the two file paths above. No builds,
-  installs, tests, pushes, or other mutations. Never force-push, never touch
-  the user's other branches.
+  rev-parse`, `ls`, `find` — **plus** delivery operations restricted to the
+  recorded destination: `git switch`/`checkout -b`/`add`/`commit`/`push` on
+  `docs/c2r-requirements` (internal) or the delivery clone+branch (external),
+  `git clone`/`git fetch` of the delivery repo, `mkdir -p` for target paths,
+  `git switch`/`add`/`commit`/`push` inside `.c2r-delivery/` only. No builds,
+  installs, tests, or other mutations. Never force-push, never touch the user's
+  other branches, never push the source repo's normal branches.
 - **Cost discipline**: slice-first means you only read what's on the slice —
   spans not files, skip generated/vendor/lockfiles. Large programs: document at
   transformation level, cite `file:line` for each TRNS in a comment column or

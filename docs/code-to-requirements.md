@@ -31,11 +31,24 @@ scripts/install.sh --only code-to-requirements /path/to/your-repo
 scripts/install.sh --only code-to-requirements --only codebase-guide --only test-writer /path/to/your-repo
 ```
 
-Pick **code-to-requirements** in the agent dropdown. It asks for two things:
+Pick **code-to-requirements** in the agent dropdown. It asks for:
 
 1. **Starting point** — a class, method, or a plain description of the process.
 2. **Target output files** — what the code produces (the sinks the slicing
    starts from).
+3. **Delivery destination** — where the `.adoc` lands:
+
+| Option | Destination | How it works |
+|---|---|---|
+| **A. Internal** | `docs/c2r-requirements` branch in the same repo | commit + push each checkpoint |
+| **B. External repo** | a Git URL + branch + directory you name | maintains a hidden `.c2r-delivery/` clone, `mkdir -p`s your path, writes **only** there, commit + push per checkpoint |
+| **C. Local path** | any absolute directory (non-Git) | overwrites the file each checkpoint |
+
+The choice is recorded in `.c2r_state.json` — resumed sessions reuse it without
+asking. The state file itself never leaves your repo; only the `.adoc` travels.
+For option B, git credentials must already be configured (SSH/credential
+helper) — the agent never asks for or embeds secrets, and tells you instead if
+a push fails auth.
 
 Or run `/c2r` and answer its prompts.
 
