@@ -44,7 +44,8 @@ session can resume without losing a single analyzed transformation.
   "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…"}],
   "idCounters": {"inp": 12, "out": 4, "trns": 9},
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
-  "verification": [{"trns": "TRNS-001", "input": "…", "expected": "…", "status": "verified"}],
+  "verification": [{"trns": "TRNS-001", "syntheticInput": "…", "traversedPath": "OrderService.java:142 → Pricing.java:58", "actualOutput": "…", "status": "verified"}],
+  "blockers": [{"field": "INP-007", "reason": "…", "where": "file:line", "status": "open"}],
   "gates": {"foundationApproved": false, "goldenSampleApproved": false, "goldenSample": "Out.csv"}
 }
 ```
@@ -111,6 +112,21 @@ output field's transformation completes: update `.c2r_state.json`, update the
   gate, fix state + `.adoc` *before* continuing and re-present if the change is
   structural.
 
+## Safety valves
+
+- **Anti-hallucination — never guess.** If a data path is broken, missing, or
+  can't be traced with certainty: mark the requirement
+  `[STATUS: UNRESOLVED]` in the `.adoc`, append `{field, reason, where}` to
+  `blockers[]` in the state file, and **pause** to tell the user exactly which
+  fields need manual resolution. A Gate-3 question that stays unanswered →
+  UNRESOLVED, not a guess. Partial certainty is not certainty.
+- **Evidence log.** Every verified transformation records in
+  `verification[]`: the synthetic input, the file:line/method path traversed
+  during the dry-run, and the actual output the code produced. This is the
+  audit trail — the `.adoc` Verification appendix mirrors it.
+- **No fabricated coverage.** If you couldn't trace it, the doc says
+  UNRESOLVED — a smaller honest spec always beats a complete-looking wrong one.
+
 ## Phase 1 — Deterministic analysis
 
 **Slicing.** Treat the named outputs as *sinks*. Perform backward slicing:
@@ -119,6 +135,13 @@ those dependencies backward — through intermediates — until you reach a
 *source* (an input). Only lines on a slice path matter; ignore unrelated code.
 Mark coverage mentally: every output field must resolve to a source or a
 constant.
+
+**Boundary-less slicing.** The call graph has no borders: when a slice crosses
+into another package, module, or shared library, follow it there — a
+transformation isn't traced until it reaches the original input, wherever it
+lives. External code that isn't readable (compiled deps, generated clients,
+code outside the repo) is **not** something to infer — it becomes a blocker
+(see Safety valves).
 
 **Input discovery — exhaustive:**
 - Primary inputs: files, API payloads, method arguments, user input.
@@ -232,8 +255,19 @@ For each non-trivial transformation:
 4. If the repo has a runnable test harness and the user is present, suggest
    running it for confirmation — but verification by dry-run is the default.
 
-Record verified examples in the doc as a `== Verification` appendix: input →
-expected output per `TRNS-xx` — these become instant test cases.
+Record verified examples in the doc as a `== Verification` appendix — the
+evidence log:
+
+```adoc
+== Verification
+|===
+| TRNS | Synthetic input | Actual output | Traversed path
+| xref:TRNS-001[] | {orderId: "A1", taxRate: 0.1} | 110.00 | OrderService.java:142 → Pricing.java:58
+|===
+```
+
+Each row mirrors the state's `verification[]` entry — instant test cases and a
+complete audit trail of how the rule was proven.
 
 ## Guardrails
 

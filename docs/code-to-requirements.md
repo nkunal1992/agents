@@ -14,6 +14,9 @@ enough to rebuild the logic without ever seeing the source.
   enabled via header attributes.
 - **Verified**: before writing, it dry-runs the code against synthetic inputs
   and corrects the spec where the two disagree.
+- **Safe**: never guesses — untraceable paths are marked
+  `[STATUS: UNRESOLVED]`, logged to `blockers[]` in state, and paused for your
+  input. Slicing follows the call graph across module/library boundaries.
 - **Resumable**: progress lives in `.c2r_state.json` + checkpoint commits on a
   dedicated `docs/c2r-requirements` branch — stop and restart across sessions
   without losing a single analyzed transformation.
@@ -89,8 +92,11 @@ An `.adoc` file with:
   `TRNS-xx` ref) and an explicit cardinality statement per output.
 - **Transformation Logic** — ordered `TRNS-xx` steps, shared-logic block with
   contextual overrides, and a dedicated negative-path section.
-- **Verification** — synthetic input → expected output per transformation,
-  plus discrepancies found and fixed during the dry-run pass.
+- **Verification** — an evidence log: per transformation, the synthetic input,
+  the file:line path traversed during the dry-run, and the actual output the
+  code produced. Mirrored in `.c2r_state.json` (`verification[]`) as the audit
+  trail. Requirements that couldn't be proven are marked
+  `[STATUS: UNRESOLVED]` with the blocking reason tracked in `blockers[]`.
 
 ## Follow-ups
 
