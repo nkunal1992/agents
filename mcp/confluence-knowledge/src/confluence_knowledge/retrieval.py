@@ -106,11 +106,13 @@ def prepare_models(home: Path) -> list[str]:
 
 
 def _load_lock() -> dict:
-    p = Path(__file__).parent.parent.parent / "models.lock.json"
+    import json
+
+    p = Path(__file__).parent / "models.lock.json"  # shipped inside the package
     if p.exists():
-        import json
         return json.loads(p.read_text())
-    return {"models": {"embed": {"revision": "main"}, "rerank": {"revision": "main"}}}
+    # package-data should always be present; refuse rather than float to main
+    raise SetupError("models.lock.json missing from package — reinstall the service")
 
 
 def _cosine(q: np.ndarray, mat: dict[str, np.ndarray]) -> list[tuple[str, float]]:

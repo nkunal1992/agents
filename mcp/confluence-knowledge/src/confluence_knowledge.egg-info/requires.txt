@@ -2,7 +2,7 @@ httpx<0.29,>=0.27
 beautifulsoup4>=4.12
 numpy>=1.26
 keyring>=25.2
-mcp>=1.6
+mcp<2,>=1.6
 
 [dev]
 pytest>=8.0
