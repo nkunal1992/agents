@@ -140,6 +140,7 @@ before refreshing.
 | `setup error: no Confluence profile configured` | run `confluence-knowledge setup` |
 | `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.confluence-knowledge/models/` from an internal mirror) |
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
+| `index database was locked` | a second server process or AV holds the DB. Check for duplicates (`Get-CimInstance Win32_Process \| ? CommandLine -like '*confluence_knowledge.server*'`), kill extras, delete `.conf_knowledge_index/` and retry. v0.1.3+ uses WAL + 30s busy-wait so transient locks retry instead of failing |
 | 403 on some pages | your account lacks permission — those pages are reported as inaccessible |
 | MCP tools not showing | check `.vscode/mcp.json` Start prompt / JetBrains MCP policy; enterprise "MCP servers in Copilot" policy must allow it |
 | corporate proxy/TLS | set `HTTPS_PROXY` / `REQUESTS_CA_BUNDLE`-style env vars for the venv Python; verification is never disabled |

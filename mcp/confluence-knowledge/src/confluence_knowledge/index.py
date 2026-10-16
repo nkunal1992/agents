@@ -37,7 +37,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 class Index:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        # timeout: retry transient locks (AV scan, second process, WAL
+        # checkpoint) instead of failing instantly; check_same_thread: MCP
+        # tools may run on worker threads
+        self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
         self.db.executescript(SCHEMA)
         self.db.execute(
             "INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
