@@ -54,6 +54,14 @@ into the repo — the agent detects `service/` on first run and installs from
 it (`pip install ./service[models]`) instead of GitHub. Python deps still
 come from PyPI (set `PIP_INDEX_URL` for an internal index, or vendor wheels
 with `--include-wheels <dir>`); models come from Hugging Face or your mirror.
+The service itself installs from whichever source is available — bundled
+`service/`, the prebuilt wheel in the zip, or the `confluence-knowledge`
+package on PyPI / your internal mirror.
+
+**Publishing to PyPI (maintainer):** create a project on pypi.org, then
+either add trusted publishing (repo + `publish-pypi.yml`) or set a
+`PYPI_API_TOKEN` repository secret. Tagging `confluence-knowledge-v*` runs
+`.github/workflows/publish-pypi.yml` → `python -m build` → upload.
 
 **First run** — the agent notices its MCP tools aren't registered and
 bootstraps itself: installs the pinned service package into a user venv,

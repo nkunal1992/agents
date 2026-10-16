@@ -53,8 +53,7 @@ def venv_bin(venv_dir: Path) -> Path:
     return venv_dir / ("Scripts" if os.name == "nt" else "bin")
 
 
-def bootstrap(sandbox: Path, service_src: Path) -> tuple[Path, dict]:
-    """Replay the agent's commands verbatim. Returns (venv_python, env)."""
+def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False):
     home = sandbox / "home"
     ck_home = home / ".confluence-knowledge"
     work = sandbox / "work"
@@ -85,8 +84,14 @@ def bootstrap(sandbox: Path, service_src: Path) -> tuple[Path, dict]:
     vpy = venv_bin(venv_dir) / ("python.exe" if os.name == "nt" else "python")
     cli = venv_bin(venv_dir) / ("confluence-knowledge.exe" if os.name == "nt"
                               else "confluence-knowledge")
-    run([str(vpy), "-m", "pip", "install", f"{service_src}[models]"], env,
-        f"venv + pip install {service_src.name}[models]")
+    if use_wheel:
+        wheels = sorted(service_src.parent.glob("confluence_knowledge-*.whl"))
+        check(wheels, "bundle contains a wheel", list(service_src.parent.iterdir()))
+        src_spec = f"{wheels[-1]}[models]"
+    else:
+        src_spec = f"{service_src}[models]"
+    run([str(vpy), "-m", "pip", "install", src_spec], env,
+        f"venv + pip install {src_spec}")
 
     # 3. models — reuse a cache dir if provided, else download for real
     cache = os.environ.get("CK_MODEL_CACHE")
@@ -164,13 +169,14 @@ async def qa_roundtrip(vpy: Path, env: dict) -> None:
 
 
 def main() -> None:
+    use_wheel = "--wheel" in sys.argv
     service_src = (BUNDLE_SVC if BUNDLE_SVC.exists() else REPO_SVC).resolve()
     if "--service" in sys.argv:
         service_src = Path(sys.argv[sys.argv.index("--service") + 1]).resolve()
-    print(f"installing from: {service_src}")
+    print(f"installing from: {'bundle wheel' if use_wheel else service_src}")
     sandbox = Path(tempfile.mkdtemp(prefix="ck-boot-")).resolve()
     print(f"sandbox: {sandbox}")
-    vpy, env, srv, _base, hits = bootstrap(sandbox, service_src)
+    vpy, env, srv, _base, hits = bootstrap(sandbox, service_src, use_wheel)
     asyncio.run(qa_roundtrip(vpy, env))
     check(all(h.startswith("/") for h in hits), "no outbound beyond localhost",
           hits[:5])

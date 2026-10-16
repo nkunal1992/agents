@@ -1,0 +1,24 @@
+name: publish-pypi
+on:
+  push:
+    tags: ["confluence-knowledge-v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # trusted publishing (preferred) — falls back to secret token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build mcp/confluence-knowledge
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        # Works two ways, whichever is configured on the repo/PyPI:
+        #   1. Trusted publishing (recommended): PyPI project settings →
+        #      Publishing → add this repo + this workflow filename.
+        #   2. API token: PYPI_API_TOKEN repository secret on GitHub.
+        with:
+          packages-dir: mcp/confluence-knowledge/dist/

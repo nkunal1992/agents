@@ -53,26 +53,29 @@ pausing between them; the user sees each command anyway.
    Only if NO interpreter ≥3.11 exists, stop with the Manual Setup block
    below. If behind a proxy/offline, tell the user: install the pinned
    package from their internal mirror or a vendored wheel, then re-run you.
-2. **Install the service — bundled copy first.** Search for a vendored
-   service source: look for a `pyproject.toml` containing
-   `name = "confluence-knowledge"` (check `service/`, `confluence-knowledge/`,
-   `mcp/confluence-knowledge/` next to this agent file or at the repo root,
-   then one level deep). If found at `<SVC>`:
-   ```bash
-   $PY -m venv "$HOME/.confluence-knowledge/venv"
-   "$HOME/.confluence-knowledge/venv/bin/python" -m pip install "<SVC>[models]"
-   ```
-   Otherwise install the package via your configured pip index (requires it
-   to be mirrored internally — there is no public PyPI release):
-   ```bash
-   $PY -m venv "$HOME/.confluence-knowledge/venv"
-   "$HOME/.confluence-knowledge/venv/bin/python" -m pip install \
-     "confluence-knowledge[models]"
-   ```
-   (Windows: `py -m venv "%USERPROFILE%\.confluence-knowledge\venv"` then
-   `"%USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe" -m pip
-   install ...`.) Never write service code yourself — always install the
-   pinned/bundled package. Never modify it after install.
+2. **Install the service — try each source in order, stop at the first that
+   works.** Sources, preferred first:
+   a. **Bundled source** — a `pyproject.toml` containing
+      `name = "confluence-knowledge"` under `service/`, `confluence-knowledge/`,
+      or `mcp/confluence-knowledge/` next to this agent file or at the repo
+      root (then one level deep). If found at `<SVC>`:
+      `"$VENV_PY" -m pip install "<SVC>[models]"`
+   b. **Bundled wheel** — a `confluence_knowledge-*.whl` anywhere near the
+      agent file or repo root:
+      `"$VENV_PY" -m pip install "<wheel>[models]"`
+   c. **Pip index** — `"$VENV_PY" -m pip install "confluence-knowledge[models]"`
+      (public PyPI, or your internal mirror — either resolves it)
+   d. **Ask the user** — "Where did you extract the confluence-knowledge
+      bundle zip? I'll install the `service/` (or the `.whl`) from that
+      path." → install from the given path.
+   Only if all four fail, give the Manual Setup block below.
+
+   First create the venv once (Windows: `py -m venv
+   "%USERPROFILE%\.confluence-knowledge\venv"`; macOS/Linux:
+   `"$PY" -m venv ~/.confluence-knowledge/venv`), then use its interpreter as
+   `$VENV_PY` (`…/venv/Scripts/python.exe` or `…/venv/bin/python`).
+   Never write service code yourself — always install the pinned/bundled
+   package. Never modify it after install.
 3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
    prepare-models` — downloads two Apache-2.0 models (embedding + reranker)
    into `~/.confluence-knowledge/models/`. If the network blocks Hugging
@@ -103,8 +106,11 @@ pausing between them; the user sees each command anyway.
 
 **Bootstrap guardrails:** you may only run the pinned install/verify commands
 above plus interpreter/`$PY -m pip`/`git` version checks. No other commands.
-If a step fails twice, stop and give the user the **Manual Setup** block
-below verbatim (it is self-contained — do not reference external docs):
+**Never dead-end**: when a command fails, name what's missing, try the next
+source/step in the ladder, and only after every option fails give the user
+the **Manual Setup** block below verbatim (it is self-contained — do not
+reference external docs). A failed attempt is information, not a stop: say
+what you're trying next.
 
 ### Manual Setup (give to the user when bootstrap can't proceed)
 

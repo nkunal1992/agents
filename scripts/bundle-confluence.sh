@@ -55,6 +55,12 @@ cat > "$OUT/mcp.json.example" <<'JSON'
 }
 JSON
 
+# prebuilt wheel — lets `pip install <whl>[models]` work without any build
+# backend or setuptools download (offline/corporate-friendly)
+python3 -c "import build" 2>/dev/null || python3 -m pip install --quiet --user build
+( cd "$ROOT/mcp/confluence-knowledge" && python3 -m build --wheel --outdir "$OUT" >/dev/null )
+echo "  wheel: $(ls "$OUT"/*.whl | xargs -n1 basename)"
+
 # human-facing README (what teams see on the store listing + in the zip)
 cp "$ROOT/bundle/README.md" "$OUT/README.md"
 # plain-language explainer — for whoever presents/defends the agent internally

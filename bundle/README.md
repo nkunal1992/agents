@@ -88,6 +88,11 @@ py -m venv %USERPROFILE%\.confluence-knowledge\venv           # python3 -m venv 
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
 ```
 
+Install sources, in the order the agent tries them: `service/` source → the
+bundled `confluence_knowledge-*.whl` → `pip install confluence-knowledge[models]`
+(PyPI or your internal mirror) → the path you gave it. Nothing needs
+copying — the agent finds whichever is there.
+
 Then register the MCP server — one command writes every config your IDEs read
 (JetBrains Copilot config, VS Code workspace/user `mcp.json`), merging with
 existing servers and backing up first:
