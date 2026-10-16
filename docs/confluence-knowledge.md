@@ -138,6 +138,7 @@ before refreshing.
 | Symptom | Fix |
 |---|---|
 | `setup error: no Confluence profile configured` | run `confluence-knowledge setup` |
+| `SSL: CERTIFICATE_VERIFY_FAILED` (Confluence or huggingface.co) | v0.1.5+ ships `pip-system-certs` so requests/httpx use the OS cert store — should be automatic. On older installs: `python -m pip install pip-system-certs`, or point `REQUESTS_CA_BUNDLE` at your corporate root CA |
 | `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.confluence-knowledge/models/` from an internal mirror) |
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
 | `index database was locked` | a second server process or AV holds the DB. **Two servers spawning?** Check *all* registration spots — IntelliJ stores UI-added servers in `%APPDATA%\JetBrains\<IDE>\options\` XML (not mcp.json); workspace configs can exist in `.vscode\mcp.json`, `.copilot\`, `.idea\`. Keep ONE registration (venv python). Also check process parents: `Get-CimInstance Win32_Process -Filter "Name='python.exe'" \| ? CommandLine -Match 'confluence_knowledge' \| Select ProcessId,ParentProcessId,CommandLine`. v0.1.3+ uses WAL + 30s busy-wait so transient locks retry instead of failing |

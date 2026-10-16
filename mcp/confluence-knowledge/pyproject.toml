@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "confluence-knowledge"
-version = "0.1.4"
+version = "0.1.5"
 description = "Local, GET-only Confluence subtree indexer + grounded-Q&A MCP service"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ dependencies = [
     "numpy>=1.26",
     "keyring>=25.2",
     "mcp>=1.6,<2",
+    "pip-system-certs>=5.0",  # OS cert store → works behind TLS-inspecting proxies
 ]
 
 [project.optional-dependencies]

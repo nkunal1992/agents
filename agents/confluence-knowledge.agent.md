@@ -68,6 +68,9 @@ set it up now. You'll approve each step." Then:
    hidden, goes to the OS keyring): `confluence-knowledge setup` — the wizard
    asks Cloud vs Data Center, prints the exact token-creation steps, and
    heartbeats the connection. Never ask them to paste a token into chat.
+   If heartbeat or downloads fail with `SSL: CERTIFICATE_VERIFY_FAILED`,
+   the fix is `$VENV/bin/python -m pip install pip-system-certs` (bundled in
+   ≥0.1.5 — only needed for older installs).
 5. **Register the MCP server.** Write `.vscode/mcp.json` in the workspace
    (merge with existing `servers`; for JetBrains, show the same block for
    Copilot MCP settings):
