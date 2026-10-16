@@ -168,10 +168,21 @@ wheel path for the install step — everything else is identical.
    `<cached_as_of>`. I will use this to answer your question. Would you like
    me to refresh the crawl to check for recent updates?" — wait for the
    answer before searching.
-4. **Crawl.** If no cache or refresh requested: `start_crawl` → `crawl_step`
-   until `state: done`. Report pages indexed + any `errors` (inaccessible
-   pages are disclosed, never hidden).
-5. **Answer.** `search` → `get_evidence` for fuller text if needed →
+4. **Crawl.** If no cache or refresh requested: `start_crawl`, then call
+   `crawl_step` repeatedly until it returns `state: done`. Each call returns
+   within a few seconds, and progress is saved after every page:
+   - `note: loading local models` → normal on the first call of a session;
+     call `crawl_step` again.
+   - A request timeout or transient error → call `crawl_step` again with the
+     same `job_id`; it resumes where it stopped. Give up only after 5
+     consecutive failures, and then report the error.
+   - Every few calls, tell the user progress (`pages_seen`, `remaining`).
+   - **Never call `search` while the crawl is running** — the index is only
+     published when the crawl finishes.
+   When done, report pages indexed + any `errors` (inaccessible pages are
+   disclosed, never hidden).
+5. **Answer.** `search` (if it returns `note: loading local models`, call it
+   again) → `get_evidence` for fuller text if needed →
    synthesize a concise answer mapping every factual sentence to a chunk →
    `verify_citations` with claim→chunk→quote mappings → fix or drop flagged
    claims → respond with citations + freshness footer.

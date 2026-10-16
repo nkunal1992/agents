@@ -86,6 +86,40 @@ def test_crawl_with_embedder_stores_vectors(tmp_path):
     assert any("deep body" in t for t in emb.inputs)
 
 
+def test_step_stops_at_time_budget_and_resumes(tmp_path, monkeypatch):
+    """Each step must return before the IDE's request timeout; completed
+    pages are checkpointed so the next step continues, not restarts."""
+    import confluence_knowledge.crawl as crawl_mod
+    clock = iter(range(0, 1000, 10))  # every monotonic() call advances 10 s
+    monkeypatch.setattr(crawl_mod.time, "monotonic", lambda: next(clock))
+    idx = Index(tmp_path / "s.db")
+    c = Crawler(_dc_client(), idx, "datacenter")
+    job = c.start("1")
+    r1 = c.step(job, batch=50, budget_s=5)   # deadline passes after the first page
+    assert r1["state"] == "running" and r1["pages_seen"] == 1
+    r2 = Crawler(_dc_client(), idx, "datacenter").step(job, batch=50)
+    assert r2["state"] == "done" and r2["pages_seen"] == 3
+
+
+def test_new_crawl_supersedes_abandoned_job(tmp_path):
+    idx = Index(tmp_path / "s.db")
+    c = Crawler(_dc_client(), idx, "datacenter")
+    stale = c.start("1")                      # never stepped, e.g. a failed attempt
+    fresh = c.start("1")
+    c.step(fresh, batch=10)
+    assert idx.job(stale)["state"] == "abandoned"
+    assert idx.latest_job() == {"job_id": fresh, "state": "done", "errors": []}
+
+
+def test_relative_cloud_links_become_absolute():
+    from confluence_knowledge.crawl import _abs_url
+    assert _abs_url("/spaces/X/pages/1", "https://a.atlassian.net/wiki") == \
+        "https://a.atlassian.net/wiki/spaces/X/pages/1"
+    assert _abs_url("https://x/y", "https://ignored") == "https://x/y"
+    c = Crawler(None, None, "cloud", site_url="https://a.atlassian.net")
+    assert c.site_url == "https://a.atlassian.net/wiki"
+
+
 def test_out_of_subtree_page_skipped(tmp_path):
     # page 4 claims ancestry not containing root
     PAGES["4"] = dict(PAGES["3"], id="4", title="Outsider",

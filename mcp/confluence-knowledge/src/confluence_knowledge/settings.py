@@ -30,6 +30,16 @@ def default_home() -> Path:
     return (Path.home() / ".confluence-knowledge").resolve()
 
 
+def resolve_workdir() -> Path:
+    """Folder for the index and the file-fallback credential, shared by the CLI
+    and the server. CONF_KNOWLEDGE_WORKDIR wins; otherwise a per-user folder,
+    never the process cwd (IDEs start servers from read-only install dirs)."""
+    env = os.environ.get("CONF_KNOWLEDGE_WORKDIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    return default_home() / "work"
+
+
 def workspace_index_root(workdir: Path) -> Path:
     return workdir / INDEX_DIR_NAME
 

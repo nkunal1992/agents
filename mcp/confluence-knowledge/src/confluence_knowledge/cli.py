@@ -10,12 +10,19 @@ import argparse
 import getpass
 import json
 import sys
-from pathlib import Path
 
 from .auth import store_credential
 from .client import AccessError, make_client
 from .retrieval import prepare_models
-from .settings import AUTH_FILE_NAME, SetupError, SiteProfile, default_home, ensure_gitignore
+from .settings import (
+    AUTH_FILE_NAME,
+    INDEX_DIR_NAME,
+    SetupError,
+    SiteProfile,
+    default_home,
+    ensure_gitignore,
+    resolve_workdir,
+)
 
 
 def _wizard() -> int:
@@ -44,7 +51,8 @@ def _wizard() -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    workdir = Path.cwd()
+    workdir = resolve_workdir()
+    workdir.mkdir(parents=True, exist_ok=True)
     home = default_home()
     # gitignore protections BEFORE any secret/cache write
     try:
@@ -132,8 +140,7 @@ def main() -> None:
     if args.cmd == "clean":
         import shutil
 
-        from .settings import INDEX_DIR_NAME
-        target = Path.cwd() / INDEX_DIR_NAME
+        target = resolve_workdir() / INDEX_DIR_NAME
         if target.exists() and (args.yes or input(
                 f"delete {target}? [y/N] ").strip().lower() == "y"):
             shutil.rmtree(target)

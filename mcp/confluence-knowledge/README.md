@@ -19,6 +19,16 @@ python3.11+ -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m ruff check src tests
 ```
 
+Before every release, run the end-to-end smoke test. It spawns the real stdio
+server through the MCP client SDK and uses the real models against a fake
+Confluence on localhost, with simulated network latency:
+
+```bash
+.venv/bin/pip install -e '.[models]'
+CONF_KNOWLEDGE_HOME=/tmp/ck/home .venv/bin/confluence-knowledge prepare-models
+CONF_KNOWLEDGE_HOME=/tmp/ck/home .venv/bin/python scripts/e2e_smoke.py   # ends with "E2E OK"
+```
+
 ## CLI
 
 | Command | Purpose |
@@ -27,4 +37,4 @@ python3.11+ -m venv .venv && .venv/bin/pip install -e '.[dev]'
 | `confluence-knowledge prepare-models` | fetch pinned local models once |
 | `confluence-knowledge doctor` | verify config + heartbeat + models |
 | `confluence-knowledge serve` | run the stdio MCP server (what the IDE launches) |
-| `confluence-knowledge clean` | delete this repo's local index |
+| `confluence-knowledge clean` | delete the local index (`~/.confluence-knowledge/work` unless `CONF_KNOWLEDGE_WORKDIR` is set) |

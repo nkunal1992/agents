@@ -6,17 +6,27 @@ are opaque and bound to the site+account+root partition.
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from .auth import get_credential
-from .client import SecurityException, make_client
+from .client import ConfluenceClient, SecurityException, make_client
 from .crawl import Crawler
 from .index import Index
 from .retrieval import LocalEmbedder, LocalReranker, check_citations, retrieve
-from .settings import SetupError, SiteProfile, default_home, extract_page_id, workspace_index_root
+from .settings import (
+    SetupError,
+    SiteProfile,
+    default_home,
+    extract_page_id,
+    resolve_workdir,
+    workspace_index_root,
+)
 
 mcp = FastMCP("confluence-knowledge")
 
@@ -24,8 +34,15 @@ mcp = FastMCP("confluence-knowledge")
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, list[dict]] = {}
 _indexes: dict[str, Index] = {}  # one connection per DB for the server lifetime
+_clients: dict[str, ConfluenceClient] = {}  # one HTTP pool per credential
 _EMBEDDER = None
 _RERANKER = None
+_model_lock = threading.Lock()
+_models_ready = threading.Event()
+_warm_lock = threading.Lock()
+_warm_started = False
+
+LOADING_NOTE = "loading local models — call this tool again"
 
 
 def _home() -> Path:
@@ -33,15 +50,23 @@ def _home() -> Path:
 
 
 def _workdir() -> Path:
-    return Path(os.environ.get("CONF_KNOWLEDGE_WORKDIR", Path.cwd())).resolve()
+    return resolve_workdir()
+
+
+def _step_seconds() -> float:
+    """Upper bound for one tool call, kept well under IDE request timeouts."""
+    return float(os.environ.get("CONF_KNOWLEDGE_STEP_SECONDS", "10"))
 
 
 def _client_for(profile: SiteProfile):
-    token = get_credential(_workdir(), profile.credential_ref)
-    if not token:
-        raise SetupError(
-            "no stored token — run `confluence-knowledge setup` to configure credentials")
-    return make_client(profile, token)
+    c = _clients.get(profile.credential_ref)
+    if c is None:
+        token = get_credential(_workdir(), profile.credential_ref)
+        if not token:
+            raise SetupError(
+                "no stored token — run `confluence-knowledge setup` to configure credentials")
+        c = _clients[profile.credential_ref] = make_client(profile, token)
+    return c
 
 
 def _index_for(scope_key: str) -> Index:
@@ -53,22 +78,56 @@ def _index_for(scope_key: str) -> Index:
 
 def _embedder():
     global _EMBEDDER
-    if _EMBEDDER is None:
-        _EMBEDDER = LocalEmbedder(_home())
+    with _model_lock:
+        if _EMBEDDER is None:
+            _EMBEDDER = LocalEmbedder(_home())
     return _EMBEDDER
 
 
 def _reranker():
     global _RERANKER
-    if _RERANKER is None:
-        _RERANKER = LocalReranker(_home())
+    with _model_lock:
+        if _RERANKER is None:
+            _RERANKER = LocalReranker(_home())
     return _RERANKER
+
+
+def _warm_models() -> None:
+    try:
+        _embedder()
+        _reranker()
+    except SetupError:
+        pass  # reported by the tool that needs the model
+    finally:
+        _models_ready.set()
+
+
+def _start_warmup() -> None:
+    """Load torch + both models off the request path; the first load can take
+    longer than an IDE's request timeout."""
+    global _warm_started
+    with _warm_lock:
+        if _warm_started:
+            return
+        _warm_started = True
+    threading.Thread(target=_warm_models, name="model-warmup", daemon=True).start()
+
+
+def _models_loaded(wait: float) -> bool:
+    _start_warmup()
+    return _models_ready.wait(wait)
 
 
 def _scope(scope_handle: str) -> dict:
     s = _scopes.get(scope_handle)
     if s is None:
-        raise SetupError("unknown scope — call confluence_knowledge_connect first")
+        # the IDE may restart the server (e.g. after a request timeout) and
+        # drop in-memory scopes; handles carry the root so they re-bind after
+        # the same identity check connect() performs
+        parts = scope_handle.split(":")
+        if len(parts) == 3 and parts[0] == "scope" and connect(parts[2])["scope_handle"] == scope_handle:
+            return _scopes[scope_handle]
+        raise SetupError("unknown scope — call connect first")
     return s
 
 
@@ -87,6 +146,7 @@ def status() -> dict:
         "profile": cfg,
         "embedding_model_ready": (models / "all-MiniLM-L6-v2").exists(),
         "reranker_model_ready": (models / "ms-marco-MiniLM-L6-v2").exists(),
+        "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
         "index_root": str(workspace_index_root(_workdir())),
         "live_scopes": sorted(_scopes),
     }
@@ -97,6 +157,7 @@ def connect(root: str) -> dict:
     """Validate credentials + root readability; bind a scope handle."""
     profile = SiteProfile.load(_home())
     root_id = extract_page_id(root)
+    _clients.pop(profile.credential_ref, None)  # re-read the token: setup may have rotated it
     client = _client_for(profile)
     who = client.get("wiki/rest/api/user/current" if profile.env == "cloud"
                      else "rest/api/user/current").json()
@@ -104,8 +165,9 @@ def connect(root: str) -> dict:
     scope_key = profile.scope_key(principal, root_id)
     idx = _index_for(scope_key)
     st = idx.stats()
-    handle = f"scope:{scope_key}"
+    handle = f"scope:{scope_key}:{root_id}"
     _scopes[handle] = {"key": scope_key, "profile": profile, "root": root_id}
+    _start_warmup()
     return {
         "scope_handle": handle,
         "root_page_id": root_id,
@@ -116,21 +178,40 @@ def connect(root: str) -> dict:
     }
 
 
+def _crawler(s: dict, embedder=None) -> Crawler:
+    return Crawler(_client_for(s["profile"]), _index_for(s["key"]), s["profile"].env,
+                   embedder=embedder, site_url=s["profile"].base_url)
+
+
 @mcp.tool()
 def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
+    """Begin a crawl of the root page and all descendants; then call
+    crawl_step until state is "done"."""
     s = _scope(scope_handle)
-    crawler = Crawler(_client_for(s["profile"]), _index_for(s["key"]),
-                      s["profile"].env, embedder=_embedder())
-    job_id = crawler.start(s["root"])
+    job_id = _crawler(s).start(s["root"])
     return {"job_id": job_id, "state": "running"}
 
 
 @mcp.tool()
-def crawl_step(scope_handle: str, job_id: str, batch: int = 10) -> dict:
+def crawl_step(scope_handle: str, job_id: str, batch: int = 50) -> dict:
+    """Crawl the next pages. Returns within ~10 s; progress is saved after
+    every page, so after a timeout just call it again with the same job_id."""
     s = _scope(scope_handle)
-    crawler = Crawler(_client_for(s["profile"]), _index_for(s["key"]),
-                      s["profile"].env, embedder=_embedder())
-    return crawler.step(job_id, batch=batch)
+    started = time.monotonic()
+    budget = _step_seconds()
+    if not _models_loaded(budget):
+        return {"job_id": job_id, "state": "running", "note": LOADING_NOTE}
+    remaining = max(1.0, budget - (time.monotonic() - started))
+    return _crawler(s, embedder=_embedder()).step(job_id, batch=batch, budget_s=remaining)
+
+
+def _coverage(idx: Index) -> str:
+    job = idx.latest_job()
+    if job is None or job["state"] == "abandoned":
+        return "unknown"
+    if job["state"] == "running":
+        return "refresh in progress — answering from the previous snapshot"
+    return "partial" if job["errors"] else "complete"
 
 
 @mcp.tool()
@@ -140,14 +221,21 @@ def search(scope_handle: str, question: str) -> dict:
     idx = _index_for(s["key"])
     st = idx.stats()
     if st["pages"] == 0:
+        job = idx.latest_job()
+        if job and job["state"] == "running":
+            return {"evidence": [], "coverage": "crawling",
+                    "note": f"crawl {job['job_id']} still running — keep calling crawl_step "
+                            "until state is done, then search"}
         return {"evidence": [], "coverage": "empty",
                 "note": "no pages indexed — run a crawl first"}
+    if not _models_loaded(_step_seconds()):
+        return {"evidence": [], "coverage": "loading", "note": LOADING_NOTE}
     ev = retrieve(idx, question, _embedder(), _reranker())
     set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
     _evidence_sets[set_id] = ev
     return {
         "evidence_set": set_id,
-        "coverage": "complete" if not _incomplete(idx) else "partial",
+        "coverage": _coverage(idx),
         "as_of": st["as_of"],
         "evidence": [
             {"chunk_id": e["chunk_id"], "page_title": e["page_title"],
@@ -156,12 +244,6 @@ def search(scope_handle: str, question: str) -> dict:
             for e in ev
         ],
     }
-
-
-def _incomplete(idx: Index) -> bool:
-    row = idx.db.execute(
-        "SELECT COUNT(*) FROM jobs WHERE state != 'done'").fetchone()
-    return bool(row and row[0])
 
 
 @mcp.tool()
@@ -187,11 +269,15 @@ def verify_citations(scope_handle: str, evidence_set: str,
     _scope(scope_handle)
     ev = _evidence_sets.get(evidence_set)
     if ev is None or not evidence_set.endswith(_scopes[scope_handle]["key"][:8]):
-        raise SecurityException("unknown or cross-scope evidence set")
+        raise SecurityException(
+            "unknown or cross-scope evidence set — run search again and cite its evidence_set")
     return check_citations(ev, mappings)
 
 
 def main() -> None:
+    # httpx logs every request URL at INFO; keep the IDE's MCP log readable
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    _start_warmup()
     mcp.run()
 
 

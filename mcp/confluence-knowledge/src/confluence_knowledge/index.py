@@ -65,6 +65,17 @@ class Index:
         return {"root_page": row[0], "state": row[1],
                 "queue": json.loads(row[2]), "errors": json.loads(row[3])}
 
+    def abandon_running_jobs(self) -> None:
+        """A new crawl supersedes any unfinished one (e.g. an earlier failed
+        attempt) so it can't leave coverage reported as partial forever."""
+        self.db.execute("UPDATE jobs SET state='abandoned' WHERE state='running'")
+        self.db.commit()
+
+    def latest_job(self) -> dict | None:
+        row = self.db.execute(
+            "SELECT job_id,state,errors FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        return row and {"job_id": row[0], "state": row[1], "errors": json.loads(row[2])}
+
     def save_job(self, job_id: str, state: str, queue: list, errors: list) -> None:
         self.db.execute(
             "UPDATE jobs SET state=?, queue=?, errors=? WHERE job_id=?",
@@ -125,7 +136,8 @@ class Index:
             rows = self.db.execute(
                 "SELECT chunk_id, rank FROM chunks_fts WHERE chunks_fts MATCH ? "
                 "ORDER BY rank LIMIT ?",
-                (" OR ".join(f'"{w}"' for w in query.split()[:16] if w.strip()) or '""',
+                (" OR ".join('"' + w.replace('"', '""') + '"'
+                             for w in query.split()[:16] if w.strip()) or '""',
                  limit)).fetchall()
         except sqlite3.OperationalError:
             return []

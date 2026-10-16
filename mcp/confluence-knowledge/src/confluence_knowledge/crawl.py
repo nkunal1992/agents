@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from .client import AccessError, ConfluenceClient
 from .extract import extract_chunks
@@ -76,38 +78,50 @@ def _fetch_children_dc(client: ConfluenceClient, page_id: str) -> list[tuple[str
     return out
 
 
+def _abs_url(webui: str, base: str | None) -> str:
+    """Join Confluence's relative `_links.webui` onto a base so citations are
+    clickable; absolute links pass through unchanged."""
+    if not webui or urlparse(webui).scheme or not base:
+        return webui
+    return base.rstrip("/") + "/" + webui.lstrip("/")
+
+
 def _fetch_page_v2(client: ConfluenceClient, page_id: str) -> dict:
     d = client.get(f"wiki/api/v2/pages/{page_id}",
                    params={"body-format": "storage"}).json()
+    links = d.get("_links") or {}
     return {
         "page_id": str(d["id"]), "title": d.get("title", ""),
         "storage": (d.get("body") or {}).get("storage", {}).get("value", ""),
         "version": str((d.get("version") or {}).get("number", "")),
-        "url": (d.get("_links") or {}).get("webui", ""),
+        "url": _abs_url(links.get("webui", ""), links.get("base")),
     }
 
 
 def _fetch_page_dc(client: ConfluenceClient, page_id: str) -> dict:
     d = client.get(f"rest/api/content/{page_id}",
                    params={"expand": "body.storage,version,ancestors"}).json()
-    webui = (d.get("_links") or {}).get("webui", "")
-    base = (d.get("_links") or {}).get("base", "")
+    links = d.get("_links") or {}
     return {
         "page_id": str(d["id"]), "title": d.get("title", ""),
         "storage": (d.get("body") or {}).get("storage", {}).get("value", ""),
         "version": str((d.get("version") or {}).get("number", "")),
-        "url": base + webui if webui.startswith("/") else webui,
+        "url": _abs_url(links.get("webui", ""), links.get("base")),
         "ancestors": [str(a["id"]) for a in d.get("ancestors", [])],
     }
 
 
 class Crawler:
     def __init__(self, client: ConfluenceClient, index: Index, env: str,
-                 embedder=None):
+                 embedder=None, site_url: str | None = None):
         self.client = client
         self.index = index
         self.env = env
         self.embedder = embedder  # retrieval.LocalEmbedder or None
+        # fallback base for page links when a response carries no _links.base
+        if site_url and env == "cloud" and not site_url.rstrip("/").endswith("/wiki"):
+            site_url = site_url.rstrip("/") + "/wiki"
+        self.site_url = site_url
 
     def _children(self, pid: str, is_folder: bool = False):
         if self.env == "cloud":
@@ -116,16 +130,33 @@ class Crawler:
         return _fetch_children_dc(self.client, pid)
 
     def _page(self, pid: str) -> dict:
-        return (_fetch_page_v2(self.client, pid) if self.env == "cloud"
+        page = (_fetch_page_v2(self.client, pid) if self.env == "cloud"
                 else _fetch_page_dc(self.client, pid))
+        page["url"] = _abs_url(page["url"], self.site_url)
+        return page
 
     def start(self, root_page: str) -> str:
         job_id = uuid.uuid4().hex[:12]
+        self.index.abandon_running_jobs()
         self.index.create_job(job_id, root_page)
         self.index.save_job(job_id, "running", [f"page:{root_page}"], [])
         return job_id
 
-    def step(self, job_id: str, batch: int = 10) -> dict:
+    def _checkpoint(self, job_id, queue, errors, seen, levels) -> None:
+        """Persist progress so an interrupted step loses no completed page."""
+        with self.index.db:
+            self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                                  (f"seen:{job_id}", json.dumps(sorted(seen))))
+            self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                                  (f"levels:{job_id}", json.dumps(levels)))
+            self.index.db.execute(
+                "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
+                (json.dumps(queue), json.dumps(errors), job_id))
+
+    def step(self, job_id: str, batch: int = 10, budget_s: float | None = None) -> dict:
+        """Process up to `batch` pages, stopping early once `budget_s` seconds
+        have passed so each MCP call returns before the IDE's request timeout."""
+        deadline = None if budget_s is None else time.monotonic() + budget_s
         job = self.index.job(job_id)
         if job is None:
             raise AccessError(f"unknown job {job_id}")
@@ -145,7 +176,10 @@ class Crawler:
         visited: set[str] = set()
 
         processed = 0
-        while queue and processed < batch:
+        while queue and processed < batch and (
+                deadline is None or processed == 0 or time.monotonic() < deadline):
+            if processed:
+                self._checkpoint(job_id, queue, errors, seen, levels)
             entry = queue.pop(0)          # "page:123" or "folder:456"
             is_folder = entry.startswith("folder:")
             pid = entry.split(":", 1)[1] if ":" in entry else entry
@@ -189,14 +223,7 @@ class Crawler:
                     levels.setdefault(cid, levels.get(pid, 0) + 1)
                     queue.append(f"{ctype}:{cid}")
 
-        # persist progress — resumable across interruptions
-        self.index.db.execute(
-            "INSERT OR REPLACE INTO meta VALUES (?,?)",
-            (f"seen:{job_id}", json.dumps(sorted(seen))))
-        self.index.db.execute(
-            "INSERT OR REPLACE INTO meta VALUES (?,?)",
-            (f"levels:{job_id}", json.dumps(levels)))
-        self.index.db.commit()
+        self._checkpoint(job_id, queue, errors, seen, levels)
 
         if queue:
             self.index.save_job(job_id, "running", queue, errors)

@@ -6,6 +6,7 @@ self-deadlocked with "database is locked".
 """
 
 import sqlite3
+import threading
 
 import pytest
 
@@ -36,10 +37,14 @@ class _FakeClient:
 @pytest.fixture
 def wired(monkeypatch, tmp_path):
     monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path))
+    monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(tmp_path / "home"))
     profile = SiteProfile("datacenter", "https://c", None, "ref")
     monkeypatch.setattr(SiteProfile, "load", staticmethod(lambda home: profile))
     monkeypatch.setattr(server, "_client_for", lambda p: _FakeClient())
     monkeypatch.setattr(server, "_embedder", lambda: None)
+    monkeypatch.setattr(server, "_reranker", lambda: None)
+    monkeypatch.setattr(server, "_models_ready", threading.Event())
+    monkeypatch.setattr(server, "_warm_started", False)
     real_connect = sqlite3.connect
     # fail fast instead of waiting out the 30s busy timeout
     monkeypatch.setattr(sqlite3, "connect",
@@ -88,6 +93,44 @@ def test_full_agent_flow_with_models(wired, monkeypatch):
     ok = server.verify_citations(c["scope_handle"], res["evidence_set"], [
         {"claim": "c", "chunk_id": top["chunk_id"], "quote": "text"}])
     assert ok["ok"] is True
+
+
+def test_search_during_crawl_says_crawling(wired):
+    c = server.connect("1")
+    server.start_crawl(c["scope_handle"])
+    res = server.search(c["scope_handle"], "text")
+    assert res["coverage"] == "crawling" and "crawl_step" in res["note"]
+
+
+def test_crawl_step_returns_while_models_load(wired, monkeypatch):
+    """The first torch/model load can exceed the IDE timeout — the tool must
+    answer 'loading' instead of blocking."""
+    monkeypatch.setenv("CONF_KNOWLEDGE_STEP_SECONDS", "0.05")
+    gate = threading.Event()
+    monkeypatch.setattr(server, "_embedder", lambda: gate.wait(5))
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    r = server.crawl_step(c["scope_handle"], job["job_id"])
+    assert r["note"] == server.LOADING_NOTE
+    gate.set()
+
+
+def test_scope_survives_server_restart(wired):
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    server._scopes.clear()                    # IDE restarted the server
+    assert server.crawl_step(c["scope_handle"], job["job_id"])["state"] == "done"
+
+
+def test_coverage_complete_despite_earlier_failed_job(wired, monkeypatch):
+    emb, rr = _FakeEmbedder(), _FakeReranker()
+    monkeypatch.setattr(server, "_embedder", lambda: emb)
+    monkeypatch.setattr(server, "_reranker", lambda: rr)
+    c = server.connect("1")
+    server.start_crawl(c["scope_handle"])     # abandoned
+    job = server.start_crawl(c["scope_handle"])
+    server.crawl_step(c["scope_handle"], job["job_id"])
+    assert server.search(c["scope_handle"], 'say "text')["coverage"] == "complete"
 
 
 def test_reconnect_after_crawl_sees_cache(wired):

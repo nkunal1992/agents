@@ -54,7 +54,8 @@ class LocalEmbedder:
         self._m = _load_sentence_transformer(EMBED_MODEL, home)
 
     def embed(self, texts: list[str]) -> np.ndarray:
-        v = self._m.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+        v = self._m.encode(texts, convert_to_numpy=True, normalize_embeddings=True,
+                           show_progress_bar=False)
         return np.asarray(v, dtype=np.float32)
 
 
@@ -77,7 +78,8 @@ class LocalReranker:
 
     def score(self, query: str, docs: list[str]) -> np.ndarray:
         return np.asarray(
-            self._m.predict([[query, d] for d in docs]), dtype=np.float32)
+            self._m.predict([[query, d] for d in docs], show_progress_bar=False),
+            dtype=np.float32)
 
 
 def prepare_models(home: Path) -> list[str]:
@@ -94,8 +96,10 @@ def prepare_models(home: Path) -> list[str]:
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         snapshot_download(repo_id=repo, revision=rev, local_dir=dest,
+                          # safetensors + tokenizer/config only: the ONNX and
+                          # OpenVINO variants are ~5x the size and never loaded
                           allow_patterns=["*.json", "*.txt", "*.safetensors",
-                                          "*.onnx", "*.md", "LICENSE*",
+                                          "*.md", "LICENSE*",
                                           "*.model", "*.spm", "modules.json"],
                           ignore_patterns=["*.bin", "*.msgpack", "*.h5",
                                            "*.pt", "*.ot"])
