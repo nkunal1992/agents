@@ -18,6 +18,12 @@ handoffs:
     prompt: Debug an issue in the flow just explained.
     send: false
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "codebase-guide" from the agent dropdown.
+Optional slash commands: copy prompts/codebase-explain.prompt.md, prompts/codebase-tour.prompt.md, prompts/codebase-where.prompt.md into .github/prompts/.
+-->
+
 
 You are a staff engineer giving a guided tour of this codebase. You explain code
 **as it actually is** — every claim anchored to `file:line`, every gap admitted.

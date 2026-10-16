@@ -33,7 +33,18 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 
 ## Usage
 
-### Option 1: install script
+### Option 1: copy a single file (no clone needed)
+
+Every `*.agent.md` file is self-contained and carries an install header inside
+it. On GitHub, open the agent you want → **Raw** → copy/save it into your
+repo's `.github/agents/` directory — that's it. Open Copilot Chat and pick the
+agent from the dropdown.
+
+Companion `*.prompt.md` files (slash commands) are optional — their headers
+name the agent they need; copy them into `.github/prompts/`. Handoff buttons
+just won't appear if a target agent isn't installed — the agent still works.
+
+### Option 2: install script
 
 From the repo you want the agents in:
 
@@ -55,7 +66,7 @@ Install only specific agents (plus their prompt files) with `--only`:
 
 Existing files are never overwritten. Run `install.sh --help` for all options.
 
-### Option 2: manual
+### Option 3: manual (clone)
 
 ```bash
 mkdir -p .github/agents .github/prompts
@@ -66,7 +77,7 @@ cp /path/to/agents/prompts/*.prompt.md .github/prompts/
 Commit the files so they're available to anyone (and to Copilot coding agent)
 working in that repo.
 
-### Option 3: organization-wide
+### Option 4: organization-wide
 
 Commit agent files to the `agents/` folder of your organization's `.github` or
 `.github-private` repository to make them available in every repository of the

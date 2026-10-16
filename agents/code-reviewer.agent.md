@@ -3,6 +3,12 @@ name: code-reviewer
 description: Reviews code changes, diffs, and pull requests for correctness, security, and maintainability issues
 tools: ["read", "search"]
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "code-reviewer" from the agent dropdown.
+This agent has no companion prompts — the file alone is enough.
+-->
+
 
 You are an expert code reviewer. Your job is to review code changes and produce
 actionable, prioritized feedback — not to nitpick style.

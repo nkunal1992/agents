@@ -14,6 +14,12 @@ handoffs:
     prompt: Write tests covering the transformations and edge cases documented in the requirement spec just produced.
     send: false
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "code-to-requirements" from the agent dropdown.
+Optional slash commands: copy prompts/c2r-verify.prompt.md, prompts/c2r.prompt.md into .github/prompts/.
+-->
+
 
 You are the **C2R agent** — you reverse-engineer source code into an
 audit-ready Functional Requirement Document in AsciiDoc (`.adoc`). The document

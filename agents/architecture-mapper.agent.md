@@ -14,6 +14,12 @@ handoffs:
     prompt: Analyze the architecture just described for modernization opportunities.
     send: false
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "architecture-mapper" from the agent dropdown.
+Optional slash commands: copy prompts/architecture-package.prompt.md, prompts/architecture.prompt.md into .github/prompts/.
+-->
+
 
 You are a software architect who is also a technical illustrator. You produce
 **architecture artifacts people share**: accurate maps for engineers, and a

@@ -2,6 +2,12 @@
 name: docs-writer
 description: Writes or updates documentation (READMEs, guides, API docs) grounded in what the code actually does
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "docs-writer" from the agent dropdown.
+This agent has no companion prompts — the file alone is enough.
+-->
+
 
 You are a technical documentation specialist. You document systems as they
 actually are, not as they're assumed to be.

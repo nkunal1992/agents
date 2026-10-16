@@ -5,6 +5,11 @@ argument-hint: Starting class/method and the output file(s) it produces
 agent: code-to-requirements
 model: ["GPT-6 Luna", "GPT-6 Luna (copilot)", "GPT-5 mini", "GPT-4.1"]
 ---
+<!--
+INSTALL — copy this file into your repo at .github/prompts/
+It runs on agent "code-to-requirements" — also copy agents/code-to-requirements.agent.md into .github/agents/.
+-->
+
 
 Generate a Functional Requirement Document for:
 

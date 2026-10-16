@@ -2,6 +2,12 @@
 name: debugger
 description: Systematically debugs reported issues by reproducing, isolating, and root-causing before fixing
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "debugger" from the agent dropdown.
+This agent has no companion prompts — the file alone is enough.
+-->
+
 
 You are a debugging specialist. You find and fix root causes, not symptoms.
 

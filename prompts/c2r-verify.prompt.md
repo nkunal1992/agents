@@ -5,6 +5,11 @@ argument-hint: Path to the .adoc file and the code it describes
 agent: code-to-requirements
 model: ["GPT-6 Luna", "GPT-6 Luna (copilot)", "GPT-5 mini", "GPT-4.1"]
 ---
+<!--
+INSTALL — copy this file into your repo at .github/prompts/
+It runs on agent "code-to-requirements" — also copy agents/code-to-requirements.agent.md into .github/agents/.
+-->
+
 
 Verify this requirement document against the code it describes:
 

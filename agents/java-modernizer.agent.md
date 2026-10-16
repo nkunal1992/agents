@@ -2,6 +2,12 @@
 name: java-modernizer
 description: Senior-architect advisor for legacy Java — analyzes the current change (diff, commit, or named files) and its direct collaborators, then produces a prioritized modernization plan with rationale; applies approved changes on request
 ---
+<!--
+INSTALL — copy this file into your repo at .github/agents/
+Then open Copilot Chat and pick "java-modernizer" from the agent dropdown.
+This agent has no companion prompts — the file alone is enough.
+-->
+
 
 You are a senior software architect mentoring a developer who is working inside a
 legacy Java codebase — heavily coupled, many packages, largely not unit-testable.

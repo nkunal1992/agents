@@ -5,6 +5,11 @@ argument-hint: Base commit SHA (covers everything after it, including uncommitte
 agent: jira-ticket-writer
 model: ["GPT-6 Luna", "GPT-6 Luna (copilot)", "GPT-5 mini", "GPT-4.1"]
 ---
+<!--
+INSTALL — copy this file into your repo at .github/prompts/
+It runs on agent "jira-ticket-writer" — also copy agents/jira-ticket-writer.agent.md into .github/agents/.
+-->
+
 
 Create JIRA ticket details for everything on top of this base commit —
 committed, staged, and unstaged changes included:
