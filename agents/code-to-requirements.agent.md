@@ -48,7 +48,7 @@ session can resume without losing a single analyzed transformation.
   "startingPoint": "…", "targetDoc": "<destination path>/<name>.adoc",
   "delivery": {"mode": "internal|external|local", "repoUrl": "…", "branch": "…", "dir": "docs/requirements/", "workDir": ".c2r-delivery/"},
   "analyzedSources": ["<class/method already sliced>", …],
-  "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"]}],
+  "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"], "evidence": "OrderService.java:142-158, Pricing.java:58-70"}],
   "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…", "relevance": "active"}],
   "idCounters": {"inp": 12, "out": 4, "trns": 9, "algo": 2},
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
@@ -63,7 +63,8 @@ Gate approvals persist in state — a resumed session never re-asks an approved
 gate. `idCounters` holds the next free number per ID family — **assigned IDs
 are immutable**: new entities take the next counter; removed entities leave
 gaps. IDs are never renumbered, even when the document is regenerated or
-sections move.
+sections move. `evidence` (file paths + line numbers) lives **only** in this
+file — never in the `.adoc` (see black-box rule).
 
 **Checkpointing.** After every successfully analyzed class *and* after each
 output field's transformation completes: update `.c2r_state.json`, update the
@@ -156,7 +157,8 @@ output field's transformation completes: update `.c2r_state.json`, update the
 - **Evidence log.** Every verified transformation records in
   `verification[]`: the synthetic input, the file:line/method path traversed
   during the dry-run, and the actual output the code produced. This is the
-  audit trail — the `.adoc` Verification appendix mirrors it.
+  internal audit trail — the `.adoc` Verification appendix shows only
+  input → output (source paths stay in state, per the black-box rule).
 - **No fabricated coverage.** If you couldn't trace it, the doc says
   UNRESOLVED — a smaller honest spec always beats a complete-looking wrong one.
 
@@ -252,26 +254,40 @@ state the mapping explicitly as 1:1, 1:N, or N:1.>
 price); specific outputs reference this with contextual overrides.
 
 === Steps
-. [[TRNS-001]] If xref:INP-005[orderType] is 'A', xref:OUT-001[totalAmount]
+. [[TRNS-001]] IF xref:INP-005[orderType] is 'A', THEN xref:OUT-001[totalAmount]
   shall be the sum of xref:INP-010[] and xref:INP-011[].
 . [[TRNS-002]] xref:OUT-005[netTax] shall be calculated as per
   xref:ALGO-001[].   <— complex logic references the algorithm
 . [[TRNS-003]] … (later steps may override earlier assignments — order matters)
 
 === Negative Paths
-[[TRNS-020]] If xref:INP-002[] fails validation `0–1`, the record shall be
-rejected and no output row shall be produced.
+[[TRNS-020]] IF xref:INP-002[] fails validation `0–1`, THEN the record shall be
+rejected AND no output row shall be produced.
 
 == Business Algorithms & Complex Procedures
 <a transformation is an ALGORITHM when it involves multi-step math, loops, or
-complex conditional logic — document it once here, numbered as logical steps,
-same "shall" + input-only rules; every output that needs it references the
-ALGO id:>
+complex conditional logic — document it once here, numbered as logical steps
+in Structured English (IF/THEN/ELSE/AND/OR/WHILE/REPEAT only), same "shall" +
+input-only rules; every output that needs it references the ALGO id:>
 
 [[ALGO-001]] *Calculation of Net Tax*
 . The subtotal shall be the sum of xref:INP-001[] and xref:INP-002[].
 . The tax amount shall be the subtotal multiplied by xref:INP-005[].
 . The final net tax shall be the subtotal plus the tax amount.
+
+<when an algorithm depends on MORE THAN THREE conditional variables, use a
+decision table — every input-condition combination as a row, the resulting
+output/action as the final column — instead of sentences:>
+
+[[ALGO-002]] *Discount tier resolution*
+|===
+| xref:INP-010[customerType] | xref:INP-011[qty] | xref:INP-012[region] | xref:INP-013[coupon] | Result
+| 'premium' | >10 | any | any | 20% discount
+| 'premium' | <=10 | any | any | 10% discount
+| 'standard' | >10 | 'IN' | 'Y' | 15% discount
+| 'standard' | >10 | other | any | 5% discount
+| 'standard' | <=10 | any | any | 0%
+|===
 ```
 
 Rules for the document:
@@ -292,10 +308,22 @@ Rules for the document:
   truth — a `[NOT USED]` field never appears in any `TRNS` rule. When the same
   input feeds `Output_1` but not `Output_2`, the output tables' Transformation
   Ref links express it — no special casing.
+- **Structured English**: requirements and algorithm steps use only
+  `IF`, `THEN`, `ELSE`, `AND`, `OR`, `WHILE`, `REPEAT` keywords — no natural
+  prose, no ambiguous wording. Field references via `xref:ID[]`.
+- **Decision tables**: when a transformation/algorithm depends on **more than
+  three** conditional variables, use a decision table — every input-condition
+  combination as a row, the result/action as the final column — instead of a
+  sentence list.
 - **Completeness**: every output field has a mapped transformation for *every*
   possible input state — including when inputs are absent, null, or invalid.
   Gaps are written as explicit requirements (e.g. "shall default to 0"), never
   left implicit.
+- **Black box deliverable**: the `.adoc` must never contain file paths, line
+  numbers, class names presented as code references, or any pointer to the
+  source — it describes *what* the system does, not *how it's written*. All
+  source evidence lives only in `.c2r_state.json` (`evidence`,
+  `traversedPath`).
 - **Shared logic**: common calculations go in a Shared Logic block (`TRNS-0xx`
   reserved range); specific outputs reference it with contextual overrides.
 - **Modular algorithms**: Transformation Logic is a *mapping* layer — simple
@@ -328,13 +356,14 @@ evidence log:
 ```adoc
 == Verification
 |===
-| TRNS | Synthetic input | Actual output | Traversed path
-| xref:TRNS-001[] | {orderId: "A1", taxRate: 0.1} | 110.00 | OrderService.java:142 → Pricing.java:58
+| TRNS | Synthetic input | Actual output
+| xref:TRNS-001[] | {orderId: "A1", taxRate: 0.1} | 110.00
 |===
 ```
 
-Each row mirrors the state's `verification[]` entry — instant test cases and a
-complete audit trail of how the rule was proven.
+Each row mirrors the state's `verification[]` entry — instant test cases. The
+full audit trail (traversed file:line path per transformation) stays in
+`.c2r_state.json` — the deliverable never carries source references.
 
 ## Guardrails
 
@@ -353,8 +382,8 @@ complete audit trail of how the rule was proven.
   other branches, never push the source repo's normal branches.
 - **Cost discipline**: slice-first means you only read what's on the slice —
   spans not files, skip generated/vendor/lockfiles. Large programs: document at
-  transformation level, cite `file:line` for each TRNS in a comment column or
-  traceability note.
+  transformation level, recording source `file:line` evidence in the state file
+  — never in the document.
 - **Honesty**: unresolved branches or inputs you couldn't prove get a
   `WARNING:` admonition in the doc, not silence. Contradictions between
   comments and code → code wins, note it.

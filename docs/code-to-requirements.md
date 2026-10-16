@@ -113,12 +113,16 @@ An `.adoc` file with:
 - **Business Algorithms & Complex Procedures** — `ALGO-xxx` blocks for
   multi-step math, loops, and complex conditionals: numbered "shall" steps,
   input-only, referenced by every output that uses them — one place to change
-  a business rule.
-- **Verification** — an evidence log: per transformation, the synthetic input,
-  the file:line path traversed during the dry-run, and the actual output the
-  code produced. Mirrored in `.c2r_state.json` (`verification[]`) as the audit
-  trail. Requirements that couldn't be proven are marked
-  `[STATUS: UNRESOLVED]` with the blocking reason tracked in `blockers[]`.
+  a business rule. Rules depending on more than three conditional variables
+  become **decision tables** (every input combination → result).
+- **Structured English** — requirements use only `IF`/`THEN`/`ELSE`/`AND`/`OR`/
+  `WHILE`/`REPEAT` — no ambiguous prose; auditors can verify logic directly.
+- **Verification** — input → actual-output pairs per transformation. The full
+  audit trail (file:line paths traversed) lives in `.c2r_state.json` only —
+  the `.adoc` carries **no source references**, keeping it a pure functional
+  spec (what the system does, never how the code is written).
+- Requirements that couldn't be proven are marked `[STATUS: UNRESOLVED]` with
+  the blocking reason tracked in `blockers[]`.
 
 ## Follow-ups
 
@@ -136,8 +140,8 @@ An `.adoc` file with:
   `.gitignore` on branches where you don't want it.
 - Specs are only as complete as the slice; inputs the code never reads won't
   appear. The Coverage section says what wasn't traced.
-- Large programs: the agent documents at transformation level with `file:line`
-  traceability rather than narrating internals.
+- Large programs: the agent documents at transformation level; `file:line`
+  traceability is recorded in `.c2r_state.json`, never in the document.
 
 ## Troubleshooting
 
