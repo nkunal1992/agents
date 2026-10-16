@@ -23,6 +23,7 @@ mcp = FastMCP("confluence-knowledge")
 # in-process caches (per server lifetime)
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, list[dict]] = {}
+_indexes: dict[str, Index] = {}  # one connection per DB for the server lifetime
 _EMBEDDER = None
 _RERANKER = None
 
@@ -44,7 +45,10 @@ def _client_for(profile: SiteProfile):
 
 
 def _index_for(scope_key: str) -> Index:
-    return Index(workspace_index_root(_workdir()) / f"{scope_key}.db")
+    idx = _indexes.get(scope_key)
+    if idx is None:
+        idx = _indexes[scope_key] = Index(workspace_index_root(_workdir()) / f"{scope_key}.db")
+    return idx
 
 
 def _embedder():

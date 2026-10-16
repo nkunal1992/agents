@@ -141,7 +141,8 @@ before refreshing.
 | `SSL: CERTIFICATE_VERIFY_FAILED` (Confluence or huggingface.co) | v0.1.5+ ships `pip-system-certs` so requests/httpx use the OS cert store — should be automatic. On older installs: `python -m pip install pip-system-certs`, or point `REQUESTS_CA_BUNDLE` at your corporate root CA |
 | `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.confluence-knowledge/models/` from an internal mirror) |
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
-| `index database was locked` | a second server process or AV holds the DB. **Two servers spawning?** Check *all* registration spots — IntelliJ stores UI-added servers in `%APPDATA%\JetBrains\<IDE>\options\` XML (not mcp.json); workspace configs can exist in `.vscode\mcp.json`, `.copilot\`, `.idea\`. Keep ONE registration (venv python). Also check process parents: `Get-CimInstance Win32_Process -Filter "Name='python.exe'" \| ? CommandLine -Match 'confluence_knowledge' \| Select ProcessId,ParentProcessId,CommandLine`. v0.1.3+ uses WAL + 30s busy-wait so transient locks retry instead of failing |
+| `index database was locked` | fixed in v0.1.6. Earlier versions deadlocked themselves on the first crawl (an uncommitted write per connection). Upgrade: `python -m pip install --upgrade "<bundle>\service[models]"`, restart the IDE |
+| Two `python.exe … confluence_knowledge.server` processes on Windows | expected, not a duplicate: a venv's `Scripts\python.exe` is a launcher that starts the base interpreter as its child. Only one server is running |
 | 403 on some pages | your account lacks permission — those pages are reported as inaccessible |
 | MCP tools not showing | check `.vscode/mcp.json` Start prompt / JetBrains MCP policy; enterprise "MCP servers in Copilot" policy must allow it |
 | corporate proxy/TLS | set `HTTPS_PROXY` / `REQUESTS_CA_BUNDLE`-style env vars for the venv Python; verification is never disabled |

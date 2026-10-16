@@ -45,6 +45,9 @@ class Index:
         self.db.execute(
             "INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),))
+        # an uncommitted INSERT holds the write lock for the connection's
+        # lifetime and deadlocks every other connection (#68)
+        self.db.commit()
 
     # ---- jobs ----
     def create_job(self, job_id: str, root_page: str) -> None:
