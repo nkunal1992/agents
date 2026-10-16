@@ -7,9 +7,9 @@ tools: ["confluence-knowledge/status", "confluence-knowledge/connect", "confluen
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload
 to your agent store). On first run the agent installs its local companion
-service itself — it downloads the pinned Python package from
-github.com/nkunal1992/agents (mcp/confluence-knowledge), sets up a venv, and
-registers the MCP server. You'll approve each command and reload once.
+service itself — from the bundled service/ directory when present, or your
+configured pip index — sets up a venv, and registers the MCP server.
+You'll approve each command and reload once.
 Optional slash commands: copy prompts/confluence-ask.prompt.md and
 prompts/confluence-refresh.prompt.md into .github/prompts/.
 -->
@@ -48,11 +48,12 @@ set it up now. You'll approve each step." Then:
    $PY -m venv "$HOME/.confluence-knowledge/venv"
    "$HOME/.confluence-knowledge/venv/bin/python" -m pip install "<SVC>[models]"
    ```
-   Otherwise fetch the pinned package from the public repo:
+   Otherwise install the package via your configured pip index (requires it
+   to be mirrored internally — there is no public PyPI release):
    ```bash
    $PY -m venv "$HOME/.confluence-knowledge/venv"
    "$HOME/.confluence-knowledge/venv/bin/python" -m pip install \
-     "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
+     "confluence-knowledge[models]"
    ```
    (Windows: `py -m venv "%USERPROFILE%\.confluence-knowledge\venv"` then
    `"%USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe" -m pip
@@ -99,9 +100,8 @@ below verbatim (it is self-contained — do not reference external docs):
 #    bundled copy (from the agent zip) preferred when present:
 python3 -m venv ~/.confluence-knowledge/venv
 ~/.confluence-knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
-#    or fetch the pinned package:
-~/.confluence-knowledge/venv/bin/python -m pip install \
-  "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
+#    or via your configured pip index (internal mirror must carry the package):
+~/.confluence-knowledge/venv/bin/python -m pip install "confluence-knowledge[models]"
 # Windows: py -m venv %USERPROFILE%\.confluence-knowledge\venv
 #          %USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe -m pip install "...same spec..."
 
@@ -119,12 +119,10 @@ python3 -m venv ~/.confluence-knowledge/venv
 # 4. reload the window, then re-ask the question.
 ```
 
-No Python ≥3.11 on PATH at all? Install it (python.org / internal artifact
-store / `brew install python@3.13`), then re-run the agent.
-If your org requires an internal mirror, replace the `git+https://github.com/…`
-spec with your mirror's package index/wheel path — everything else is identical.
-(Deeper guide if reachable: docs/confluence-knowledge.md in
-github.com/nkunal1992/agents — optional, not required.)
+No Python ≥3.11 on PATH at all? Install it (internal artifact store /
+python.org / `brew install python@3.13`), then re-run the agent.
+If your org requires an internal mirror, use your mirror's package index or
+wheel path for the install step — everything else is identical.
 
 ## Absolute rules (Q&A mode)
 
