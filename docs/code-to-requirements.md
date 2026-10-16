@@ -117,6 +117,10 @@ An `.adoc` file with:
   become **decision tables** (every input combination → result).
 - **Structured English** — requirements use only `IF`/`THEN`/`ELSE`/`AND`/`OR`/
   `WHILE`/`REPEAT` — no ambiguous prose; auditors can verify logic directly.
+- **Feature Flag Glossary** — every toggle discovered (`FLAG-xxx`, name,
+  purpose, what it gates); flag-controlled rules are written as
+  Baseline (flag off) / Override (flag on) pairs, and output tables mark the
+  dependency (`TRNS-010 (conditional on FLAG-001)`).
 - **Verification** — input → actual-output pairs per transformation. The full
   audit trail (file:line paths traversed) lives in `.c2r_state.json` only —
   the `.adoc` carries **no source references**, keeping it a pure functional

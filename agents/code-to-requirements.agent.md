@@ -28,10 +28,9 @@ configs, edge cases, cardinality, sequential overrides — from it alone, withou
 seeing the code.
 
 Formality matters: requirements use **"shall"** language and stable,
-immutable IDs (`INP-xxx` for inputs, `OUT-xxx` for outputs, `TRNS-xxx` for
-transformations, `ALGO-xxx` for complex algorithms) so the document can be
-traced in audits — every reference is an AsciiDoc `xref`, never a positional
-one.
+immutable IDs (`INP-xxx` inputs, `OUT-xxx` outputs, `TRNS-xxx` transformations,
+`ALGO-xxx` algorithms, `FLAG-xxx` feature flags) so the document can be traced
+in audits — every reference is an AsciiDoc `xref`, never a positional one.
 
 ## Phase 0 — Persistent state (the memory layer)
 
@@ -50,7 +49,8 @@ session can resume without losing a single analyzed transformation.
   "analyzedSources": ["<class/method already sliced>", …],
   "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"], "evidence": "OrderService.java:142-158, Pricing.java:58-70"}],
   "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…", "relevance": "active"}],
-  "idCounters": {"inp": 12, "out": 4, "trns": 9, "algo": 2},
+  "idCounters": {"inp": 12, "out": 4, "trns": 9, "algo": 2, "flag": 1},
+  "featureFlags": [{"id": "FLAG-001", "name": "FEATURE_X_ENABLED", "purpose": "…", "gates": ["TRNS-010"]}],
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
   "verification": [{"trns": "TRNS-001", "syntheticInput": "…", "traversedPath": "OrderService.java:142 → Pricing.java:58", "actualOutput": "…", "status": "verified"}],
   "blockers": [{"field": "INP-007", "reason": "…", "where": "file:line", "status": "open"}],
@@ -184,6 +184,11 @@ code outside the repo) is **not** something to infer — it becomes a blocker
   variables, JVM/system properties, database lookup/reference tables, feature
   flags, defaults. These are inputs too — discover them via search for config
   keys actually read by slice-relevant code.
+- **Feature flags are system-level inputs**: actively look for toggle-like
+  keys/variables on the slice — `isEnabled`, `useNewLogic`,
+  `FEATURE_X_ENABLED`, launchdarkly/togglz/unleash-style keys. Each gets an
+  immutable `FLAG-xxx` ID (state `featureFlags[]` + `idCounters.flag`) and is
+  documented as a system-level input.
 - **Catalog everything, tag relevance.** Document *every* field a source
   exposes — not just used ones. Tag each `INP-xxx` as `[ACTIVE]` (traced to at
   least one output transformation) or `[NOT USED IN CURRENT SCOPE]` (exists in
@@ -243,6 +248,7 @@ drives no documented output; shall be ignored by the documented behavior.
 |===
 | Field Name | Dict ID | Data Type | Size | Transformation Ref
 | totalAmount | xref:OUT-001[] | Decimal | 10 | xref:TRNS-005[]
+| netTax | xref:OUT-005[] | Decimal | 10 | xref:TRNS-010[] (conditional on xref:FLAG-001[])
 |===
 Cardinality: One input record shall generate one output record (1:1).
 <or: Multiple input records shall be aggregated into one output record (N:1);
@@ -259,6 +265,9 @@ price); specific outputs reference this with contextual overrides.
 . [[TRNS-002]] xref:OUT-005[netTax] shall be calculated as per
   xref:ALGO-001[].   <— complex logic references the algorithm
 . [[TRNS-003]] … (later steps may override earlier assignments — order matters)
+. [[TRNS-010]] xref:OUT-005[netTax] — flag-controlled, Baseline/Override form:
+  - Baseline (when xref:FLAG-001[] is DISABLED): OUT-005 shall be <Logic A>.
+  - Override (when xref:FLAG-001[] is ENABLED): OUT-005 shall be <Logic B>.
 
 === Negative Paths
 [[TRNS-020]] IF xref:INP-002[] fails validation `0–1`, THEN the record shall be
@@ -287,6 +296,14 @@ output/action as the final column — instead of sentences:>
 | 'standard' | >10 | 'IN' | 'Y' | 15% discount
 | 'standard' | >10 | other | any | 5% discount
 | 'standard' | <=10 | any | any | 0%
+|===
+
+== Feature Flag Glossary
+<every flag discovered during silent-input discovery — only present when flags
+exist:>
+|===
+| ID | Flag | Purpose | Gates
+| FLAG-001 | `FEATURE_X_ENABLED` | Enables the new pricing path (inferred from name/comments) | xref:TRNS-010[]
 |===
 ```
 
@@ -332,6 +349,13 @@ Rules for the document:
   references it (`shall be calculated as per xref:ALGO-001[]`). Multiple
   outputs sharing complex logic reference the **same** `ALGO` ID — one place
   to change the rule.
+- **Feature flags**: flag-controlled transformations use the
+  Baseline/Override pair — `Baseline:` = behavior when the flag is DISABLED
+  (default state), `Override (when xref:FLAG-xxx[] is ENABLED):` = the
+  alternate behavior. Every discovered flag lands in the Feature Flag
+  Glossary (id, name, purpose — from comments/naming — and the TRNS it gates);
+  output tables annotate flag-dependent refs as
+  `xref:TRNS-010[] (conditional on xref:FLAG-001[])`.
 - **Cardinality** stated per output — explicitly `1:1`, `1:N`, `N:1`, or
   filtered-out.
 - **Sequential order preserved**: number steps so override order is explicit.
