@@ -16,9 +16,9 @@ jobs:
           python-version: "3.12"
       - run: pip install build && python -m build mcp/confluence-knowledge
       - uses: pypa/gh-action-pypi-publish@release/v1
-        # Works two ways, whichever is configured on the repo/PyPI:
-        #   1. Trusted publishing (recommended): PyPI project settings →
-        #      Publishing → add this repo + this workflow filename.
-        #   2. API token: PYPI_API_TOKEN repository secret on GitHub.
+        # API-token auth: PYPI_API_TOKEN repository secret on GitHub.
+        # (Trusted publishing would work too — PyPI project settings →
+        #  Publishing — but passing the secret is explicit and one less setup.)
         with:
           packages-dir: mcp/confluence-knowledge/dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
