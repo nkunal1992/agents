@@ -106,8 +106,14 @@ An `.adoc` file with:
   express which inputs drive which outputs.
 - **Output Specification** — per-output tables (field · Dict ID · type · size ·
   `TRNS-xx` ref) and an explicit cardinality statement per output.
-- **Transformation Logic** — ordered `TRNS-xx` steps, shared-logic block with
-  contextual overrides, and a dedicated negative-path section.
+- **Transformation Logic** — ordered `TRNS-xxx` steps acting as a mapping
+  layer: simple mappings inline, complex logic by reference (`as per
+  xref:ALGO-001[]`), shared-logic block with contextual overrides, and a
+  dedicated negative-path section.
+- **Business Algorithms & Complex Procedures** — `ALGO-xxx` blocks for
+  multi-step math, loops, and complex conditionals: numbered "shall" steps,
+  input-only, referenced by every output that uses them — one place to change
+  a business rule.
 - **Verification** — an evidence log: per transformation, the synthetic input,
   the file:line path traversed during the dry-run, and the actual output the
   code produced. Mirrored in `.c2r_state.json` (`verification[]`) as the audit

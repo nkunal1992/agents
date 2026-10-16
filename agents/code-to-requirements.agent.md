@@ -29,8 +29,9 @@ seeing the code.
 
 Formality matters: requirements use **"shall"** language and stable,
 immutable IDs (`INP-xxx` for inputs, `OUT-xxx` for outputs, `TRNS-xxx` for
-transformations) so the document can be traced in audits — every reference is
-an AsciiDoc `xref`, never a positional one.
+transformations, `ALGO-xxx` for complex algorithms) so the document can be
+traced in audits — every reference is an AsciiDoc `xref`, never a positional
+one.
 
 ## Phase 0 — Persistent state (the memory layer)
 
@@ -49,7 +50,7 @@ session can resume without losing a single analyzed transformation.
   "analyzedSources": ["<class/method already sliced>", …],
   "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"]}],
   "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…", "relevance": "active"}],
-  "idCounters": {"inp": 12, "out": 4, "trns": 9},
+  "idCounters": {"inp": 12, "out": 4, "trns": 9, "algo": 2},
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
   "verification": [{"trns": "TRNS-001", "syntheticInput": "…", "traversedPath": "OrderService.java:142 → Pricing.java:58", "actualOutput": "…", "status": "verified"}],
   "blockers": [{"field": "INP-007", "reason": "…", "where": "file:line", "status": "open"}],
@@ -253,18 +254,31 @@ price); specific outputs reference this with contextual overrides.
 === Steps
 . [[TRNS-001]] If xref:INP-005[orderType] is 'A', xref:OUT-001[totalAmount]
   shall be the sum of xref:INP-010[] and xref:INP-011[].
-. [[TRNS-002]] … (later steps may override earlier assignments — order matters)
+. [[TRNS-002]] xref:OUT-005[netTax] shall be calculated as per
+  xref:ALGO-001[].   <— complex logic references the algorithm
+. [[TRNS-003]] … (later steps may override earlier assignments — order matters)
 
 === Negative Paths
 [[TRNS-020]] If xref:INP-002[] fails validation `0–1`, the record shall be
 rejected and no output row shall be produced.
+
+== Business Algorithms & Complex Procedures
+<a transformation is an ALGORITHM when it involves multi-step math, loops, or
+complex conditional logic — document it once here, numbered as logical steps,
+same "shall" + input-only rules; every output that needs it references the
+ALGO id:>
+
+[[ALGO-001]] *Calculation of Net Tax*
+. The subtotal shall be the sum of xref:INP-001[] and xref:INP-002[].
+. The tax amount shall be the subtotal multiplied by xref:INP-005[].
+. The final net tax shall be the subtotal plus the tax amount.
 ```
 
 Rules for the document:
 
-- **Anchors everywhere**: `[[INP-xxx]]`, `[[OUT-xxx]]`, `[[TRNS-xxx]]` precede
-  each defining block — paragraph, list item, or table cell. An anchor is
-  defined exactly once; everything else links to it.
+- **Anchors everywhere**: `[[INP-xxx]]`, `[[OUT-xxx]]`, `[[TRNS-xxx]]`,
+  `[[ALGO-xxx]]` precede each defining block — paragraph, list item, or table
+  cell. An anchor is defined exactly once; everything else links to it.
 - **xref, never positional**: "see section 3.2" is forbidden. Transformations
   reference inputs as `xref:INP-001[]`; the output table's Transformation Ref
   column links `xref:TRNS-xxx[]`; the dictionary's ID column links
@@ -284,6 +298,12 @@ Rules for the document:
   left implicit.
 - **Shared logic**: common calculations go in a Shared Logic block (`TRNS-0xx`
   reserved range); specific outputs reference it with contextual overrides.
+- **Modular algorithms**: Transformation Logic is a *mapping* layer — simple
+  mappings stay inline; anything with multi-step math, loops, or complex
+  conditionals becomes an `ALGO-xxx` block in Business Algorithms and TRNS just
+  references it (`shall be calculated as per xref:ALGO-001[]`). Multiple
+  outputs sharing complex logic reference the **same** `ALGO` ID — one place
+  to change the rule.
 - **Cardinality** stated per output — explicitly `1:1`, `1:N`, `N:1`, or
   filtered-out.
 - **Sequential order preserved**: number steps so override order is explicit.
