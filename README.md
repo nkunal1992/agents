@@ -31,6 +31,96 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [architecture-mapper](agents/architecture-mapper.agent.md) | Maps repo/package architecture into mermaid diagrams + a self-contained explainer site — [guide](docs/architecture-mapper.md) |
 | [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
 
+## What each agent does — and why it matters at work
+
+Each entry: **what it does** → **why it helps in an enterprise** → **try it**.
+All agents pin cheap models first (`GPT-6 Luna` → `GPT-5 mini` → `GPT-4.1` fallbacks),
+are repo-agnostic, and never expose secrets. Read-only agents can't modify your
+code by design.
+
+### code-reviewer
+Reviews diffs, staged changes, and PRs for correctness, security, and
+maintainability. *Why it matters:* a consistent second pair of eyes on every
+change — catches defect classes humans skim over, without touching code
+(read-only). *Try:* stage a change → "review this".
+
+### test-writer
+Writes tests that match the repo's existing frameworks, naming, and fixtures.
+*Why:* raises coverage without style drift — new tests look like your senior
+devs wrote them, so review friction stays low. *Try:* "write tests for
+`OrderService`".
+
+### debugger
+Systematic root-cause workflow: reproduce → trace → isolate → fix → verify —
+no shotgun changes. *Why:* turns debugging from guesswork into a repeatable,
+evidence-based process; an audit trail of what was ruled out. *Try:* paste a
+stack trace or failing test.
+
+### refactor
+Safe, incremental refactoring — smallest behavior-preserving steps, verified
+between each. *Why:* modernization without the big-bang risk; every step is
+revertible and reviewable. *Try:* "extract this method's discount logic".
+
+### docs-writer
+Writes and updates documentation derived from the actual code — READMEs,
+guides, API docs. *Why:* docs stop drifting from code; generated from source
+truth, so nothing is invented. *Try:* "document the authentication flow".
+
+### java-modernizer
+Senior-architect advisor for legacy Java: scopes analysis to your staged
+changes + their direct collaborators, detects the Java version/framework, and
+produces a prioritized modernization plan (testability seams first) — then
+implements only the items you approve. *Why:* modernization advice that
+respects your stack's constraints and never suggests APIs your JDK can't run.
+*Try:* commit some legacy changes → "modernize"
+
+### cve-remediator
+Fixes CVEs with the *smallest safe* upgrade — patch before minor before major —
+checks fixed versions exist in your Nexus/Artifactory mirror, audits your CVE
+whitelist on every run, and recommends removing suppressions when real fixes
+exist. Internal package names never leave your network. *Why:* remediation
+that's auditable end-to-end — every version choice is evidence-backed, every
+whitelist entry gets a disposition (fixable / already-fixed / keep / needs
+review). *Try:* `/cve-fix` or paste a scanner log · [guide](docs/cve-remediator.md)
+
+### codebase-guide
+Read-only codebase explainer: "how does X work?", guided repo tours, where-is
+questions — every claim anchored `file:line`, with a confidence section
+separating proven from inferred. *Why:* kills tribal-knowledge onboarding —
+new engineers get evidence-backed answers in minutes instead of days of
+code-spelunking. Physically cannot modify the repo. *Try:* `/codebase-tour` ·
+[guide](docs/codebase-guide.md)
+
+### jira-ticket-writer
+Generates complete, paste-ready JIRA ticket details from your actual changes —
+staged/unstaged diffs, a commit SHA, a range, or a branch — including summary,
+description (Jira wiki-markup or Markdown), acceptance criteria, test notes,
+and rollback. *Why:* tickets describe what the code *actually* does rather
+than vague intent — consistent quality for the whole team; and it writes
+nothing back to JIRA, so no credentials or permissions needed. *Try:*
+`/jira-ticket` after staging work · [guide](docs/jira-ticket-writer.md)
+
+### architecture-mapper
+Maps repo or package architecture into `docs/architecture/`: a Mermaid-diagram
+`ARCHITECTURE.md` plus a self-contained explainer `index.html` written in plain
+language. *Why:* instant, evidence-backed architecture docs for reviews,
+audits, and onboarding — the explainer site reads well even for
+non-engineers/stakeholders. *Try:* `/architecture` ·
+[guide](docs/architecture-mapper.md)
+
+### code-to-requirements (C2R)
+Reverse-engineers code into an audit-ready AsciiDoc functional spec: backward
+slices from output sinks to input sources, catalogs every field per source
+(with active/unused relevance), maps all branches and negative paths, captures
+feature flags as Baseline/Override rules, decision-tables complex logic, and
+verifies every transformation with a synthetic-input dry run. Human-in-the-loop
+gates (Plan → Foundation → Golden Sample) keep you in control; `.c2r_state.json`
+makes long runs resumable; deliverables can go in-repo, to an external repo, or
+a local path. Untraceable paths are marked `UNRESOLVED`, never guessed.
+*Why:* produces the kind of pure functional specification auditors and
+rebuild-teams actually need — with the technical evidence retained internally
+for traceability. *Try:* `/c2r` · [guide](docs/code-to-requirements.md)
+
 ## Usage
 
 ### Option 1: copy a single file (no clone needed)
