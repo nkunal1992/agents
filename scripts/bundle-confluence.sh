@@ -55,26 +55,8 @@ cat > "$OUT/mcp.json.example" <<'JSON'
 }
 JSON
 
-# human-facing install notes
-cat > "$OUT/README.md" <<'EOF'
-# confluence-knowledge bundle
-
-1. Copy `confluence-knowledge.agent.md` into your repo at `.github/agents/`
-   (or upload to the agent store). Prompts in `prompts/` are optional —
-   they go to `.github/prompts/`.
-2. Keep the `service/` folder somewhere in the repo (e.g. repo root or
-   `tools/confluence-knowledge-service/`). The agent auto-detects it on
-   first run and installs it locally — no GitHub access needed for the code.
-3. First run: the agent installs the service, downloads the two Apache-2.0
-   models (Hugging Face, or your internal mirror), collects your token via
-   hidden input in your own terminal, writes `.vscode/mcp.json` (see
-   `mcp.json.example`), and asks you to reload once.
-4. Offline model install: drop `all-MiniLM-L6-v2/` and
-   `ms-marco-MiniLM-L6-v2/` into `~/.confluence-knowledge/models/`.
-
-Requires: Python ≥3.11. Dependencies resolve from PyPI (or your internal
-index — set `PIP_INDEX_URL` / use `wheels/` if provided).
-EOF
+# human-facing README (what teams see on the store listing + in the zip)
+cp "$ROOT/bundle/README.md" "$OUT/README.md"
 
 # optional vendored wheels for fully-offline pip installs
 if [[ -n "$WHEELS" ]]; then
