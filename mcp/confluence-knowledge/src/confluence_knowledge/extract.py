@@ -43,10 +43,39 @@ def extract_chunks(storage_html: str) -> tuple[list[Chunk], list[str]]:
     soup = BeautifulSoup(storage_html, "html.parser")  # stdlib parser; no ext entities
     warnings: list[str] = []
 
+    # macros that render external/dynamic content — skip entirely
+    SKIP_MACROS = {"jira", "jirachart", "rss", "include", "widget", "gadget",
+                   "livesearch", "recently-updated", "view-file", "gallery",
+                   "content-by-label", "children", "pagetree", "excerpt-include",
+                   "multiexcerpt-include"}
+    skipped_macros: set[str] = set()
     for tag in soup.find_all(["script", "style", "ac:structured-macro"]):
         if tag.name.startswith("ac:"):
-            warnings.append("skipped unsupported macro (content may be incomplete)")
+            name = tag.get("ac:name", "")
+            if name in SKIP_MACROS:
+                skipped_macros.add(name)
+                tag.decompose()
+                continue
+            # container macros (code, expand, info, panel...) — keep the body:
+            # rich-text bodies are unwrapped so their markup chunks normally;
+            # plain-text bodies (code) become <pre> so the walker keeps order
+            rich = tag.find("ac:rich-text-body")
+            plain = tag.find("ac:plain-text-body")
+            if plain is not None:
+                pre = soup.new_tag("pre")
+                pre.string = plain.get_text(strip=True)
+                tag.replace_with(pre)
+            elif rich is not None:
+                rich.unwrap()
+                tag.unwrap()
+            else:
+                tag.decompose()
+            continue
         tag.decompose()
+    if skipped_macros:
+        warnings.append(
+            "skipped dynamic macros (content may be incomplete): "
+            + ", ".join(sorted(skipped_macros)))
 
     chunks: list[Chunk] = []
     buf: list[str] = []

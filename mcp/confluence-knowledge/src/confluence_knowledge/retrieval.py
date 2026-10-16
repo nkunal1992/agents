@@ -8,6 +8,7 @@ disabled; a missing model is a setup error, never a silent fallback.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -92,8 +93,14 @@ def prepare_models(home: Path) -> list[str]:
         rev = lock["models"][key]["revision"]
         dest = _models_dir(home) / repo.split("/")[-1]
         if dest.exists():
-            out.append(f"already prepared: {repo}@{rev[:8]}")
-            continue
+            # treat partial/interrupted downloads as not prepared: a finished
+            # dir has config + model weights + tokenizer files
+            complete = (dest / "config.json").exists() and (
+                any(dest.glob("*.safetensors")) or any(dest.rglob("*.safetensors")))
+            if complete:
+                out.append(f"already prepared: {repo}@{rev[:8]}")
+                continue
+            shutil.rmtree(dest)  # incomplete — fetch again
         dest.parent.mkdir(parents=True, exist_ok=True)
         snapshot_download(repo_id=repo, revision=rev, local_dir=dest,
                           # safetensors + tokenizer/config only: the ONNX and

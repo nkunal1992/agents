@@ -41,7 +41,10 @@ for i in range(101, 131):
 PAGES["200"] = ("Deploy Windows",
                 ("<h2>Schedule</h2><p>Production deploys happen only on Thursdays "
                 "after 18:00.</p><table><tr><th>Env</th><th>Day</th></tr>"
-                "<tr><td>prod</td><td>Thursday</td></tr></table>"))
+                "<tr><td>prod</td><td>Thursday</td></tr></table>"
+                '<ac:structured-macro ac:name="info"><ac:rich-text-body>'
+                "<p>The maintenance freeze runs from December 20 to January 5."
+                "</p></ac:rich-text-body></ac:structured-macro>"))
 
 
 class FakeDC(BaseHTTPRequestHandler):
@@ -156,6 +159,11 @@ async def main() -> None:
         ev = await call(session, "get_evidence", {"scope_handle": scope,
                                                   "chunk_ids": [top["chunk_id"]]})
         check("Thursdays" in ev["chunks"][0]["text"], "get_evidence: full chunk text")
+
+        res3 = await call(session, "search", {"scope_handle": scope,
+                                              "question": "maintenance freeze dates"})
+        check(any("maintenance freeze" in e["text"] for e in res3["evidence"]),
+              "search: macro body content is indexed", res3["evidence"])
 
         ok = await call(session, "verify_citations", {
             "scope_handle": scope, "evidence_set": res["evidence_set"],

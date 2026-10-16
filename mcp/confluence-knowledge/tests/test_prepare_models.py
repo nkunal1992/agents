@@ -67,6 +67,41 @@ def test_model_card_license_accepted(monkeypatch, tmp_path):
     assert len(out) == 2
 
 
+def test_partial_download_is_retried(monkeypatch, tmp_path):
+    """An interrupted download leaves a dir that exists but has no weights —
+    it must be re-fetched, not reported as 'already prepared'."""
+    calls = []
+
+    fake_hf = types.ModuleType("huggingface_hub")
+
+    def fake_download(repo_id, revision, local_dir, **kw):
+        calls.append(repo_id)
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "config.json").write_text("{}")
+        (local_dir / "model.safetensors").write_bytes(b"x")
+        (local_dir / "LICENSE").write_text("apache")
+        return str(local_dir)
+
+    fake_hf.snapshot_download = fake_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
+    monkeypatch.setattr(
+        "confluence_knowledge.retrieval._load_lock",
+        lambda: {"models": {"embed": {"revision": "r1"},
+                            "rerank": {"revision": "r2"}}})
+
+    # simulate two aborted runs: dirs exist but are empty
+    for name in ("all-MiniLM-L6-v2", "ms-marco-MiniLM-L6-v2"):
+        (tmp_path / "models" / name).mkdir(parents=True)
+
+    from confluence_knowledge import retrieval
+    out = retrieval.prepare_models(tmp_path)
+    assert len(calls) == 2 and all("prepared" in line for line in out)
+
+    # now complete — second run must skip both
+    out2 = retrieval.prepare_models(tmp_path)
+    assert all("already prepared" in line for line in out2)
+
+
 def test_missing_license_rejected(monkeypatch, tmp_path):
     fake_hf = types.ModuleType("huggingface_hub")
 
