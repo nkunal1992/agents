@@ -41,3 +41,47 @@ def test_prepare_models_uses_ignore_patterns(monkeypatch, tmp_path):
     assert len(out) == 2
     for kw in calls:
         assert "exclude_patterns" not in kw
+
+
+def test_model_card_license_accepted(monkeypatch, tmp_path):
+    """Models like all-MiniLM-L6-v2 have no LICENSE file — the card's
+    frontmatter license must satisfy the check."""
+
+    fake_hf = types.ModuleType("huggingface_hub")
+
+    def fake_download(repo_id, revision, local_dir, **kw):
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "README.md").write_text(
+            "---\nlanguage: en\nlicense: apache-2.0\n---\nmodel card")
+        return str(local_dir)
+
+    fake_hf.snapshot_download = fake_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
+    monkeypatch.setattr(
+        "confluence_knowledge.retrieval._load_lock",
+        lambda: {"models": {"embed": {"revision": "r1"},
+                            "rerank": {"revision": "r2"}}})
+
+    from confluence_knowledge import retrieval
+    out = retrieval.prepare_models(tmp_path)
+    assert len(out) == 2
+
+
+def test_missing_license_rejected(monkeypatch, tmp_path):
+    fake_hf = types.ModuleType("huggingface_hub")
+
+    def fake_download(repo_id, revision, local_dir, **kw):
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "README.md").write_text("no license here")
+        return str(local_dir)
+
+    fake_hf.snapshot_download = fake_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
+    monkeypatch.setattr(
+        "confluence_knowledge.retrieval._load_lock",
+        lambda: {"models": {"embed": {"revision": "r1"},
+                            "rerank": {"revision": "r2"}}})
+
+    from confluence_knowledge import retrieval, settings
+    with pytest.raises(settings.SetupError, match="license"):
+        retrieval.prepare_models(tmp_path)

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: confluence-knowledge
-Version: 0.1.1
+Version: 0.1.2
 Summary: Local, GET-only Confluence subtree indexer + grounded-Q&A MCP service
 License: MIT
 Requires-Python: >=3.11

@@ -95,14 +95,25 @@ def prepare_models(home: Path) -> list[str]:
         dest.parent.mkdir(parents=True, exist_ok=True)
         snapshot_download(repo_id=repo, revision=rev, local_dir=dest,
                           allow_patterns=["*.json", "*.txt", "*.safetensors",
-                                          "*.onnx", "LICENSE*", "*.model",
-                                          "*.spm", "modules.json"],
+                                          "*.onnx", "*.md", "LICENSE*",
+                                          "*.model", "*.spm", "modules.json"],
                           ignore_patterns=["*.bin", "*.msgpack", "*.h5",
                                            "*.pt", "*.ot"])
-        if not any(dest.glob("LICENSE*")):
+        if not _license_ok(dest):
             raise SetupError(f"{repo} license artifact missing — refusing to ship")
         out.append(f"prepared {repo}@{rev[:8]} (Apache-2.0)")
     return out
+
+
+def _license_ok(dest: Path) -> bool:
+    """LICENSE* file present, or the model card declares a permissive license."""
+    if any(dest.glob("LICENSE*")):
+        return True
+    for md in dest.glob("*.md"):
+        head = md.read_text(errors="ignore")[:6000].lower()
+        if "license: apache-2.0" in head or "license: mit" in head:
+            return True
+    return False
 
 
 def _load_lock() -> dict:
