@@ -48,7 +48,7 @@ session can resume without losing a single analyzed transformation.
   "delivery": {"mode": "internal|external|local", "repoUrl": "…", "branch": "…", "dir": "docs/requirements/", "workDir": ".c2r-delivery/"},
   "analyzedSources": ["<class/method already sliced>", …],
   "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"], "evidence": "OrderService.java:142-158, Pricing.java:58-70"}],
-  "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…", "relevance": "active"}],
+  "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "source": "orders.csv", "definition": "…", "relevance": "active", "correlates": ["INP-020"]}],
   "idCounters": {"inp": 12, "out": 4, "trns": 9, "algo": 2, "flag": 1},
   "featureFlags": [{"id": "FLAG-001", "name": "FEATURE_X_ENABLED", "purpose": "…", "gates": ["TRNS-010"]}],
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
@@ -99,6 +99,11 @@ output field's transformation completes: update `.c2r_state.json`, update the
    The recorded `delivery` target is reused without re-asking; for external
    repos/local paths verify they still exist and are reachable — if not, ask
    for a corrected destination before continuing.
+   **Structural upgrade**: if the loaded state/doc predates the current
+   structure (e.g. dictionary entries lack `source`/`correlates`), backfill
+   from recorded evidence — unknown sources are a Gate-3 question, never a
+   guess — and rewrite the dictionary + Input Specification sections to the
+   current layout at the next checkpoint. Immutable IDs are preserved.
 3. If absent, initialize the state file after the destination-setup step.
 
 ## Interaction flow
@@ -134,7 +139,8 @@ output field's transformation completes: update `.c2r_state.json`, update the
 
    Record `gates.planApproved` on approval; corrections update the plan first.
 5. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
-   build the Global Data Dictionary → present it with relevance tags and
+   build the Global Data Dictionary → present it **grouped per source entity**
+   (per file/endpoint/config/table) with relevance tags and per-source
    active-vs-unused counts → **pause for user approval** before doing any
    transformation work. Incorporate corrections, then checkpoint.
 6. **Gate 2 — Golden Sample**: fully document the *first* output file — all
@@ -211,6 +217,15 @@ code outside the repo) is **not** something to infer — it becomes a blocker
   least one output transformation) or `[NOT USED IN CURRENT SCOPE]` (exists in
   the source, unused in this scope). `relevance` is stored in the state file so
   tagging survives resume.
+- **Source identity is mandatory.** Every discovered field records its exact
+  `source` entity (`orders.csv`, `POST /orders`, `application.properties`,
+  `CUSTOMER_REF` table…) in the state dictionary — never just the category
+  ("file"). Fields from different source entities must never be merged into
+  one input group.
+- **Correlation keys.** When the same logical field appears in multiple
+  sources (e.g. `orderId` in `orders.csv` and `payments.csv`), give each
+  occurrence its own `INP-xxx` ID — per-source validation/format stays
+  faithful — and cross-tag them via `correlates` so join keys are explicit.
 
 **Path & state analysis — exhaustive:**
 - Walk every conditional on the slice: `if/else`, `switch`/`case`, ternaries,
@@ -240,25 +255,32 @@ Use this skeleton (`:`-prefixed attributes are AsciiDoc):
 :source-highlighter: highlightjs
 
 == Global Data Dictionary
+<every row names its exact source entity — a field is never "just a file field":>
 |===
-| ID | Field Name | Data Type | Business Definition
-| xref:INP-001[] | orderId | String | Unique order identifier
-| xref:OUT-001[] | totalAmount | Decimal | Final order total
+| ID | Field Name | Data Type | Source | Business Definition
+| xref:INP-001[] | orderId | String | orders.csv | Unique order identifier. Correlates: xref:INP-020[]
+| xref:INP-020[] | orderId | String | payments.csv | Order key in the payments file. Correlates: xref:INP-001[]
+| xref:OUT-001[] | totalAmount | Decimal | (derived) | Final order total
 |===
 
 == Input Specification
-<grouped by source: Files / API / Config / Environment / Database — every
-discovered field is listed; each entry starts with its anchor, then the
-relevance tag, then the "shall" statement:>
+<ONE subsection + table per SOURCE ENTITY — each input file, API endpoint,
+config file, DB table, or env-var set gets its own block; fields from
+different entities are NEVER merged into one table. Every discovered field of
+that entity is listed, anchored, and relevance-tagged:>
 
-[[INP-001]] *orderId* [ACTIVE] shall be used to correlate the input record to
-the order. Validations: non-empty, alphanumeric. Source: `orders.csv`, col 1.
+=== `orders.csv` (File)
+|===
+| ID | Field | Type | Relevance | Purpose & Validations
+| xref:INP-001[] | orderId | String | [ACTIVE] | shall correlate the input record to the order; non-empty, alphanumeric
+| xref:INP-003[] | legacyCode | String | [NOT USED IN CURRENT SCOPE] | exists in the file; shall be ignored by the documented behavior
+|===
 
-[[INP-002]] *taxRate* [ACTIVE] shall be read from config. Validations: 0–1.
-Source: `application.properties` key `tax.rate`.
-
-[[INP-003]] *legacyCode* [NOT USED IN CURRENT SCOPE] exists in `orders.csv` but
-drives no documented output; shall be ignored by the documented behavior.
+=== `application.properties` (Config)
+|===
+| ID | Field | Type | Relevance | Purpose & Validations
+| xref:INP-002[] | taxRate | Decimal | [ACTIVE] | shall be read from key `tax.rate`; 0–1
+|===
 
 == Output Specification
 <per output file — table:>
@@ -342,6 +364,14 @@ Rules for the document:
   truth — a `[NOT USED]` field never appears in any `TRNS` rule. When the same
   input feeds `Output_1` but not `Output_2`, the output tables' Transformation
   Ref links express it — no special casing.
+- **Per-source grouping — never merge entities**: the Input Specification has
+  one `===` subsection + table per source entity (file, endpoint, config file,
+  DB table, env set). Fields from `orders.csv` never sit beside fields from
+  `customers.csv`. The dictionary's `Source` column makes every field's origin
+  explicit.
+- **Correlation keys**: the same logical field in two sources is two `INP` IDs
+  linked via `correlates` — join relationships stay explicit without losing
+  per-source fidelity.
 - **Structured English**: requirements and algorithm steps use only
   `IF`, `THEN`, `ELSE`, `AND`, `OR`, `WHILE`, `REPEAT` keywords — no natural
   prose, no ambiguous wording. Field references via `xref:ID[]`.

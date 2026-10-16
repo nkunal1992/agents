@@ -106,11 +106,15 @@ An `.adoc` file with:
 
 - **Global Data Dictionary** — every field with an immutable `INP-xxx`/
   `OUT-xxx` ID (tracked in `.c2r_state.json` — never renumbered), type,
-  definition.
-- **Input Specification** — grouped by source (files / API / config / env / DB),
-  each with purpose + validations and a relevance tag: `[ACTIVE]` (drives an
-  output) or `[NOT USED IN CURRENT SCOPE]` (in the source but unused — never
-  appears in a transformation rule). Per-output Transformation Ref links
+  **source entity**, definition, and correlation links for join keys.
+- **Input Specification** — one subsection + table **per source entity** (each
+  input file, API endpoint, config file, DB table): fields from different
+  sources are never merged into one table. Each field carries purpose +
+  validations and a relevance tag: `[ACTIVE]` (drives an output) or
+  `[NOT USED IN CURRENT SCOPE]` (in the source but unused — never appears in a
+  transformation rule). Fields that appear in multiple sources get distinct
+  IDs linked as correlation (join) keys — the dictionary's `Source` column
+  keeps every field's origin explicit. Per-output Transformation Ref links
   express which inputs drive which outputs.
 - **Output Specification** — per-output tables (field · Dict ID · type · size ·
   `TRNS-xx` ref) and an explicit cardinality statement per output.
