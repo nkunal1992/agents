@@ -47,7 +47,7 @@ session can resume without losing a single analyzed transformation.
   "startingPoint": "…", "targetDoc": "docs/requirements/<name>.adoc",
   "analyzedSources": ["<class/method already sliced>", …],
   "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"]}],
-  "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…"}],
+  "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…", "relevance": "active"}],
   "idCounters": {"inp": 12, "out": 4, "trns": 9},
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
   "verification": [{"trns": "TRNS-001", "syntheticInput": "…", "traversedPath": "OrderService.java:142 → Pricing.java:58", "actualOutput": "…", "status": "verified"}],
@@ -93,8 +93,9 @@ output field's transformation completes: update `.c2r_state.json`, update the
    these are the sinks. If a prompt file already supplied them, use those.
    Initialize `.c2r_state.json` with all outputs marked `pending`.
 3. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
-   build the Global Data Dictionary → **pause for user approval** before doing
-   any transformation work. Incorporate corrections, then checkpoint.
+   build the Global Data Dictionary → present it with relevance tags and
+   active-vs-unused counts → **pause for user approval** before doing any
+   transformation work. Incorporate corrections, then checkpoint.
 4. **Gate 2 — Golden Sample**: fully document the *first* output file — all
    sequential transformations, negative paths, verification — then **pause for
    approval**. The approved output sets the standard for everything after it.
@@ -155,6 +156,11 @@ code outside the repo) is **not** something to infer — it becomes a blocker
   variables, JVM/system properties, database lookup/reference tables, feature
   flags, defaults. These are inputs too — discover them via search for config
   keys actually read by slice-relevant code.
+- **Catalog everything, tag relevance.** Document *every* field a source
+  exposes — not just used ones. Tag each `INP-xxx` as `[ACTIVE]` (traced to at
+  least one output transformation) or `[NOT USED IN CURRENT SCOPE]` (exists in
+  the source, unused in this scope). `relevance` is stored in the state file so
+  tagging survives resume.
 
 **Path & state analysis — exhaustive:**
 - Walk every conditional on the slice: `if/else`, `switch`/`case`, ternaries,
@@ -191,14 +197,18 @@ Use this skeleton (`:`-prefixed attributes are AsciiDoc):
 |===
 
 == Input Specification
-<grouped by source: Files / API / Config / Environment / Database — each entry
-starts with its anchor, then the "shall" statement:>
+<grouped by source: Files / API / Config / Environment / Database — every
+discovered field is listed; each entry starts with its anchor, then the
+relevance tag, then the "shall" statement:>
 
-[[INP-001]] *orderId* shall be used to correlate the input record to the order.
-Validations: non-empty, alphanumeric. Source: `orders.csv`, column 1.
+[[INP-001]] *orderId* [ACTIVE] shall be used to correlate the input record to
+the order. Validations: non-empty, alphanumeric. Source: `orders.csv`, col 1.
 
-[[INP-002]] *taxRate* shall be read from config. Validations: 0–1. Source:
-`application.properties` key `tax.rate`.
+[[INP-002]] *taxRate* [ACTIVE] shall be read from config. Validations: 0–1.
+Source: `application.properties` key `tax.rate`.
+
+[[INP-003]] *legacyCode* [NOT USED IN CURRENT SCOPE] exists in `orders.csv` but
+drives no documented output; shall be ignored by the documented behavior.
 
 == Output Specification
 <per output file — table:>
@@ -237,6 +247,12 @@ Rules for the document:
 - **ID stability**: IDs come from `.c2r_state.json` (`idCounters` +
   `dataDictionary`/`mappingMatrix`). Once assigned, never change — new fields
   get the next counter; removed fields leave gaps.
+- **Relevance tagging**: the Input Specification catalogs *all* discovered
+  fields; `[ACTIVE]` means traced to ≥1 transformation, `[NOT USED IN CURRENT
+  SCOPE]` means present-but-unused. Transformation Logic is the sole source of
+  truth — a `[NOT USED]` field never appears in any `TRNS` rule. When the same
+  input feeds `Output_1` but not `Output_2`, the output tables' Transformation
+  Ref links express it — no special casing.
 - **Completeness**: every output field has a mapped transformation for *every*
   possible input state — including when inputs are absent, null, or invalid.
   Gaps are written as explicit requirements (e.g. "shall default to 0"), never

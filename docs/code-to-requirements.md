@@ -87,7 +87,10 @@ An `.adoc` file with:
   `OUT-xxx` ID (tracked in `.c2r_state.json` — never renumbered), type,
   definition.
 - **Input Specification** — grouped by source (files / API / config / env / DB),
-  each with purpose + validations.
+  each with purpose + validations and a relevance tag: `[ACTIVE]` (drives an
+  output) or `[NOT USED IN CURRENT SCOPE]` (in the source but unused — never
+  appears in a transformation rule). Per-output Transformation Ref links
+  express which inputs drive which outputs.
 - **Output Specification** — per-output tables (field · Dict ID · type · size ·
   `TRNS-xx` ref) and an explicit cardinality statement per output.
 - **Transformation Logic** — ordered `TRNS-xx` steps, shared-logic block with
