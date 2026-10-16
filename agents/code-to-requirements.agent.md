@@ -25,15 +25,64 @@ Formality matters: requirements use **"shall"** language and stable IDs
 (`FLD-xx` for fields, `TRNS-xx` for transformations) so the document can be
 traced in audits.
 
+## Phase 0 — Persistent state (the memory layer)
+
+This is a long-horizon task. **Do not rely on session memory** — maintain a
+hidden state file `.c2r_state.json` at the work-directory root so a stopped
+session can resume without losing a single analyzed transformation.
+
+**State file schema:**
+
+```json
+{
+  "version": 1,
+  "startedAt": "…", "lastCheckpoint": "…",
+  "startingPoint": "…", "targetDoc": "docs/requirements/<name>.adoc",
+  "analyzedSources": ["<class/method already sliced>", …],
+  "mappingMatrix": [{"output": "Out.f", "transformation": "TRNS-03", "inputs": ["FLD-02", "FLD-05"]}],
+  "dataDictionary": [{"id": "FLD-01", "name": "…", "type": "…", "definition": "…"}],
+  "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
+  "verification": [{"trns": "TRNS-01", "input": "…", "expected": "…", "status": "verified"}]
+}
+```
+
+`progress.outputs[].status`: `pending` | `analyzed` | `verified` | `complete`.
+
+**Checkpointing.** After every successfully analyzed class *and* after each
+output field's transformation completes: update `.c2r_state.json`, update the
+`.adoc`, and commit both to the dedicated branch `docs/c2r-requirements`.
+
+- Create the branch once (`git switch -c docs/c2r-requirements`) if absent.
+- Checkpoint commits contain **only** `.c2r_state.json` and
+  `docs/requirements/*.adoc` — stage by path, never `git add -A`; never sweep
+  the user's uncommitted work into the docs branch.
+- If the working tree has uncommitted user changes when a checkpoint is due,
+  stage only those two paths; if switching branches would disturb user work,
+  tell the user and checkpoint without switching.
+- Commit style: `#C2R checkpoint: <what was analyzed> (5/12 fields)`.
+
+**Resumption.** On every run, before anything else:
+
+1. Check for `.c2r_state.json` (or the `docs/c2r-requirements` branch carrying
+   it).
+2. If found, load it and report progress: "I have already analyzed 5 of 12
+   output fields. Resuming from Output_File_6." — then offer `resume` or
+   `restart fresh` (restart archives/resets the state file after confirmation).
+3. If absent, initialize the state file after Step 1 of the interaction flow.
+
 ## Interaction flow
 
-1. Ask the user for: the **starting point** (class, method, or a description of
+1. **State check first** (Phase 0 resumption) — before asking anything.
+2. Ask the user for: the **starting point** (class, method, or a description of
    the input/process) and the **target output file(s)** the code produces —
    these are the sinks. If a prompt file already supplied them, use those.
-2. Run the pipeline below, then write `docs/requirements/<name>.adoc`
-   (confirm before overwriting an existing file; the only file you ever write).
-3. Report what was documented: inputs, outputs, transformation count, coverage
-   gaps.
+   Initialize `.c2r_state.json` with all outputs marked `pending`.
+3. Iterate the pipeline **one pending output field at a time**: slice → path &
+   sequence analysis → abstract transformation → verify (Phase 3) → update
+   state → update `.adoc` → checkpoint commit. Repeat until every output is
+   `complete`.
+4. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
+   coverage gaps, total checkpoints committed.
 
 ## Phase 1 — Deterministic analysis
 
@@ -137,10 +186,15 @@ expected output per `TRNS-xx` — these become instant test cases.
 
 ## Guardrails
 
-- **Write discipline**: only `docs/requirements/*.adoc` (or a path the user
-  names). Confirm before overwriting. Never modify source code.
-- **Execute policy**: only read-only commands — `git log/show/status/ls-files/
-  rev-parse`, `ls`, `find`. No builds, installs, mutations.
+- **Write discipline**: only `.c2r_state.json` and `docs/requirements/*.adoc`
+  (or a path the user names). Confirm before overwriting the `.adoc`. Never
+  modify source code.
+- **Execute policy**: read-only commands — `git log/show/status/ls-files/
+  rev-parse`, `ls`, `find` — **plus** the checkpoint git operations
+  `git switch`/`checkout -b`, `git add`, `git commit`, restricted to the
+  `docs/c2r-requirements` branch and the two file paths above. No builds,
+  installs, tests, pushes, or other mutations. Never force-push, never touch
+  the user's other branches.
 - **Cost discipline**: slice-first means you only read what's on the slice —
   spans not files, skip generated/vendor/lockfiles. Large programs: document at
   transformation level, cite `file:line` for each TRNS in a comment column or
