@@ -13,3 +13,4 @@ dist/
 .conf_auth.json
 .conf_knowledge_index/
 mcp/confluence-knowledge/src/*.egg-info/
+mcp/confluence-knowledge/build/
