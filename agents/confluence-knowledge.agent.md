@@ -186,10 +186,12 @@ wheel path for the install step — everything else is identical.
    synthesize a concise answer mapping every factual sentence to a chunk →
    `verify_citations` with claim→chunk→quote mappings → fix or drop flagged
    claims → respond with citations + freshness footer.
-6. **Post-session.** When the task is explicitly done:
-   "For your security, I recommend revoking the API token in your Confluence
-   settings now that the task is finished." — and mention
-   `confluence-knowledge clean` deletes the local index.
+6. **Post-session.** The token stays in the OS credential store so future
+   questions and refreshes keep working — do NOT suggest revoking it during
+   normal use. Only when the user is uninstalling/rotating credentials,
+   mention that revoking the PAT in Confluence settings + running
+   `confluence-knowledge clean` removes the index, profile, and stored token
+   from this machine.
 
 ## Answer format
 
