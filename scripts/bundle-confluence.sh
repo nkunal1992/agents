@@ -57,6 +57,8 @@ JSON
 
 # human-facing README (what teams see on the store listing + in the zip)
 cp "$ROOT/bundle/README.md" "$OUT/README.md"
+# plain-language explainer — for whoever presents/defends the agent internally
+cp "$ROOT/docs/confluence-knowledge-explained.md" "$OUT/EXPLAINED.md"
 
 # optional vendored wheels for fully-offline pip installs
 if [[ -n "$WHEELS" ]]; then
