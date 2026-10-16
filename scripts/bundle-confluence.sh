@@ -59,6 +59,8 @@ JSON
 cp "$ROOT/bundle/README.md" "$OUT/README.md"
 # plain-language explainer — for whoever presents/defends the agent internally
 cp "$ROOT/docs/confluence-knowledge-explained.md" "$OUT/EXPLAINED.md"
+# slide deck (Marp) for presenting the agent internally
+cp "$ROOT/docs/confluence-knowledge-slides.md" "$OUT/SLIDES.md"
 
 # optional vendored wheels for fully-offline pip installs
 if [[ -n "$WHEELS" ]]; then
