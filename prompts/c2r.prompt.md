@@ -16,9 +16,12 @@ ${input:outputs:Output file(s) the code produces}
 
 Run the full C2R pipeline: check `.c2r_state.json` first (resume if present) →
 backward-slice from the outputs → exhaustive input discovery (including silent
-inputs: config files, env vars, DB lookups) → map every branch and negative path
-→ trace sequential overrides → abstract transformations to input-only rules →
-verification loop per field → update `.adoc` + state and checkpoint-commit on
-`docs/c2r-requirements` after each output field → deliver
+inputs: config files, env vars, DB lookups) + Global Data Dictionary → **pause
+for my approval** → document the first output fully → **pause for my approval**
+(the Golden Sample) → then the remaining outputs autonomously: map every branch
+and negative path → trace sequential overrides → abstract transformations to
+input-only rules → verify (dry-run + reconcile) → update `.adoc` + state and
+checkpoint-commit on `docs/c2r-requirements` after each output field → deliver
 `docs/requirements/<name>.adoc` in formal "shall" language with FLD/TRNS IDs.
-Confirm before overwriting; never touch source code.
+Stop and ask me whenever code is contradictory or an input source can't be
+resolved. Confirm before overwriting; never touch source code.

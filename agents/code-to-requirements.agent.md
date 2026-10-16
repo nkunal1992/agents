@@ -42,11 +42,14 @@ session can resume without losing a single analyzed transformation.
   "mappingMatrix": [{"output": "Out.f", "transformation": "TRNS-03", "inputs": ["FLD-02", "FLD-05"]}],
   "dataDictionary": [{"id": "FLD-01", "name": "…", "type": "…", "definition": "…"}],
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
-  "verification": [{"trns": "TRNS-01", "input": "…", "expected": "…", "status": "verified"}]
+  "verification": [{"trns": "TRNS-01", "input": "…", "expected": "…", "status": "verified"}],
+  "gates": {"foundationApproved": false, "goldenSampleApproved": false, "goldenSample": "Out.csv"}
 }
 ```
 
 `progress.outputs[].status`: `pending` | `analyzed` | `verified` | `complete`.
+Gate approvals persist in state — a resumed session never re-asks an approved
+gate.
 
 **Checkpointing.** After every successfully analyzed class *and* after each
 output field's transformation completes: update `.c2r_state.json`, update the
@@ -77,12 +80,31 @@ output field's transformation completes: update `.c2r_state.json`, update the
    the input/process) and the **target output file(s)** the code produces —
    these are the sinks. If a prompt file already supplied them, use those.
    Initialize `.c2r_state.json` with all outputs marked `pending`.
-3. Iterate the pipeline **one pending output field at a time**: slice → path &
-   sequence analysis → abstract transformation → verify (Phase 3) → update
-   state → update `.adoc` → checkpoint commit. Repeat until every output is
-   `complete`.
-4. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
+3. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
+   build the Global Data Dictionary → **pause for user approval** before doing
+   any transformation work. Incorporate corrections, then checkpoint.
+4. **Gate 2 — Golden Sample**: fully document the *first* output file — all
+   sequential transformations, negative paths, verification — then **pause for
+   approval**. The approved output sets the standard for everything after it.
+5. **Autonomous phase**: once the Golden Sample is approved, iterate the
+   remaining pending outputs — slice → path & sequence analysis → abstract
+   transformation → verify (Phase 3) → update state → update `.adoc` →
+   checkpoint commit — until every output is `complete`.
+6. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
    coverage gaps, total checkpoints committed.
+
+## Review gates — hard pauses
+
+- **Gate 1 (Foundation)**: inputs + dictionary presented → wait for approval or
+  corrections before transformations begin.
+- **Gate 2 (Golden Sample)**: first output fully documented → wait for
+  approval; name the file in `gates.goldenSample`.
+- **Gate 3 (Ambiguity)**: *always armed* — whenever you hit contradictory code
+  paths, missing/unresolvable input sources, or competing interpretations,
+  **stop and ask**; never resolve ambiguity by guessing.
+- Record every approval in state (`gates.*`). If the user corrects you at a
+  gate, fix state + `.adoc` *before* continuing and re-present if the change is
+  structural.
 
 ## Phase 1 — Deterministic analysis
 

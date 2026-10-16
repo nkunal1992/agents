@@ -39,14 +39,17 @@ Or run `/c2r` and answer its prompts.
 
 ```
 State check (resume if .c2r_state.json exists)
-→ for each pending output field:
-    slice from output sink → input discovery (incl. silent inputs)
-    → path & state analysis (all branches, negative paths, pre-conditions)
-    → sequential lifecycle (first assignment → overrides)
-    → input-only abstract transformation
-    → verify (synthetic input → dry-run → reconcile)
+→ input discovery + Global Data Dictionary
+→ GATE 1 — you approve the foundation
+→ first output fully documented → GATE 2 — you approve the Golden Sample
+→ for each remaining pending output (autonomous):
+    slice → path & state analysis → sequential lifecycle
+    → input-only abstract transformation → verify (dry-run + reconcile)
     → update state + .adoc → checkpoint commit on docs/c2r-requirements
 → final docs/requirements/<name>.adoc
+
+GATE 3 is always armed: contradictory code paths or missing input sources
+pause the run until you clarify.
 ```
 
 ## Resuming
@@ -55,7 +58,22 @@ State persists in `.c2r_state.json` (work-dir root) with checkpoint commits on
 the `docs/c2r-requirements` branch — only state and spec files are ever
 committed there, never your source changes. Re-open the agent any time: it
 reports progress ("analyzed 5 of 12 output fields") and offers **resume** or
-**restart fresh**.
+**restart fresh**. Approved review gates are stored in the state file — a
+resumed session never re-asks a gate you already approved.
+
+## Review gates
+
+The agent stops for your sign-off at three points, so a wrong path never burns
+a full run:
+
+- **Gate 1 — Foundation**: after all inputs (including silent ones) and the
+  Global Data Dictionary are built. Approve or correct before transformations
+  start.
+- **Gate 2 — Golden Sample**: after the first output file is fully documented.
+  Approve it — it becomes the standard for the remaining outputs, which then
+  proceed autonomously.
+- **Gate 3 — Ambiguity**: any time the code is contradictory or an input source
+  can't be resolved, it stops and asks rather than guessing.
 
 ## What you get
 
