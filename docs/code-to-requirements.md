@@ -56,14 +56,16 @@ Or run `/c2r` and answer its prompts.
 
 ```
 State check (resume if .c2r_state.json exists)
+→ reconnaissance scan → GATE 0 — you approve the Strategic Plan
+  (sinks/sources found, slicing map, execution order, known blockers)
 → input discovery + Global Data Dictionary
 → GATE 1 — you approve the foundation
 → first output fully documented → GATE 2 — you approve the Golden Sample
 → for each remaining pending output (autonomous):
     slice → path & state analysis → sequential lifecycle
     → input-only abstract transformation → verify (dry-run + reconcile)
-    → update state + .adoc → checkpoint commit on docs/c2r-requirements
-→ final docs/requirements/<name>.adoc
+    → update state + .adoc → checkpoint per delivery mode
+→ final .adoc delivered
 
 GATE 3 is always armed: contradictory code paths or missing input sources
 pause the run until you clarify.
@@ -80,8 +82,14 @@ resumed session never re-asks a gate you already approved.
 
 ## Review gates
 
-The agent stops for your sign-off at three points, so a wrong path never burns
+The agent stops for your sign-off at four points, so a wrong path never burns
 a full run:
+
+- **Gate 0 — Strategic Plan**: before any analysis, it presents a discovery
+  report (candidate sinks/sources/silent inputs), the proposed slicing map, an
+  execution roadmap (output order + where the later gates land), and a
+  resource assessment (blockers like obfuscated code or unreadable deps).
+  Nothing starts until you approve.
 
 - **Gate 1 — Foundation**: after all inputs (including silent ones) and the
   Global Data Dictionary are built. Approve or correct before transformations

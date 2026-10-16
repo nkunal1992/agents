@@ -20,7 +20,9 @@ Target output file(s) / sinks:
 ${input:outputs:Output file(s) the code produces}
 
 Run the full C2R pipeline: check `.c2r_state.json` first (resume if present) →
-backward-slice from the outputs → exhaustive input discovery (including silent
+reconnaissance scan → present the Strategic Plan (discovery report, slicing
+map, roadmap, blockers) → **pause for my approval** → backward-slice from the
+outputs → exhaustive input discovery (including silent
 inputs: config files, env vars, DB lookups) + Global Data Dictionary → **pause
 for my approval** → document the first output fully → **pause for my approval**
 (the Golden Sample) → then the remaining outputs autonomously: map every branch

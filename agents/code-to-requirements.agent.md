@@ -54,7 +54,7 @@ session can resume without losing a single analyzed transformation.
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
   "verification": [{"trns": "TRNS-001", "syntheticInput": "…", "traversedPath": "OrderService.java:142 → Pricing.java:58", "actualOutput": "…", "status": "verified"}],
   "blockers": [{"field": "INP-007", "reason": "…", "where": "file:line", "status": "open"}],
-  "gates": {"foundationApproved": false, "goldenSampleApproved": false, "goldenSample": "Out.csv"}
+  "gates": {"planApproved": false, "foundationApproved": false, "goldenSampleApproved": false, "goldenSample": "Out.csv"}
 }
 ```
 
@@ -118,23 +118,40 @@ output field's transformation completes: update `.c2r_state.json`, update the
    `.c2r_state.json`. The state file itself always stays in the source work
    dir — it is internal memory, never part of the deliverable. Initialize the
    state file with all outputs `pending`.
-4. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
+4. **Gate 0 — Strategic Plan**: run a light reconnaissance scan (entry points,
+   build files, readers/writers — *not* deep slicing) and present a Strategic
+   Plan — then **pause for approval. Do not begin analysis until approved**:
+
+   - *Repository Discovery Report* — candidate **sinks** (output writers/
+     serializers) and **sources** (input readers/ingestors); silent inputs
+     spotted at scan level (configs, env vars, DB tables, feature flags).
+   - *Proposed Slicing Map* — the intended trace: starting point →
+     intermediates → named outputs.
+   - *Execution Roadmap* — the order output files will be tackled, and where
+     Gate 1 (Foundation) and Gate 2 (Golden Sample) will occur.
+   - *Resource Assessment* — potential blockers up front: obfuscated code,
+     missing deps, very deep call stacks, unreadable external modules.
+
+   Record `gates.planApproved` on approval; corrections update the plan first.
+5. **Gate 1 — Foundation**: complete input discovery (incl. silent inputs) and
    build the Global Data Dictionary → present it with relevance tags and
    active-vs-unused counts → **pause for user approval** before doing any
    transformation work. Incorporate corrections, then checkpoint.
-5. **Gate 2 — Golden Sample**: fully document the *first* output file — all
+6. **Gate 2 — Golden Sample**: fully document the *first* output file — all
    sequential transformations, negative paths, verification — then **pause for
    approval**. The approved output sets the standard for everything after it.
-6. **Autonomous phase**: once the Golden Sample is approved, iterate the
+7. **Autonomous phase**: once the Golden Sample is approved, iterate the
    remaining pending outputs — slice → path & sequence analysis → abstract
    transformation → verify (Phase 3) → update state → write `.adoc` to the
    recorded destination → checkpoint per its delivery mode — until every
    output is `complete`.
-7. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
+8. Deliver the final `.adoc` and report: inputs, outputs, transformation count,
    coverage gaps, delivery target, total checkpoints committed/pushed/written.
 
 ## Review gates — hard pauses
 
+- **Gate 0 (Strategic Plan)**: discovery report + slicing map + roadmap +
+  blocker assessment presented → **no analysis begins** until approved.
 - **Gate 1 (Foundation)**: inputs + dictionary presented → wait for approval or
   corrections before transformations begin.
 - **Gate 2 (Golden Sample)**: first output fully documented → wait for
