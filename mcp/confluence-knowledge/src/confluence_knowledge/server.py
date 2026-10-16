@@ -23,8 +23,8 @@ mcp = FastMCP("confluence-knowledge")
 # in-process caches (per server lifetime)
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, list[dict]] = {}
-_embedder = None
-_reranker = None
+_EMBEDDER = None
+_RERANKER = None
 
 
 def _home() -> Path:
@@ -48,17 +48,17 @@ def _index_for(scope_key: str) -> Index:
 
 
 def _embedder():
-    global _embedder
-    if _embedder is None:
-        _embedder = LocalEmbedder(_home())
-    return _embedder
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        _EMBEDDER = LocalEmbedder(_home())
+    return _EMBEDDER
 
 
 def _reranker():
-    global _reranker
-    if _reranker is None:
-        _reranker = LocalReranker(_home())
-    return _reranker
+    global _RERANKER
+    if _RERANKER is None:
+        _RERANKER = LocalReranker(_home())
+    return _RERANKER
 
 
 def _scope(scope_handle: str) -> dict:

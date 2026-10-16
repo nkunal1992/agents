@@ -1,2 +1,0 @@
-[console_scripts]
-confluence-knowledge = confluence_knowledge.cli:main
