@@ -121,11 +121,10 @@ echo
 echo "Installed $copied file(s) into $TARGET_REPO/.github ($skipped skipped)."
 echo "Commit them so they're available in the repo: git add .github && git commit"
 
-# confluence-knowledge additionally needs its local MCP service — point users
-# at the guide rather than installing runtimes/models during a file copy.
-if selected "confluence-knowledge" || selected "confluence-setup"; then
+# confluence-knowledge additionally needs its local MCP service — the agent
+# self-installs it on first run, so just point users at the guide.
+if selected "confluence-knowledge"; then
   echo
-  echo "note  confluence-knowledge needs its local MCP service (one-time setup)."
-  echo "      In Copilot Chat pick the 'confluence-setup' agent and say 'set this up',"
-  echo "      or see docs/confluence-knowledge.md#setup."
+  echo "note  confluence-knowledge self-installs its local MCP service on first run"
+  echo "      (you'll approve each step, then reload once). Guide: docs/confluence-knowledge.md"
 fi

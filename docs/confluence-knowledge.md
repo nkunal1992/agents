@@ -40,20 +40,24 @@ answer with [Source: Page Title](url) on every claim
 - **Resumable.** Crawls checkpoint into the index DB; an interrupted crawl
   resumes where it stopped.
 
-## Setup
+## Setup — it's one file
 
-Copy the agent file (and optionally the prompts) into your repo:
+Copy `agents/confluence-knowledge.agent.md` into your repo's
+`.github/agents/` (Raw → save, or `scripts/install.sh --only
+confluence-knowledge /path/to/repo`), or upload it to your org's agent store.
 
-```bash
-scripts/install.sh --only confluence-knowledge --only confluence-setup /path/to/repo
-```
+**First run** — the agent notices its MCP tools aren't registered and
+bootstraps itself: installs the pinned service package into a user venv,
+downloads the two Apache-2.0 models, walks you through token creation, writes
+`.vscode/mcp.json`, then asks you to reload once. Every command is shown and
+approved — the whole flow is ~5 minutes.
 
-Then either pick **confluence-setup** in the Copilot agent dropdown and say
-"set this up" — or run it yourself:
+Prefer to run it manually? Equivalent commands:
 
 ```bash
 python3.11+ -m venv ~/.confluence-knowledge/venv
-~/.confluence-knowledge/venv/bin/pip install ./mcp/confluence-knowledge[models]
+~/.confluence-knowledge/venv/bin/pip install \
+  "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
 ~/.confluence-knowledge/venv/bin/confluence-knowledge setup      # guided: env, URL, hidden token entry
 ~/.confluence-knowledge/venv/bin/confluence-knowledge prepare-models
 ~/.confluence-knowledge/venv/bin/confluence-knowledge doctor     # must be green
@@ -79,8 +83,8 @@ Register the server in VS Code (`.vscode/mcp.json`):
 }
 ```
 
-JetBrains: same command/args in Copilot's MCP settings (stdio). The setup
-agent generates the exact block for your OS if you prefer.
+JetBrains: same command/args in Copilot's MCP settings (stdio). The agent
+writes the exact block for your OS during bootstrap if you prefer.
 
 ## Using it
 
@@ -112,6 +116,7 @@ before refreshing.
 | Concern | Mechanism |
 |---|---|
 | Writes to Confluence | GET-only transport + endpoint allowlist + no generic request tool |
+| Single-file bootstrap | The `.agent.md` carries `execute`/`edit` so it can install the service on first run; bootstrap commands are whitelisted and Q&A mode never uses them |
 | Credentials | OS keyring default · env var supported · chmod-600 file fallback; never in chat, logs, or IDE config |
 | Secrets in Git | `.gitignore` for `.conf_auth.json` + `.conf_knowledge_index/` written *before* any file; tracked-file check aborts setup |
 | Token lifetime | end-of-session reminder to revoke; `confluence-knowledge clean` deletes the index |

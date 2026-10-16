@@ -16,6 +16,6 @@ ${input:root:Root Confluence page URL or pageId}
 
 Question: ${input:question:What do you want to know?}
 
-Follow your standard flow: check status → connect → freshness nudge or crawl →
-search → verify citations → cited answer with coverage line. If setup is
-missing, explain how to run it instead of guessing.
+Follow your standard flow: if the confluence-knowledge MCP tools aren't
+callable, run your bootstrap first. Then status → connect → freshness nudge
+or crawl → search → verify citations → cited answer with coverage line.
