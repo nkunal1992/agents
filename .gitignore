@@ -1,3 +1,13 @@
 .DS_Store
 *.swp
 *~
+
+# confluence-knowledge dev/runtime artifacts
+mcp/confluence-knowledge/.venv/
+mcp/confluence-knowledge/dist/
+mcp/confluence-knowledge/*.egg-info/
+mcp/confluence-knowledge/**/__pycache__/
+mcp/confluence-knowledge/.pytest_cache/
+mcp/confluence-knowledge/.ruff_cache/
+.conf_auth.json
+.conf_knowledge_index/

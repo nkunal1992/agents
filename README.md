@@ -30,13 +30,17 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [jira-ticket-writer](agents/jira-ticket-writer.agent.md) | Generates paste-ready JIRA ticket details from worktree diffs, commits, or ranges — [guide](docs/jira-ticket-writer.md) |
 | [architecture-mapper](agents/architecture-mapper.agent.md) | Maps repo/package architecture into mermaid diagrams + a self-contained explainer site — [guide](docs/architecture-mapper.md) |
 | [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
+| [confluence-knowledge](agents/confluence-knowledge.agent.md) | Grounded Q&A over one Confluence page + its descendant pages — local crawl/index/embeddings, per-claim citations, explicit "not documented" refusals. Needs the local MCP service (one-time setup) — [guide](docs/confluence-knowledge.md) |
+| [confluence-setup](agents/confluence-setup.agent.md) | One-time guided installer for the confluence-knowledge local service — credentials, models, MCP registration |
 
 ## What each agent does — and why it matters at work
 
 Each entry: **what it does** → **why it helps in an enterprise** → **try it**.
-All agents pin cheap models first (`GPT-6 Luna` → `GPT-5 mini` → `GPT-4.1` fallbacks),
-are repo-agnostic, and never expose secrets. Read-only agents can't modify your
-code by design.
+All agents are repo-agnostic and never expose secrets; most pin cheap models
+first (`GPT-6 Luna` → `GPT-5 mini` → `GPT-4.1` fallbacks) — confluence agents
+instead inherit your company's approved Copilot model. Read-only agents can't
+modify your code by design. `confluence-knowledge` is the only agent that
+needs a local companion service.
 
 ### code-reviewer
 Reviews diffs, staged changes, and PRs for correctness, security, and
@@ -120,6 +124,28 @@ a local path. Untraceable paths are marked `UNRESOLVED`, never guessed.
 *Why:* produces the kind of pure functional specification auditors and
 rebuild-teams actually need — with the technical evidence retained internally
 for traceability. *Try:* `/c2r` · [guide](docs/code-to-requirements.md)
+
+### confluence-knowledge
+Answers questions strictly from a Confluence page subtree you choose: root
+page + all descendants, crawled and indexed locally (`.conf_knowledge_index/`),
+semantic + keyword retrieval reranked by a local model, and every claim in
+the answer carries a clickable source citation. The companion service is
+hard-coded GET-only — it physically cannot write to Confluence — and its
+embeddings run entirely on the laptop (Apache-2.0 models, no cloud calls).
+Missing evidence gets an explicit "not documented" answer, never a guess.
+*Why:* a safe, auditable way to let teams query internal documentation
+without exposing it to uncontrolled tooling — read-only by construction,
+credentials in the OS keyring, subtree access rechecked on every refresh.
+*Try:* `/confluence-ask` · [guide](docs/confluence-knowledge.md)
+*Requires:* the local MCP service (one-time setup — see below).
+
+### confluence-setup
+One-time bootstrap companion for `confluence-knowledge`: detects OS/IDE,
+installs the tested service into a user venv, walks through secure token
+setup (hidden input, OS credential store), prepares the local models, and
+registers the MCP server — every change previewed before it runs. *Why:*
+colleagues get a guided, consistent install instead of hand-editing config
+files. *Try:* `/confluence-setup` or "set this up".
 
 ## Usage
 

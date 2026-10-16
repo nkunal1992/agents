@@ -1,0 +1,31 @@
+name: confluence-knowledge
+
+on:
+  push:
+    paths: ["mcp/confluence-knowledge/**", ".github/workflows/confluence-knowledge.yml"]
+  pull_request:
+    paths: ["mcp/confluence-knowledge/**", ".github/workflows/confluence-knowledge.yml"]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install package + dev deps
+        run: pip install -e './mcp/confluence-knowledge[dev]'
+      - name: Lint
+        run: ruff check mcp/confluence-knowledge/src mcp/confluence-knowledge/tests
+      - name: Unit tests (offline — no models, no network)
+        run: pytest mcp/confluence-knowledge/tests -q
+      - name: CLI smoke
+        run: |
+          pip install -e './mcp/confluence-knowledge' --quiet
+          confluence-knowledge --help >/dev/null
+          confluence-knowledge doctor; test $? -le 3

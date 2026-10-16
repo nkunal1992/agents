@@ -1,0 +1,14 @@
+httpx<0.29,>=0.27
+beautifulsoup4>=4.12
+numpy>=1.26
+keyring>=25.2
+mcp>=1.6
+
+[dev]
+pytest>=8.0
+pytest-cov>=5.0
+ruff>=0.6
+
+[models]
+sentence-transformers<4.0,>=3.0
+huggingface-hub>=0.26

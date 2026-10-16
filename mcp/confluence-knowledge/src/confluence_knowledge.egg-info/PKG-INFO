@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: confluence-knowledge
+Version: 0.1.0
+Summary: Local, GET-only Confluence subtree indexer + grounded-Q&A MCP service
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: httpx<0.29,>=0.27
+Requires-Dist: beautifulsoup4>=4.12
+Requires-Dist: numpy>=1.26
+Requires-Dist: keyring>=25.2
+Requires-Dist: mcp>=1.6
+Provides-Extra: models
+Requires-Dist: sentence-transformers<4.0,>=3.0; extra == "models"
+Requires-Dist: huggingface-hub>=0.26; extra == "models"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"
