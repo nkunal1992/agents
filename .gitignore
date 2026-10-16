@@ -9,5 +9,6 @@ mcp/confluence-knowledge/*.egg-info/
 mcp/confluence-knowledge/**/__pycache__/
 mcp/confluence-knowledge/.pytest_cache/
 mcp/confluence-knowledge/.ruff_cache/
+dist/
 .conf_auth.json
 .conf_knowledge_index/

@@ -39,7 +39,16 @@ set it up now. You'll approve each step." Then:
    Only if NO interpreter ≥3.11 exists, stop with the Manual Setup block
    below. If behind a proxy/offline, tell the user: install the pinned
    package from their internal mirror or a vendored wheel, then re-run you.
-2. **Install the service** — show, then run (one block, using `$PY`):
+2. **Install the service — bundled copy first.** Search for a vendored
+   service source: look for a `pyproject.toml` containing
+   `name = "confluence-knowledge"` (check `service/`, `confluence-knowledge/`,
+   `mcp/confluence-knowledge/` next to this agent file or at the repo root,
+   then one level deep). If found at `<SVC>`:
+   ```bash
+   $PY -m venv "$HOME/.confluence-knowledge/venv"
+   "$HOME/.confluence-knowledge/venv/bin/python" -m pip install "<SVC>[models]"
+   ```
+   Otherwise fetch the pinned package from the public repo:
    ```bash
    $PY -m venv "$HOME/.confluence-knowledge/venv"
    "$HOME/.confluence-knowledge/venv/bin/python" -m pip install \
@@ -48,7 +57,7 @@ set it up now. You'll approve each step." Then:
    (Windows: `py -m venv "%USERPROFILE%\.confluence-knowledge\venv"` then
    `"%USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe" -m pip
    install ...`.) Never write service code yourself — always install the
-   pinned package. Never modify it after install.
+   pinned/bundled package. Never modify it after install.
 3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
    prepare-models` — downloads two Apache-2.0 models (embedding + reranker)
    into `~/.confluence-knowledge/models/`. If the network blocks Hugging
@@ -87,7 +96,10 @@ below verbatim (it is self-contained — do not reference external docs):
 
 ```bash
 # 1. install the service (use your python: python3 / python / py)
+#    bundled copy (from the agent zip) preferred when present:
 python3 -m venv ~/.confluence-knowledge/venv
+~/.confluence-knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
+#    or fetch the pinned package:
 ~/.confluence-knowledge/venv/bin/python -m pip install \
   "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
 # Windows: py -m venv %USERPROFILE%\.confluence-knowledge\venv

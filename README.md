@@ -30,7 +30,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [jira-ticket-writer](agents/jira-ticket-writer.agent.md) | Generates paste-ready JIRA ticket details from worktree diffs, commits, or ranges — [guide](docs/jira-ticket-writer.md) |
 | [architecture-mapper](agents/architecture-mapper.agent.md) | Maps repo/package architecture into mermaid diagrams + a self-contained explainer site — [guide](docs/architecture-mapper.md) |
 | [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
-| [confluence-knowledge](agents/confluence-knowledge.agent.md) | Single-file grounded Q&A over one Confluence page + its descendant pages — self-installs its local MCP service on first run, per-claim citations, explicit "not documented" refusals — [guide](docs/confluence-knowledge.md) |
+| [confluence-knowledge](agents/confluence-knowledge.agent.md) | Single-file grounded Q&A over one Confluence page + its descendant pages — self-installs its local MCP service on first run (bundled zip available via `scripts/bundle-confluence.sh`), per-claim citations, explicit "not documented" refusals — [guide](docs/confluence-knowledge.md) |
 
 ## What each agent does — and why it matters at work
 

@@ -40,11 +40,20 @@ answer with [Source: Page Title](url) on every claim
 - **Resumable.** Crawls checkpoint into the index DB; an interrupted crawl
   resumes where it stopped.
 
-## Setup — it's one file
+## Setup — it's one file (or one zip)
 
 Copy `agents/confluence-knowledge.agent.md` into your repo's
 `.github/agents/` (Raw → save, or `scripts/install.sh --only
 confluence-knowledge /path/to/repo`), or upload it to your org's agent store.
+
+**Zip bundle (AI store / no GitHub access):** run
+`scripts/bundle-confluence.sh --zip` to produce
+`dist/confluence-knowledge-bundle.zip` containing the agent file, prompts,
+the vendored `service/` source, an `mcp.json.example`, and a README. Unzip
+into the repo — the agent detects `service/` on first run and installs from
+it (`pip install ./service[models]`) instead of GitHub. Python deps still
+come from PyPI (set `PIP_INDEX_URL` for an internal index, or vendor wheels
+with `--include-wheels <dir>`); models come from Hugging Face or your mirror.
 
 **First run** — the agent notices its MCP tools aren't registered and
 bootstraps itself: installs the pinned service package into a user venv,
