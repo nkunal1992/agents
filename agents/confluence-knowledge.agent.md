@@ -172,15 +172,17 @@ wheel path for the install step — everything else is identical.
    `<cached_as_of>`. I will use this to answer your question. Would you like
    me to refresh the crawl to check for recent updates?" — wait for the
    answer before searching.
-4. **Crawl.** If no cache or refresh requested: `start_crawl`, then call
-   `crawl_step` repeatedly until it returns `state: done`. Each call returns
-   within a few seconds, and progress is saved after every page:
-   - `note: loading local models` → normal on the first call of a session;
-     call `crawl_step` again.
+4. **Crawl.** If no cache or refresh requested: `start_crawl` begins a
+   **background crawl** — the server indexes the whole subtree on its own.
+   Call `crawl_step` every few seconds to poll progress until it returns
+   `state: done`. Each call returns instantly:
+   - `note: loading local models` → the crawl is queued while models warm;
+     keep polling.
    - A request timeout or transient error → call `crawl_step` again with the
-     same `job_id`; it resumes where it stopped. Give up only after 5
+     same `job_id`; progress is checkpointed after every page and the crawl
+     even resumes itself after a server restart. Give up only after 5
      consecutive failures, and then report the error.
-   - Every few calls, tell the user progress (`pages_seen`, `remaining`).
+   - Tell the user progress as it moves (`pages_seen`, `remaining`).
    - **Never call `search` while the crawl is running** — the index is only
      published when the crawl finishes.
    When done, report pages indexed + any `errors` (inaccessible pages are

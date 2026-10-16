@@ -60,13 +60,16 @@ async def main() -> None:
         check(not c["cached"], "connect: fresh scope, nothing cached")
 
         job = await call(session, "start_crawl", {"scope_handle": scope})
-        steps, r = 0, {"state": "running"}
+        # background crawl — crawl_step is an instant progress poll now
+        steps, r, waited = 0, {"state": "running"}, 0.0
         while r["state"] != "done":
             steps += 1
-            check(steps <= 40, "crawl finishes within 40 steps")
+            check(waited <= 90, "background crawl finishes within 90s", r)
+            await asyncio.sleep(0.4)
+            waited += 0.4
             r = await call(session, "crawl_step", {"scope_handle": scope, "job_id": job["job_id"]})
         check(r["pages_seen"] == 32 and not r["errors"],
-              f"crawl: all 32 pages incl. grandchild indexed in {steps} steps", r)
+              f"crawl: all 32 pages incl. grandchild indexed ({steps} polls)", r)
 
         res = await call(session, "search", {"scope_handle": scope,
                                              "question": "When are production deploys allowed?"})

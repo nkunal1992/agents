@@ -9,13 +9,12 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from .auth import get_credential
-from .client import ConfluenceClient, SecurityException, make_client
+from .client import AccessError, ConfluenceClient, SecurityException, make_client
 from .crawl import Crawler
 from .index import Index
 from .retrieval import LocalEmbedder, LocalReranker, check_citations, retrieve
@@ -183,26 +182,83 @@ def _crawler(s: dict, embedder=None) -> Crawler:
                    embedder=embedder, site_url=s["profile"].base_url)
 
 
+# background crawl workers — a crawl runs to completion server-side so a big
+# subtree doesn't need hundreds of tool calls (each one an IDE LLM turn and a
+# timeout surface, #81). crawl_step is then only a progress read.
+_workers: dict[str, threading.Thread] = {}
+_worker_errors: dict[str, str] = {}
+_workers_lock = threading.Lock()
+
+
+def _worker_loop(s: dict, job_id: str) -> None:
+    idx = _index_for(s["key"])
+    try:
+        # models may still be warming; the worker waits, not the tool call
+        _models_ready.wait()
+        c = _crawler(s, embedder=_embedder())
+        while True:
+            r = c.step(job_id, batch=None, budget_s=None)
+            if r["state"] != "running":
+                break
+    except Exception as e:  # noqa: BLE001 — surfaced via job state
+        err = f"{type(e).__name__}: {e}"
+        _worker_errors[f"{s['key']}:{job_id}"] = err
+        job = idx.job(job_id)
+        if job and job["state"] == "running":
+            idx.save_job(job_id, "error", job["queue"], job["errors"] + [err])
+
+
+def _ensure_worker(s: dict, job_id: str) -> None:
+    """Start the crawl worker if none is alive — also the resume path after
+    the server restarts mid-crawl (the queue is durable, the thread isn't)."""
+    key = f"{s['key']}:{job_id}"
+    with _workers_lock:
+        t = _workers.get(key)
+        if t is not None and t.is_alive():
+            return
+        _workers[key] = threading.Thread(
+            target=_worker_loop, args=(s, job_id),
+            name=f"crawl-{job_id}", daemon=True)
+        _workers[key].start()
+
+
 @mcp.tool()
 def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
-    """Begin a crawl of the root page and all descendants; then call
-    crawl_step until state is "done"."""
+    """Begin crawling the root page and all descendants in a background
+    thread. The crawl runs to completion without further input — call
+    crawl_step only to read progress."""
     s = _scope(scope_handle)
     job_id = _crawler(s).start(s["root"])
-    return {"job_id": job_id, "state": "running"}
+    _ensure_worker(s, job_id)
+    return {"job_id": job_id, "state": "running",
+            "note": "crawl runs in the background — call crawl_step to poll"}
 
 
 @mcp.tool()
-def crawl_step(scope_handle: str, job_id: str, batch: int = 50) -> dict:
-    """Crawl the next pages. Returns within ~10 s; progress is saved after
-    every page, so after a timeout just call it again with the same job_id."""
+def crawl_step(scope_handle: str, job_id: str) -> dict:
+    """Read crawl progress instantly. A running job with no live worker (e.g.
+    the server restarted mid-crawl) is resumed automatically; the queue and
+    per-page checkpoints are durable."""
     s = _scope(scope_handle)
-    started = time.monotonic()
-    budget = _step_seconds()
-    if not _models_loaded(budget):
-        return {"job_id": job_id, "state": "running", "note": LOADING_NOTE}
-    remaining = max(1.0, budget - (time.monotonic() - started))
-    return _crawler(s, embedder=_embedder()).step(job_id, batch=batch, budget_s=remaining)
+    idx = _index_for(s["key"])
+    job = idx.job(job_id)
+    if job is None:
+        raise AccessError(f"unknown job {job_id}")
+    if job["state"] == "running":
+        if not _models_ready.is_set():
+            _start_warmup()
+            note = LOADING_NOTE
+        else:
+            note = None
+        _ensure_worker(s, job_id)
+        p = idx.job_progress(job_id)
+        if note:
+            p["note"] = note
+        return p
+    p = idx.job_progress(job_id)
+    if p["state"] == "done":
+        p["note"] = "no further calls needed — the index is published"
+    return p
 
 
 def _coverage(idx: Index) -> str:

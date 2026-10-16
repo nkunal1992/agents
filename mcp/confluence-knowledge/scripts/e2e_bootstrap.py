@@ -147,13 +147,15 @@ async def qa_roundtrip(vpy: Path, env: dict) -> None:
         check(st["configured"], "status: configured")
         c = await call(session, "connect", {"root": "100"})
         job = await call(session, "start_crawl", {"scope_handle": c["scope_handle"]})
-        steps, r_ = 0, {"state": "running"}
+        steps, r_, waited = 0, {"state": "running"}, 0.0
         while r_["state"] != "done":
             steps += 1
-            check(steps <= 60, "crawl finishes")
+            check(waited <= 90, "background crawl finishes", r_)
+            await asyncio.sleep(0.4)
+            waited += 0.4
             r_ = await call(session, "crawl_step",
                             {"scope_handle": c["scope_handle"], "job_id": job["job_id"]})
-        check(r_["pages_seen"] == 32, f"crawled 32 pages in {steps} steps")
+        check(r_["pages_seen"] == 32, f"crawled 32 pages ({steps} polls)")
         res = await call(session, "search", {"scope_handle": c["scope_handle"],
                                              "question": "When can we deploy?"})
         check(res["coverage"] == "complete"

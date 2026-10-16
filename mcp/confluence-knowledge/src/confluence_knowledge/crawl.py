@@ -144,7 +144,7 @@ class Crawler:
 
     def _checkpoint(self, job_id, queue, errors, seen, levels) -> None:
         """Persist progress so an interrupted step loses no completed page."""
-        with self.index.db:
+        with self.index.lock, self.index.db:
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"seen:{job_id}", json.dumps(sorted(seen))))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
@@ -153,9 +153,11 @@ class Crawler:
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
 
-    def step(self, job_id: str, batch: int = 10, budget_s: float | None = None) -> dict:
-        """Process up to `batch` pages, stopping early once `budget_s` seconds
-        have passed so each MCP call returns before the IDE's request timeout."""
+    def step(self, job_id: str, batch: int | None = 10,
+             budget_s: float | None = None) -> dict:
+        """Process up to `batch` pages (None = whole queue), stopping early
+        once `budget_s` seconds have passed. The background worker calls this
+        unbounded; a bounded call stays under the IDE's request timeout."""
         deadline = None if budget_s is None else time.monotonic() + budget_s
         job = self.index.job(job_id)
         if job is None:
@@ -166,17 +168,15 @@ class Crawler:
 
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
-        seen_file = self.index.db.execute(
-            "SELECT value FROM meta WHERE key=?", (f"seen:{job_id}",)).fetchone()
-        seen: set[str] = set(json.loads(seen_file[0])) if seen_file else set()
-        levels_file = self.index.db.execute(
-            "SELECT value FROM meta WHERE key=?", (f"levels:{job_id}",)).fetchone()
-        levels: dict[str, int] = (json.loads(levels_file[0]) if levels_file
+        seen_raw = self.index.meta_get(f"seen:{job_id}")
+        seen: set[str] = set(json.loads(seen_raw)) if seen_raw else set()
+        levels_raw = self.index.meta_get(f"levels:{job_id}")
+        levels: dict[str, int] = (json.loads(levels_raw) if levels_raw
                                   else {job["root_page"]: 0})
         visited: set[str] = set()
 
         processed = 0
-        while queue and processed < batch and (
+        while queue and (batch is None or processed < batch) and (
                 deadline is None or processed == 0 or time.monotonic() < deadline):
             if processed:
                 self._checkpoint(job_id, queue, errors, seen, levels)

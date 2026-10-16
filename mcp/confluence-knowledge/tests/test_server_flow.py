@@ -7,6 +7,7 @@ self-deadlocked with "database is locked".
 
 import sqlite3
 import threading
+import time
 
 import pytest
 
@@ -51,14 +52,42 @@ def wired(monkeypatch, tmp_path):
                         lambda *a, **kw: real_connect(*a, **{**kw, "timeout": 1}))
     monkeypatch.setattr(server, "_scopes", {})
     monkeypatch.setattr(server, "_indexes", {})
+    monkeypatch.setattr(server, "_workers", {})
+    monkeypatch.setattr(server, "_worker_errors", {})
+
+
+def wait_done(scope, job_id, timeout=15):
+    """The background worker does the crawling; crawl_step polls."""
+    end = time.monotonic() + timeout
+    while True:
+        r = server.crawl_step(scope, job_id)
+        if r["state"] != "running":
+            return r
+        assert time.monotonic() < end, "background crawl did not finish"
+        time.sleep(0.02)
 
 
 def test_connect_then_crawl_does_not_lock(wired):
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])
-    r = server.crawl_step(c["scope_handle"], job["job_id"])
+    r = wait_done(c["scope_handle"], job["job_id"])
     assert r["state"] == "done"
     assert r["pages_seen"] == 1
+
+
+def test_background_crawl_worker_does_the_work(wired):
+    """#81: start_crawl returns instantly and the crawl completes on its
+    own — crawl_step is only an instant progress read, so a big subtree
+    doesn't need one LLM turn per page."""
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    # the job may still be running — crawl_step must return instantly anyway
+    t = time.monotonic()
+    r = server.crawl_step(c["scope_handle"], job["job_id"])
+    assert time.monotonic() - t < 2
+    assert r["state"] in ("running", "done")
+    r = wait_done(c["scope_handle"], job["job_id"])
+    assert r["state"] == "done" and r["pages_seen"] == 1
 
 
 class _FakeEmbedder:
@@ -80,7 +109,7 @@ def test_full_agent_flow_with_models(wired, monkeypatch):
     monkeypatch.setattr(server, "_reranker", lambda: rr)
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])
-    assert server.crawl_step(c["scope_handle"], job["job_id"])["state"] == "done"
+    assert wait_done(c["scope_handle"], job["job_id"])["state"] == "done"
 
     res = server.search(c["scope_handle"], "text")
     assert res["evidence"], res
@@ -95,7 +124,11 @@ def test_full_agent_flow_with_models(wired, monkeypatch):
     assert ok["ok"] is True
 
 
-def test_search_during_crawl_says_crawling(wired):
+def test_search_during_crawl_says_crawling(wired, monkeypatch):
+    # keep the worker parked on the model-warmup gate so the job stays
+    # "running" deterministically — a 1-page crawl finishes before the race
+    # could otherwise resolve
+    monkeypatch.setattr(server, "_models_ready", threading.Event())
     c = server.connect("1")
     server.start_crawl(c["scope_handle"])
     res = server.search(c["scope_handle"], "text")
@@ -105,21 +138,21 @@ def test_search_during_crawl_says_crawling(wired):
 def test_crawl_step_returns_while_models_load(wired, monkeypatch):
     """The first torch/model load can exceed the IDE timeout — the tool must
     answer 'loading' instead of blocking."""
-    monkeypatch.setenv("CONF_KNOWLEDGE_STEP_SECONDS", "0.05")
-    gate = threading.Event()
-    monkeypatch.setattr(server, "_embedder", lambda: gate.wait(5))
+    # models never finish loading — the warmup gate stays closed so the
+    # worker parks and the tool call must still answer instantly
+    monkeypatch.setattr(server, "_start_warmup", lambda: None)
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])
     r = server.crawl_step(c["scope_handle"], job["job_id"])
     assert r["note"] == server.LOADING_NOTE
-    gate.set()
 
 
 def test_scope_survives_server_restart(wired):
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])
     server._scopes.clear()                    # IDE restarted the server
-    assert server.crawl_step(c["scope_handle"], job["job_id"])["state"] == "done"
+    server._workers.clear()                   # and the worker died with it
+    assert wait_done(c["scope_handle"], job["job_id"])["state"] == "done"
 
 
 def test_coverage_complete_despite_earlier_failed_job(wired, monkeypatch):
@@ -129,14 +162,14 @@ def test_coverage_complete_despite_earlier_failed_job(wired, monkeypatch):
     c = server.connect("1")
     server.start_crawl(c["scope_handle"])     # abandoned
     job = server.start_crawl(c["scope_handle"])
-    server.crawl_step(c["scope_handle"], job["job_id"])
+    wait_done(c["scope_handle"], job["job_id"])
     assert server.search(c["scope_handle"], 'say "text')["coverage"] == "complete"
 
 
 def test_reconnect_after_crawl_sees_cache(wired):
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])
-    server.crawl_step(c["scope_handle"], job["job_id"])
+    wait_done(c["scope_handle"], job["job_id"])
     again = server.connect("1")
     assert again["cached"] is True
     assert again["cached_pages"] == 1

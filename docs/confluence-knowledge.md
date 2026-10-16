@@ -154,8 +154,8 @@ before refreshing.
 | `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.confluence-knowledge/models/` from an internal mirror) |
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
 | `index database was locked` | fixed in v0.1.6. Earlier versions deadlocked themselves on the first crawl (an uncommitted write per connection). Upgrade: `python -m pip install --upgrade "<bundle>\service[models]"`, restart the IDE |
-| `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.1.8: each call returns within ~10 s (`CONF_KNOWLEDGE_STEP_SECONDS`) and saves progress after every page, and models load in the background. The agent calls `crawl_step` again until `state: done` |
-| `search` says "crawl … still running" | the crawl hasn't finished; keep calling `crawl_step`. The index is published only when the whole subtree is crawled |
+| `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.2.1: the crawl runs in a background thread server-side and `crawl_step` is an instant progress poll — a request timeout can no longer stall or lose a crawl; progress checkpoints every page and a server restart auto-resumes |
+| `search` says "crawl … still running" | the background crawl hasn't finished; poll `crawl_step` for progress. The index is published only when the whole subtree is crawled |
 | Two `python.exe … confluence_knowledge.server` processes on Windows | expected, not a duplicate: a venv's `Scripts\python.exe` is a launcher that starts the base interpreter as its child. Only one server is running |
 | 403 on some pages | your account lacks permission — those pages are reported as inaccessible |
 | MCP tools not showing | check `.vscode/mcp.json` Start prompt / JetBrains MCP policy; enterprise "MCP servers in Copilot" policy must allow it |

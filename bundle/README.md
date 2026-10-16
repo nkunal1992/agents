@@ -162,7 +162,7 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
 | `pip --version` not found | Use `python -m pip` — the agent does this automatically |
 | `SSL: CERTIFICATE_VERIFY_FAILED` | Included from v0.1.5 (`pip-system-certs`). Older installs: `python -m pip install pip-system-certs` |
 | `database is locked` | Fixed in v0.1.6+ (self-deadlock bug); upgrade the service |
-| `Request timeout` on `crawl_step` | Fixed in v0.1.8+; calls are bounded to ~10 s — just call again |
+| `Request timeout` on `crawl_step` | Fixed in v0.2.1: the crawl runs server-side in the background; `crawl_step` returns instantly with progress |
 | "loading local models" | First call per session warms the models; retry the tool call |
 | `no stored token` | Run `confluence-knowledge setup` in your own terminal |
 | Two `python.exe` processes on Windows | Normal — a venv `python.exe` is a launcher that starts the base interpreter as its child |
