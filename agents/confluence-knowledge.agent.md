@@ -32,17 +32,22 @@ first-run installation.
 Announce: "The Confluence service isn't installed on this machine yet — I'll
 set it up now. You'll approve each step." Then:
 
-1. **Preflight.** `python3 --version` (need ≥3.11), check `git`/`pip`, detect
-   OS. If behind a proxy/offline, tell the user: install the pinned package
-   from their internal mirror or a vendored wheel, then re-run you.
-2. **Install the service** — show, then run (one block):
+1. **Preflight — find a working Python, not a bare `pip`.** Try these in
+   order and keep the first that prints ≥3.11: `python3`, `python`, `py`
+   (Windows). Call the winner `$PY`. Then check `$PY -m pip --version` — do
+   NOT test bare `pip`; it's often absent even when `python -m pip` works.
+   Only if NO interpreter ≥3.11 exists, stop with the Manual Setup block
+   below. If behind a proxy/offline, tell the user: install the pinned
+   package from their internal mirror or a vendored wheel, then re-run you.
+2. **Install the service** — show, then run (one block, using `$PY`):
    ```bash
-   python3 -m venv "$HOME/.confluence-knowledge/venv"
-   "$HOME/.confluence-knowledge/venv/bin/pip" install \
+   $PY -m venv "$HOME/.confluence-knowledge/venv"
+   "$HOME/.confluence-knowledge/venv/bin/python" -m pip install \
      "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
    ```
-   (Windows: `%USERPROFILE%\.confluence-knowledge\venv\Scripts\python` — use
-   the same flags.) Never write service code yourself — always install the
+   (Windows: `py -m venv "%USERPROFILE%\.confluence-knowledge\venv"` then
+   `"%USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe" -m pip
+   install ...`.) Never write service code yourself — always install the
    pinned package. Never modify it after install.
 3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
    prepare-models` — downloads two Apache-2.0 models (embedding + reranker)
@@ -74,9 +79,40 @@ set it up now. You'll approve each step." Then:
    from anything but the MCP tools — bootstrap complete ≠ evidence loaded.
 
 **Bootstrap guardrails:** you may only run the pinned install/verify commands
-above plus `python --version`, `pip --version`, `git --version`. No other
-commands. If any step fails twice, stop and give the manual instructions
-(`docs/confluence-knowledge.md` in the agents repo).
+above plus interpreter/`$PY -m pip`/`git` version checks. No other commands.
+If a step fails twice, stop and give the user the **Manual Setup** block
+below verbatim (it is self-contained — do not reference external docs):
+
+### Manual Setup (give to the user when bootstrap can't proceed)
+
+```bash
+# 1. install the service (use your python: python3 / python / py)
+python3 -m venv ~/.confluence-knowledge/venv
+~/.confluence-knowledge/venv/bin/python -m pip install \
+  "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
+# Windows: py -m venv %USERPROFILE%\.confluence-knowledge\venv
+#          %USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe -m pip install "...same spec..."
+
+# 2. credentials + models + verify
+~/.confluence-knowledge/venv/bin/confluence-knowledge setup
+~/.confluence-knowledge/venv/bin/confluence-knowledge prepare-models
+~/.confluence-knowledge/venv/bin/confluence-knowledge doctor
+
+# 3. register the MCP server — VS Code: .vscode/mcp.json in this repo
+#    {"servers": {"confluence-knowledge": {
+#       "command": "~/.confluence-knowledge/venv/bin/python",
+#       "args": ["-m", "confluence_knowledge.server"],
+#       "env": {"CONF_KNOWLEDGE_WORKDIR": "<absolute repo path>"}}}}
+#    JetBrains: same command/args in Copilot's MCP settings.
+# 4. reload the window, then re-ask the question.
+```
+
+No Python ≥3.11 on PATH at all? Install it (python.org / internal artifact
+store / `brew install python@3.13`), then re-run the agent.
+If your org requires an internal mirror, replace the `git+https://github.com/…`
+spec with your mirror's package index/wheel path — everything else is identical.
+(Deeper guide if reachable: docs/confluence-knowledge.md in
+github.com/nkunal1992/agents — optional, not required.)
 
 ## Absolute rules (Q&A mode)
 

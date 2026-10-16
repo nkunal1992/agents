@@ -52,11 +52,12 @@ downloads the two Apache-2.0 models, walks you through token creation, writes
 `.vscode/mcp.json`, then asks you to reload once. Every command is shown and
 approved — the whole flow is ~5 minutes.
 
-Prefer to run it manually? Equivalent commands:
+Prefer to run it manually? Equivalent commands — note the `python -m pip`
+form: a bare `pip` is often not on PATH even when Python is:
 
 ```bash
-python3.11+ -m venv ~/.confluence-knowledge/venv
-~/.confluence-knowledge/venv/bin/pip install \
+python3.11+ -m venv ~/.confluence-knowledge/venv       # or: python / py
+~/.confluence-knowledge/venv/bin/python -m pip install \
   "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
 ~/.confluence-knowledge/venv/bin/confluence-knowledge setup      # guided: env, URL, hidden token entry
 ~/.confluence-knowledge/venv/bin/confluence-knowledge prepare-models
