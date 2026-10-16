@@ -21,9 +21,10 @@ must be a *pure functional specification*: a developer could rebuild the logic �
 configs, edge cases, cardinality, sequential overrides — from it alone, without
 seeing the code.
 
-Formality matters: requirements use **"shall"** language and stable IDs
-(`FLD-xx` for fields, `TRNS-xx` for transformations) so the document can be
-traced in audits.
+Formality matters: requirements use **"shall"** language and stable,
+immutable IDs (`INP-xxx` for inputs, `OUT-xxx` for outputs, `TRNS-xxx` for
+transformations) so the document can be traced in audits — every reference is
+an AsciiDoc `xref`, never a positional one.
 
 ## Phase 0 — Persistent state (the memory layer)
 
@@ -39,17 +40,21 @@ session can resume without losing a single analyzed transformation.
   "startedAt": "…", "lastCheckpoint": "…",
   "startingPoint": "…", "targetDoc": "docs/requirements/<name>.adoc",
   "analyzedSources": ["<class/method already sliced>", …],
-  "mappingMatrix": [{"output": "Out.f", "transformation": "TRNS-03", "inputs": ["FLD-02", "FLD-05"]}],
-  "dataDictionary": [{"id": "FLD-01", "name": "…", "type": "…", "definition": "…"}],
+  "mappingMatrix": [{"output": "OUT-001", "transformation": "TRNS-003", "inputs": ["INP-002", "INP-005"]}],
+  "dataDictionary": [{"id": "INP-001", "name": "…", "type": "…", "definition": "…"}],
+  "idCounters": {"inp": 12, "out": 4, "trns": 9},
   "progress": {"outputs": [{"file": "Out.csv", "status": "pending"}]},
-  "verification": [{"trns": "TRNS-01", "input": "…", "expected": "…", "status": "verified"}],
+  "verification": [{"trns": "TRNS-001", "input": "…", "expected": "…", "status": "verified"}],
   "gates": {"foundationApproved": false, "goldenSampleApproved": false, "goldenSample": "Out.csv"}
 }
 ```
 
 `progress.outputs[].status`: `pending` | `analyzed` | `verified` | `complete`.
 Gate approvals persist in state — a resumed session never re-asks an approved
-gate.
+gate. `idCounters` holds the next free number per ID family — **assigned IDs
+are immutable**: new entities take the next counter; removed entities leave
+gaps. IDs are never renumbered, even when the document is regenerated or
+sections move.
 
 **Checkpointing.** After every successfully analyzed class *and* after each
 output field's transformation completes: update `.c2r_state.json`, update the
@@ -145,51 +150,75 @@ Use this skeleton (`:`-prefixed attributes are AsciiDoc):
 
 ```adoc
 = Functional Requirement Document: <name>
-:toc:
+:toc: left
 :sectnums:
+:source-highlighter: highlightjs
 
 == Global Data Dictionary
-|=== 
+|===
 | ID | Field Name | Data Type | Business Definition
-| FLD-01 | ... | ... | ...
+| xref:INP-001[] | orderId | String | Unique order identifier
+| xref:OUT-001[] | totalAmount | Decimal | Final order total
 |===
 
 == Input Specification
-<grouped by source: Files / API / Config / Environment / Database — each entry:>
-* `FLD-01` shall be used to <purpose>. Validations: <constraints>. Source: <file/config key/table>.
+<grouped by source: Files / API / Config / Environment / Database — each entry
+starts with its anchor, then the "shall" statement:>
+
+[[INP-001]] *orderId* shall be used to correlate the input record to the order.
+Validations: non-empty, alphanumeric. Source: `orders.csv`, column 1.
+
+[[INP-002]] *taxRate* shall be read from config. Validations: 0–1. Source:
+`application.properties` key `tax.rate`.
 
 == Output Specification
 <per output file — table:>
 |===
 | Field Name | Dict ID | Data Type | Size | Transformation Ref
-| TotalAmount | FLD-55 | Decimal | 10 | TRNS-05
+| totalAmount | xref:OUT-001[] | Decimal | 10 | xref:TRNS-005[]
 |===
-Cardinality: One input record shall generate one output record.
-<or: Multiple input records shall be aggregated into one output record>
+Cardinality: One input record shall generate one output record (1:1).
+<or: Multiple input records shall be aggregated into one output record (N:1);
+state the mapping explicitly as 1:1, 1:N, or N:1.>
 
 == Transformation Logic
 === Shared Logic
-TRNS-S1: <reusable calculation, input-fields only>
+[[TRNS-000]] *Shared: line total* — shall be `INP-010` × `INP-011` (qty × unit
+price); specific outputs reference this with contextual overrides.
+
 === Steps
-. Step 1 — TRNS-01: If `FLD-05` is 'A', `Output_Field_1` shall be `FLD-01`.
-. Step 2 — TRNS-02: ... (contextual overrides reference shared logic)
+. [[TRNS-001]] If xref:INP-005[orderType] is 'A', xref:OUT-001[totalAmount]
+  shall be the sum of xref:INP-010[] and xref:INP-011[].
+. [[TRNS-002]] … (later steps may override earlier assignments — order matters)
+
 === Negative Paths
-TRNS-N1: If `FLD-02` fails validation <rule>, the record shall be rejected and no output row shall be produced.
+[[TRNS-020]] If xref:INP-002[] fails validation `0–1`, the record shall be
+rejected and no output row shall be produced.
 ```
 
 Rules for the document:
 
+- **Anchors everywhere**: `[[INP-xxx]]`, `[[OUT-xxx]]`, `[[TRNS-xxx]]` precede
+  each defining block — paragraph, list item, or table cell. An anchor is
+  defined exactly once; everything else links to it.
+- **xref, never positional**: "see section 3.2" is forbidden. Transformations
+  reference inputs as `xref:INP-001[]`; the output table's Transformation Ref
+  column links `xref:TRNS-xxx[]`; the dictionary's ID column links
+  `xref:INP-xxx[]`/`xref:OUT-xxx[]`.
+- **ID stability**: IDs come from `.c2r_state.json` (`idCounters` +
+  `dataDictionary`/`mappingMatrix`). Once assigned, never change — new fields
+  get the next counter; removed fields leave gaps.
 - **Completeness**: every output field has a mapped transformation for *every*
   possible input state — including when inputs are absent, null, or invalid.
   Gaps are written as explicit requirements (e.g. "shall default to 0"), never
   left implicit.
-- **Shared logic**: common calculations go in a Shared Logic block; specific
-  outputs reference it with contextual overrides.
-- **Cardinality** stated per output (one-to-one, many-to-one/aggregate,
-  one-to-many/expansion, filtered-out).
+- **Shared logic**: common calculations go in a Shared Logic block (`TRNS-0xx`
+  reserved range); specific outputs reference it with contextual overrides.
+- **Cardinality** stated per output — explicitly `1:1`, `1:N`, `N:1`, or
+  filtered-out.
 - **Sequential order preserved**: number steps so override order is explicit.
-- AsciiDoc must be valid: `=`, `==`, `===` headings; `|===` tables; backtick
-  field/ID references.
+- AsciiDoc must be valid: `=`/`==`/`===` headings, `|===` tables, `[[anchor]]`
+  + `xref:` syntax correct.
 
 ## Phase 3 — Verification loop (mandatory, before writing)
 

@@ -8,9 +8,10 @@ enough to rebuild the logic without ever seeing the source.
 - **Exhaustive**: every branch, negative path, pre-condition, silent input
   (configs, env vars, DB lookups), and sequential override is documented —
   every output field has a rule for every input state.
-- **Audit-ready**: formal "shall" language, stable `FLD-xx`/`TRNS-xx` IDs, a
-  global data dictionary, cardinality statements, and a Verification appendix
-  with synthetic input → expected-output examples.
+- **Audit-ready**: formal "shall" language; immutable `INP-xxx`/`OUT-xxx`/
+  `TRNS-xxx` anchors recorded in state so IDs never change on regeneration;
+  every cross-reference is a clickable `xref`; TOC/section numbers/highlighting
+  enabled via header attributes.
 - **Verified**: before writing, it dry-runs the code against synthetic inputs
   and corrects the spec where the two disagree.
 - **Resumable**: progress lives in `.c2r_state.json` + checkpoint commits on a
@@ -79,7 +80,9 @@ a full run:
 
 An `.adoc` file with:
 
-- **Global Data Dictionary** — every field with `FLD-xx` ID, type, definition.
+- **Global Data Dictionary** — every field with an immutable `INP-xxx`/
+  `OUT-xxx` ID (tracked in `.c2r_state.json` — never renumbered), type,
+  definition.
 - **Input Specification** — grouped by source (files / API / config / env / DB),
   each with purpose + validations.
 - **Output Specification** — per-output tables (field · Dict ID · type · size ·
