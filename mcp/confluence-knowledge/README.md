@@ -29,6 +29,15 @@ CONF_KNOWLEDGE_HOME=/tmp/ck/home .venv/bin/confluence-knowledge prepare-models
 CONF_KNOWLEDGE_HOME=/tmp/ck/home .venv/bin/python scripts/e2e_smoke.py   # ends with "E2E OK"
 ```
 
+`e2e_bootstrap.py` goes further — it replays the agent's entire install flow
+in a sandboxed $HOME (python discovery → venv → `pip install` from the
+shipped `dist/` bundle → models → credentials → `register` → the real server
+over stdio → a full Q&A round-trip). Run it before every release:
+
+```bash
+CK_MODEL_CACHE=/tmp/ck/home/models .venv/bin/python scripts/e2e_bootstrap.py  # "E2E BOOTSTRAP OK"
+```
+
 ## CLI
 
 | Command | Purpose |

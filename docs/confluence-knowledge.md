@@ -57,9 +57,10 @@ with `--include-wheels <dir>`); models come from Hugging Face or your mirror.
 
 **First run** — the agent notices its MCP tools aren't registered and
 bootstraps itself: installs the pinned service package into a user venv,
-downloads the two Apache-2.0 models, walks you through token creation, writes
-`.vscode/mcp.json`, then asks you to reload once. Every command is shown and
-approved — the whole flow is ~5 minutes.
+downloads the two Apache-2.0 models, writes the IDE MCP config itself
+(`register` — JetBrains user config + `.vscode/mcp.json`, no pasting into
+settings). The only manual bits: `setup` once in your own terminal for the
+token, and one IDE reload.
 
 Prefer to run it manually? Equivalent commands — note the `python -m pip`
 form: a bare `pip` is often not on PATH even when Python is:
@@ -79,7 +80,15 @@ Personal Access Tokens for Data Center 7.9+), reads it with hidden input, and
 stores it in the OS credential store (`.conf_auth.json` chmod-600 fallback —
 gitignored before it is ever written).
 
-Register the server in VS Code (`.vscode/mcp.json`):
+Register the server — one command writes every config Copilot reads
+(JetBrains `github-copilot/intellij/mcp.json`, VS Code user + workspace):
+
+```bash
+~/.confluence-knowledge/venv/bin/confluence-knowledge register --ide auto \
+    --workspace "<this repo>"        # use --remove to undo
+```
+
+Manual fallback — `.vscode/mcp.json`:
 
 ```jsonc
 {

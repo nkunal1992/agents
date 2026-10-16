@@ -71,9 +71,12 @@ In Copilot Chat, select the **confluence-knowledge** agent and say:
 set up confluence-knowledge
 ```
 
-The agent guides you through (asking approval for each step): Python check →
-virtual environment → service install → model download → credentials → IDE
-registration → one reload. After that, every session just works.
+The agent does everything itself from the chat — Python discovery, virtual
+environment, service install, model download, and it writes the IDE's MCP
+config files (`confluence-knowledge register`) so there's nothing to paste
+into settings. You do exactly two things manually: run `confluence-knowledge
+setup` in your own terminal when asked (hidden token input, OS credential
+store) and reload the IDE once so the new server registers.
 
 Manual install (if preferred):
 
@@ -85,8 +88,15 @@ py -m venv %USERPROFILE%\.confluence-knowledge\venv           # python3 -m venv 
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
 ```
 
-Then register the MCP server in your IDE (VS Code: `.vscode/mcp.json`,
-JetBrains: Copilot MCP settings) — see `mcp.json.example`:
+Then register the MCP server — one command writes every config your IDEs read
+(JetBrains Copilot config, VS Code workspace/user `mcp.json`), merging with
+existing servers and backing up first:
+
+```bash
+confluence-knowledge register --ide auto --workspace "<this repo>"
+```
+
+Manual fallback — VS Code `.vscode/mcp.json` (see `mcp.json.example`):
 
 ```jsonc
 {

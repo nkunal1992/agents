@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import sys
+from pathlib import Path
 
 from .auth import store_credential
 from .client import AccessError, make_client
@@ -120,6 +122,16 @@ def main() -> None:
     sub.add_parser("setup", help="guided credential + config setup")
     sub.add_parser("doctor", help="verify config, credentials, models")
     sub.add_parser("prepare-models", help="download the pinned local models")
+    reg = sub.add_parser(
+        "register",
+        help="write this server into the IDE's MCP config (no manual paste)")
+    reg.add_argument("--ide", default="auto",
+                     choices=["auto", "all", "vscode", "jetbrains"],
+                     help="which config files to write (default: all that apply)")
+    reg.add_argument("--workspace", type=Path, default=None,
+                     help="also write <workspace>/.vscode/mcp.json")
+    reg.add_argument("--remove", action="store_true",
+                     help="remove our entry instead of adding it")
     sub.add_parser("serve", help="run the stdio MCP server")
     clean = sub.add_parser("clean", help="delete the local index for this repo")
     clean.add_argument("--yes", action="store_true")
@@ -132,6 +144,22 @@ def main() -> None:
     if args.cmd == "prepare-models":
         for line in prepare_models(default_home()):
             print(line)
+        return
+    if args.cmd == "register":
+        from .registration import register
+        try:
+            wd = (Path(os.environ["CONF_KNOWLEDGE_WORKDIR"]).expanduser().resolve()
+                  if os.environ.get("CONF_KNOWLEDGE_WORKDIR") else None)
+            results = register(ide=args.ide, workspace=args.workspace,
+                               workdir=wd, remove=args.remove)
+        except SetupError as e:
+            print(f"error: {e}", file=sys.stderr)
+            sys.exit(2)
+        for path, action in results:
+            print(f"{action}: {path}")
+        if not args.remove:
+            print("\nReload your IDE so Copilot picks up the server, "
+                  "then re-ask the agent.")
         return
     if args.cmd == "serve":
         from .server import main as serve

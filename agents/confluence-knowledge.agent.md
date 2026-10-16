@@ -30,20 +30,25 @@ first-run installation.
 ## Bootstrap mode (first run, or when status/connect are missing)
 
 Announce: "The Confluence service isn't responding — checking whether it's
-already installed." Then:
+already installed. If not, I'll install it for you: create a virtual
+environment, install the service, download two small local models, and
+register the IDE config — then you'll do a one-time credential setup in your
+own terminal and reload once." Then run the steps below end-to-end without
+pausing between them; the user sees each command anyway.
 
 0. **Already installed?** If `~/.confluence-knowledge/venv` (or
    `%USERPROFILE%\.confluence-knowledge\venv`) exists, run its
    `confluence-knowledge doctor` first:
    - `configured: true` + models ready → the service is FINE; the MCP
-     registration is what is missing — jump straight to step 5 (write/show
-     the config block) + reload handoff. Never re-run install/prepare-models
-     on a healthy setup.
+     registration is what is missing — run `register` (step 4) + reload
+     handoff. Never re-run install/prepare-models on a healthy setup.
    - `configured: false` or a model missing → run ONLY the missing step
      (setup / prepare-models) — do not reinstall the package.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
-   order and keep the first that prints ≥3.11: `python3`, `python`, `py`
-   (Windows). Call the winner `$PY`. Then check `$PY -m pip --version` — do
+   order and keep the first that prints ≥3.11: `python3.13`, `python3.12`,
+   `python3.11`, `python3`, `python`, `py` (Windows). On macOS the system
+   `python3` can be an old Command-Line-Tools build while brew installs live
+   as `python3.13` — try the versioned names first. Call the winner `$PY`. Then check `$PY -m pip --version` — do
    NOT test bare `pip`; it's often absent even when `python -m pip` works.
    Only if NO interpreter ≥3.11 exists, stop with the Manual Setup block
    below. If behind a proxy/offline, tell the user: install the pinned
@@ -73,27 +78,23 @@ already installed." Then:
    into `~/.confluence-knowledge/models/`. If the network blocks Hugging
    Face, tell the user to drop the model dirs there from their internal
    mirror — never switch to a cloud embedding API.
-4. **Credentials.** Tell the user to run, **in their own terminal** (input is
-   hidden, goes to the OS keyring): `confluence-knowledge setup` — the wizard
-   asks Cloud vs Data Center, prints the exact token-creation steps, and
-   heartbeats the connection. Never ask them to paste a token into chat.
-   If heartbeat or downloads fail with `SSL: CERTIFICATE_VERIFY_FAILED`,
-   the fix is `$VENV/bin/python -m pip install pip-system-certs` (bundled in
-   ≥0.1.5 — only needed for older installs).
-5. **Register the MCP server.** Write `.vscode/mcp.json` in the workspace
-   (merge with existing `servers`; for JetBrains, show the same block for
-   Copilot MCP settings):
-   ```json
-   {
-     "servers": {
-       "confluence-knowledge": {
-         "command": "<venv>/bin/python",
-         "args": ["-m", "confluence_knowledge.server"],
-         "env": { "CONF_KNOWLEDGE_WORKDIR": "<absolute repo root>" }
-       }
-     }
-   }
+4. **Register the MCP server — the command writes the config itself.** Run:
+   ```bash
+   "$VENV/bin/confluence-knowledge" register --ide auto --workspace "<repo root>"
    ```
+   (Windows: `"%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe"`.)
+   It writes the user-level JetBrains Copilot config (`github-copilot/intellij/
+   mcp.json`) and the workspace `.vscode/mcp.json`, merging with any existing
+   servers and backing up first. If it reports "backup-replaced", tell the
+   user their old config was moved to `<file>.bak` and to re-add other servers.
+5. **Credentials — the only manual step.** Tell the user to run, **in their own
+   terminal** (input is hidden, goes to the OS keyring): `confluence-knowledge
+   setup` — the wizard asks Cloud vs Data Center, prints the exact
+   token-creation steps, and heartbeats the connection. Never ask them to
+   paste a token into chat. If heartbeat fails with
+   `SSL: CERTIFICATE_VERIFY_FAILED`, the fix is
+   `$VENV/bin/python -m pip install pip-system-certs` (bundled in ≥0.1.5 —
+   only needed for older installs).
 6. **Verify then hand off.** Run `"$HOME/.confluence-knowledge/venv/bin/
    confluence-knowledge" doctor` — must print `configured: true` and both
    models ready. Then tell the user: **reload the window / restart the MCP
@@ -122,12 +123,15 @@ python3 -m venv ~/.confluence-knowledge/venv
 ~/.confluence-knowledge/venv/bin/confluence-knowledge prepare-models
 ~/.confluence-knowledge/venv/bin/confluence-knowledge doctor
 
-# 3. register the MCP server — VS Code: .vscode/mcp.json in this repo
+# 3. register the IDE config automatically:
+~/.confluence-knowledge/venv/bin/confluence-knowledge register --ide auto \
+    --workspace "<absolute repo path>"
+#    manual fallback (writes .vscode/mcp.json by hand):
 #    {"servers": {"confluence-knowledge": {
 #       "command": "~/.confluence-knowledge/venv/bin/python",
-#       "args": ["-m", "confluence_knowledge.server"],
-#       "env": {"CONF_KNOWLEDGE_WORKDIR": "<absolute repo path>"}}}}
-#    JetBrains: same command/args in Copilot's MCP settings.
+#       "args": ["-m", "confluence_knowledge.server"]}}}
+#    JetBrains without the register command: same command/args in Copilot's
+#    MCP settings.
 # 4. reload the window, then re-ask the question.
 ```
 

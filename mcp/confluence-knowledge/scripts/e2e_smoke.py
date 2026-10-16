@@ -17,90 +17,17 @@ import json
 import os
 import sys
 import tempfile
-import threading
-import time
-from datetime import timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-TOKEN = "e2e-secret-token-canary"
+sys.path.insert(0, str(Path(__file__).parent))
+from _e2e_common import TOKEN, call, check, serve
+
 REQUEST_TIMEOUT = 20  # seconds; IDE clients time out around this order
-PAGE_DELAY = 0.4      # simulated corporate-network latency per request
-
-# root 100 → 30 children (101..130) → grandchild 200 under 101
-PAGES = {"100": ("Release Handbook",
-                 ("<h1>Approvals</h1><p>Every production release requires sign-off "
-                 "from the Change Advisory Board.</p>"))}
-CHILDREN = {"100": [str(i) for i in range(101, 131)], "101": ["200"]}
-for i in range(101, 131):
-    PAGES[str(i)] = (f"Team {i} notes",
-                     f"<h2>Overview</h2><p>Team {i} owns service number {i}.</p>")
-PAGES["200"] = ("Deploy Windows",
-                ("<h2>Schedule</h2><p>Production deploys happen only on Thursdays "
-                "after 18:00.</p><table><tr><th>Env</th><th>Day</th></tr>"
-                "<tr><td>prod</td><td>Thursday</td></tr></table>"
-                '<ac:structured-macro ac:name="info"><ac:rich-text-body>'
-                "<p>The maintenance freeze runs from December 20 to January 5."
-                "</p></ac:rich-text-body></ac:structured-macro>"))
 
 
-class FakeDC(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
-
-    def _json(self, code, body):
-        data = json.dumps(body).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def do_GET(self):
-        time.sleep(PAGE_DELAY)
-        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
-            return self._json(401, {})
-        path = self.path.split("?")[0].rstrip("/")
-        if path == "/rest/api/user/current":
-            return self._json(200, {"username": "e2e", "displayName": "E2E User"})
-        parts = path.split("/")
-        if len(parts) >= 5 and parts[1:4] == ["rest", "api", "content"]:
-            pid = parts[4]
-            if path.endswith("/child/page"):
-                kids = CHILDREN.get(pid, [])
-                return self._json(200, {"results": [{"id": k} for k in kids],
-                                        "size": len(kids), "limit": 200})
-            if pid in PAGES:
-                title, body = PAGES[pid]
-                anc = [] if pid == "100" else (["100", "101"] if pid == "200" else ["100"])
-                return self._json(200, {
-                    "id": pid, "title": title, "version": {"number": 1},
-                    "body": {"storage": {"value": body}},
-                    "ancestors": [{"id": a} for a in anc],
-                    "_links": {"webui": f"/pages/viewpage.action?pageId={pid}",
-                               "base": f"http://127.0.0.1:{self.server.server_port}"}})
-        return self._json(404, {})
-
-
-def check(cond, msg, detail=None):
-    print(("PASS " if cond else "FAIL ") + msg + ("" if cond or detail is None else f"\n  got: {detail}"))
-    if not cond:
-        os._exit(1)  # skip the client's teardown traceback noise
-
-
-async def call(session, name, args=None):
-    t = time.monotonic()
-    r = await session.call_tool(name, args or {},
-                                read_timeout_seconds=timedelta(seconds=REQUEST_TIMEOUT))
-    dt = time.monotonic() - t
-    text = r.content[0].text if r.content else ""
-    if r.isError:
-        raise SystemExit(f"FAIL {name} returned an error after {dt:.1f}s: {text}")
-    print(f"  {name:<17} {dt:5.1f}s")
-    return json.loads(text)
 
 
 async def main() -> None:
@@ -108,9 +35,7 @@ async def main() -> None:
     if not (home / "models" / "all-MiniLM-L6-v2").exists():
         raise SystemExit("prepare models first: CONF_KNOWLEDGE_HOME=<dir> "
                          "confluence-knowledge prepare-models")
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), FakeDC)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{srv.server_port}"
+    srv, base, _hits = serve()
     (home / "profile.json").write_text(json.dumps(
         {"env": "datacenter", "base_url": base, "email": None, "credential_ref": "e2e"}))
     work = Path(tempfile.mkdtemp(prefix="ck-e2e-work-")).resolve()
