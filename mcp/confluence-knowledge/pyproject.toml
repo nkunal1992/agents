@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "confluence-knowledge"
-version = "0.3.1"
+version = "0.4.0"
 description = "Local, GET-only Confluence subtree indexer + grounded-Q&A MCP service"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,6 +33,12 @@ Issues = "https://github.com/nkunal1992/agents/issues"
 models = [
     "sentence-transformers>=3.0,<4.0",
     "huggingface-hub>=0.26",
+]
+files = [
+    "python-docx>=1.1",
+    "pypdf>=4.0",
+    "python-pptx>=1.0",
+    "openpyxl>=3.1",
 ]
 dev = [
     "pytest>=8.0",

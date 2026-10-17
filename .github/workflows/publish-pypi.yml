@@ -1,24 +1,32 @@
 name: publish-pypi
 on:
   push:
-    tags: ["confluence-knowledge-v*"]
+    tags: ["confluence-knowledge-v*", "local-knowledge-v*", "sharepoint-knowledge-v*"]
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # trusted publishing (preferred) — falls back to secret token
+      id-token: write  # trusted publishing — falls back to secret token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install build && python -m build mcp/confluence-knowledge
+      # tag <pkg>-vX.Y.Z → package dir mcp/<pkg>
+      - name: Pick the package dir from the tag
+        id: pkg
+        run: |
+          name="${GITHUB_REF_NAME%-v*}"
+          echo "dir=${name}" >> "$GITHUB_OUTPUT"
+          echo "building mcp/${name}"
+      - name: build dists
+        run: pip install build && python -m build "mcp/${{ steps.pkg.outputs.dir }}"
       - uses: pypa/gh-action-pypi-publish@release/v1
         # API-token auth: PYPI_API_TOKEN repository secret on GitHub.
-        # (Trusted publishing would work too — PyPI project settings →
-        #  Publishing — but passing the secret is explicit and one less setup.)
+        # (Trusted publishing works too — PyPI project → Publishing — but the
+        #  secret is explicit and needs no per-project setup.)
         with:
-          packages-dir: mcp/confluence-knowledge/dist/
+          packages-dir: "mcp/${{ steps.pkg.outputs.dir }}/dist/"
           password: ${{ secrets.PYPI_API_TOKEN }}

@@ -16,15 +16,17 @@ from pathlib import Path
 from .settings import SetupError
 
 SERVER_ID = "confluence-knowledge"
+SERVER_MODULE = "confluence_knowledge.server"
+WORKDIR_ENV = "CONF_KNOWLEDGE_WORKDIR"
 
 
-def _server_entry(workdir: Path | None) -> dict:
+def _server_entry(workdir: Path | None, module: str, env_var: str) -> dict:
     entry = {
         "command": sys.executable,  # the venv python — no PATH guessing
-        "args": ["-m", "confluence_knowledge.server"],
+        "args": ["-m", module],
     }
     if workdir is not None:
-        entry["env"] = {"CONF_KNOWLEDGE_WORKDIR": str(workdir)}
+        entry["env"] = {env_var: str(workdir)}
     return entry
 
 
@@ -78,8 +80,8 @@ def targets(ide: str = "auto", workspace: Path | None = None) -> list[Path]:
     return dedup
 
 
-def _merge(path: Path, entry: dict | None) -> str:
-    """Write `entry` under servers[SERVER_ID], or remove it when None.
+def _merge(path: Path, entry: dict | None, server_id: str = SERVER_ID) -> str:
+    """Write `entry` under servers[server_id], or remove it when None.
 
     Merges with existing JSON; backs up before overwriting. A file that isn't
     parseable (JSONC comments etc.) is backed up and replaced — the agent
@@ -97,10 +99,10 @@ def _merge(path: Path, entry: dict | None) -> str:
         shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
     servers = data.setdefault("servers", {})
     if entry is None:
-        servers.pop(SERVER_ID, None)
+        servers.pop(server_id, None)
         action = "removed"
     else:
-        servers[SERVER_ID] = entry
+        servers[server_id] = entry
         action = "backup-replaced" if replaced else "written"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")
@@ -109,7 +111,9 @@ def _merge(path: Path, entry: dict | None) -> str:
 
 
 def register(ide: str = "auto", workspace: Path | None = None,
-             workdir: Path | None = None, remove: bool = False) -> list[tuple[Path, str]]:
+             workdir: Path | None = None, remove: bool = False,
+             server_id: str = SERVER_ID, module: str = SERVER_MODULE,
+             env_var: str = WORKDIR_ENV) -> list[tuple[Path, str]]:
     """Write/remove our server entry in each target. Returns (path, action)."""
     if ide not in ("auto", "all", "vscode", "jetbrains"):
         raise SetupError(f"unknown --ide '{ide}' (auto|all|vscode|jetbrains)")
@@ -117,11 +121,11 @@ def register(ide: str = "auto", workspace: Path | None = None,
     if not files:
         raise SetupError("no IDE config locations found — no Copilot/JetBrains "
                          "or VS Code profile detected")
-    entry = None if remove else _server_entry(workdir)
-    return [(f, _merge(f, entry)) for f in files]
+    entry = None if remove else _server_entry(workdir, module, env_var)
+    return [(f, _merge(f, entry, server_id)) for f in files]
 
 
-def registered_paths() -> list[Path]:
+def registered_paths(server_id: str = SERVER_ID) -> list[Path]:
     """Existing config files that already contain our server — for doctor."""
     out = []
     for p in targets("all"):
@@ -129,6 +133,6 @@ def registered_paths() -> list[Path]:
             servers = json.loads(p.read_text()).get("servers", {})
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
-        if p.exists() and SERVER_ID in servers:
+        if p.exists() and server_id in servers:
             out.append(p)
     return out

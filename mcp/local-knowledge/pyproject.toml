@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-knowledge"
+version = "0.1.0"
+description = "Local file/folder indexer + grounded-Q&A MCP service — same engine as confluence-knowledge, no credentials needed"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+classifiers = [
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "confluence-knowledge>=0.4.0",
+    "python-docx>=1.1",
+    "pypdf>=4.0",
+    "python-pptx>=1.0",
+    "openpyxl>=3.1",
+    "mcp>=1.6,<2",
+    "pip-system-certs>=5.0",
+]
+
+[project.optional-dependencies]
+models = [
+    "confluence-knowledge[models]>=0.4.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Repository = "https://github.com/nkunal1992/agents"
+Documentation = "https://github.com/nkunal1992/agents/blob/main/docs/local-knowledge.md"
+Issues = "https://github.com/nkunal1992/agents/issues"
+
+[project.scripts]
+local-knowledge = "local_knowledge.cli_local:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110

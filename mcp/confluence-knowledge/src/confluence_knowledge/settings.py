@@ -23,25 +23,28 @@ class SetupError(RuntimeError):
     """A problem the user can fix via setup instructions."""
 
 
-def default_home() -> Path:
-    env = os.environ.get("CONF_KNOWLEDGE_HOME")
+def default_home(env_var: str = "CONF_KNOWLEDGE_HOME",
+                 dir_name: str = ".confluence-knowledge") -> Path:
+    env = os.environ.get(env_var)
     if env:
         return Path(env).expanduser().resolve()
-    return (Path.home() / ".confluence-knowledge").resolve()
+    return (Path.home() / dir_name).resolve()
 
 
-def resolve_workdir() -> Path:
+def resolve_workdir(env_var: str = "CONF_KNOWLEDGE_WORKDIR",
+                    home_env: str = "CONF_KNOWLEDGE_HOME",
+                    home_dir: str = ".confluence-knowledge") -> Path:
     """Folder for the index and the file-fallback credential, shared by the CLI
-    and the server. CONF_KNOWLEDGE_WORKDIR wins; otherwise a per-user folder,
-    never the process cwd (IDEs start servers from read-only install dirs)."""
-    env = os.environ.get("CONF_KNOWLEDGE_WORKDIR")
+    and the server. The env var wins; otherwise a per-user folder, never the
+    process cwd (IDEs start servers from read-only install dirs)."""
+    env = os.environ.get(env_var)
     if env:
         return Path(env).expanduser().resolve()
-    return default_home() / "work"
+    return default_home(home_env, home_dir) / "work"
 
 
-def workspace_index_root(workdir: Path) -> Path:
-    return workdir / INDEX_DIR_NAME
+def workspace_index_root(workdir: Path, index_dir: str = INDEX_DIR_NAME) -> Path:
+    return workdir / index_dir
 
 
 def _is_windows() -> bool:
@@ -63,7 +66,9 @@ def reject_unsafe_path(path: Path) -> Path:
     return resolved
 
 
-def ensure_gitignore(path: Path, entries: list[str]) -> None:
+def ensure_gitignore(path: Path, entries: list[str],
+                     protected: tuple[str, ...] = (AUTH_FILE_NAME,
+                                                 INDEX_DIR_NAME)) -> None:
     """Append ignore entries before any secret/cache write. Idempotent.
 
     Raises SetupError if a protected path is already tracked by git.
@@ -76,13 +81,13 @@ def ensure_gitignore(path: Path, entries: list[str]) -> None:
             for e in missing:
                 f.write(("\n" if existing else "") + e + "\n")
             existing.update(missing)
-    _assert_not_tracked(path)
+    _assert_not_tracked(path, protected)
 
 
-def _assert_not_tracked(workdir: Path) -> None:
+def _assert_not_tracked(workdir: Path, protected: tuple[str, ...]) -> None:
     import subprocess
 
-    for rel in (AUTH_FILE_NAME, INDEX_DIR_NAME):
+    for rel in protected:
         try:
             r = subprocess.run(
                 ["git", "-C", str(workdir), "ls-files", "--error-unmatch", rel],

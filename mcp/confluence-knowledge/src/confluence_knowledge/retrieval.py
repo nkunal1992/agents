@@ -27,20 +27,20 @@ def _models_dir(home: Path) -> Path:
     return home / "models"
 
 
-def _load_sentence_transformer(model_key: str, home: Path):
+def _load_sentence_transformer(model_key: str, home: Path,
+                               cli: str = "confluence-knowledge"):
     """Local-only model load — fails closed if artifacts aren't prepared."""
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as e:
         raise SetupError(
-            "sentence-transformers isn't installed — run "
-            "`confluence-knowledge prepare-models` (see docs/confluence-knowledge.md)"
+            f"sentence-transformers isn't installed — run `{cli} prepare-models`"
         ) from e
     local = _models_dir(home) / model_key.split("/")[-1]
     if not local.exists():
         raise SetupError(
             f"local model '{model_key}' not prepared — run "
-            "`confluence-knowledge prepare-models`. Cloud embeddings are never used."
+            f"`{cli} prepare-models`. Cloud embeddings are never used."
         )
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -51,8 +51,8 @@ def _load_sentence_transformer(model_key: str, home: Path):
 
 
 class LocalEmbedder:
-    def __init__(self, home: Path):
-        self._m = _load_sentence_transformer(EMBED_MODEL, home)
+    def __init__(self, home: Path, cli: str = "confluence-knowledge"):
+        self._m = _load_sentence_transformer(EMBED_MODEL, home, cli)
 
     def embed(self, texts: list[str]) -> np.ndarray:
         v = self._m.encode(texts, convert_to_numpy=True, normalize_embeddings=True,
@@ -61,19 +61,18 @@ class LocalEmbedder:
 
 
 class LocalReranker:
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, cli: str = "confluence-knowledge"):
         try:
             from sentence_transformers import CrossEncoder
         except ImportError as e:
             raise SetupError(
-                "sentence-transformers isn't installed — run "
-                "`confluence-knowledge prepare-models`"
+                f"sentence-transformers isn't installed — run `{cli} prepare-models`"
             ) from e
         local = _models_dir(home) / RERANK_MODEL.split("/")[-1]
         if not local.exists():
             raise SetupError(
                 f"local reranker '{RERANK_MODEL}' not prepared — run "
-                "`confluence-knowledge prepare-models`.")
+                f"`{cli} prepare-models`.")
         self._m = CrossEncoder(str(local), device="cpu",
                                trust_remote_code=False)
 

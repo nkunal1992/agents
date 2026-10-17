@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/local_knowledge/__init__.py
+src/local_knowledge/cli_local.py
+src/local_knowledge/crawl_local.py
+src/local_knowledge/server_local.py
+src/local_knowledge/settings_local.py
+src/local_knowledge.egg-info/PKG-INFO
+src/local_knowledge.egg-info/SOURCES.txt
+src/local_knowledge.egg-info/dependency_links.txt
+src/local_knowledge.egg-info/entry_points.txt
+src/local_knowledge.egg-info/requires.txt
+src/local_knowledge.egg-info/top_level.txt
+tests/test_crawl_local.py
+tests/test_extract_files.py
+tests/test_server_flow_local.py

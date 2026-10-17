@@ -1,0 +1,32 @@
+name: local-knowledge
+
+on:
+  push:
+    paths: ["mcp/local-knowledge/**", "mcp/confluence-knowledge/src/**",
+            ".github/workflows/local-knowledge.yml"]
+  pull_request:
+    paths: ["mcp/local-knowledge/**", "mcp/confluence-knowledge/src/**",
+            ".github/workflows/local-knowledge.yml"]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install engine + package + dev deps
+        run: |
+          pip install -e './mcp/confluence-knowledge[dev]'
+          pip install -e './mcp/local-knowledge[dev]'
+      - name: Lint
+        run: ruff check mcp/local-knowledge/src mcp/local-knowledge/tests
+      - name: Unit tests (offline — no models, no network)
+        run: pytest mcp/local-knowledge/tests -q
+      - name: CLI smoke
+        run: local-knowledge --help >/dev/null

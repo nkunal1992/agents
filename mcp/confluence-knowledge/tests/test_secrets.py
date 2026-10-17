@@ -9,7 +9,7 @@ from confluence_knowledge.settings import AUTH_FILE_NAME
 
 def test_gitignore_written_before_secret(tmp_path, monkeypatch):
     from confluence_knowledge import auth
-    monkeypatch.setattr(auth, "_keyring_store", lambda r, s: False)
+    monkeypatch.setattr(auth, "_keyring_store", lambda r, s, service=None: False)
     where = store_credential(tmp_path, tmp_path / "home", "ref1", "tok_ABC123")
     gi = (tmp_path / ".gitignore").read_text()
     assert AUTH_FILE_NAME in gi and ".conf_knowledge_index/" in gi
@@ -19,7 +19,7 @@ def test_gitignore_written_before_secret(tmp_path, monkeypatch):
 def test_secret_file_permissions(tmp_path, monkeypatch):
     # force file fallback: make keyring unusable
     from confluence_knowledge import auth
-    monkeypatch.setattr(auth, "_keyring_store", lambda r, s: False)
+    monkeypatch.setattr(auth, "_keyring_store", lambda r, s, service=None: False)
     store_credential(tmp_path, tmp_path / "home", "ref1", "tok_ABC123")
     if os.name != "nt":
         mode = (tmp_path / AUTH_FILE_NAME).stat().st_mode

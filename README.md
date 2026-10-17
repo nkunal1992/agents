@@ -31,6 +31,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [architecture-mapper](agents/architecture-mapper.agent.md) | Maps repo/package architecture into mermaid diagrams + a self-contained explainer site — [guide](docs/architecture-mapper.md) |
 | [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
 | [confluence-knowledge](agents/confluence-knowledge.agent.md) | Single-file grounded Q&A over one Confluence page + its descendant pages — self-installs its local MCP service on first run (bundled zip available via `scripts/bundle-confluence.sh`), per-claim citations, explicit "not documented" refusals — [guide](docs/confluence-knowledge.md) |
+| [local-knowledge](agents/local-knowledge.agent.md) | Same engine pointed at a local file or folder — docx/pdf/pptx/xlsx/csv/md/txt/html, `file://` citations, secret-looking files excluded + disclosed, no credentials at all — [guide](docs/local-knowledge.md) |
 
 ## What each agent does — and why it matters at work
 
@@ -141,6 +142,20 @@ the service, credentials in the OS keyring, subtree access rechecked on every
 refresh. *Try:* `/confluence-ask` · [guide](docs/confluence-knowledge.md)
 *Tradeoff to know:* the file carries `execute`/`edit` for first-run install —
 bootstrap commands are whitelisted, and Q&A mode never uses them.
+
+### local-knowledge
+The same self-installing engine pointed at a **file or folder** instead of
+Confluence — `connect` takes either and detects which. docx/pdf/pptx/xlsx/
+csv/md/txt/html are parsed locally (shared `extract_files` module), indexed
+into the same SQLite + FTS5 + vector store, and answered with `file://`
+citations. There is **no credential step at all** — the filesystem is the
+ACL. Secret-looking files (`.env`, `id_rsa`, `*.pem`, `credentials*`…) are
+skipped and disclosed as warnings rather than indexed; symlinks escaping the
+root are refused; the service is read-only on the filesystem.
+*Why:* "what's in this folder of policies/runbooks/specs?" is a question
+every org asks — this answers it with the same citations-and-refusal
+guarantees, and nothing needs a server or a token.
+*Try:* `/local-ask` · [guide](docs/local-knowledge.md)
 
 ## Usage
 
