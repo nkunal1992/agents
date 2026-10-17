@@ -46,6 +46,12 @@ case "$NAME" in
     PROMPTS=(local-ask local-refresh)
     README_SRC="bundle/local-README.md"
     ;;
+  sharepoint)
+    SERVER_MODULE="sharepoint_knowledge.server_sp"
+    ENV_VAR="SP_KNOWLEDGE_WORKDIR"
+    PROMPTS=(sharepoint-ask sharepoint-refresh)
+    README_SRC="bundle/sharepoint-README.md"
+    ;;
   *)
     echo "no bundler config for '$NAME' — add a case block" >&2; exit 1 ;;
 esac

@@ -1,0 +1,2 @@
+[console_scripts]
+sharepoint-knowledge = sharepoint_knowledge.cli_sp:main

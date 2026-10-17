@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: local-knowledge
-Version: 0.1.0
+Version: 0.1.1
 Summary: Local file/folder indexer + grounded-Q&A MCP service — same engine as confluence-knowledge, no credentials needed
 License: MIT
 Project-URL: Repository, https://github.com/nkunal1992/agents

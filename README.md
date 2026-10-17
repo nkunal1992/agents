@@ -32,6 +32,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
 | [confluence-knowledge](agents/confluence-knowledge.agent.md) | Single-file grounded Q&A over one Confluence page + its descendant pages — self-installs its local MCP service on first run (bundled zip available via `scripts/bundle-confluence.sh`), per-claim citations, explicit "not documented" refusals — [guide](docs/confluence-knowledge.md) |
 | [local-knowledge](agents/local-knowledge.agent.md) | Same engine pointed at a local file or folder — docx/pdf/pptx/xlsx/csv/md/txt/html, `file://` citations, secret-looking files excluded + disclosed, no credentials at all — [guide](docs/local-knowledge.md) |
+| [sharepoint-knowledge](agents/sharepoint-knowledge.agent.md) | Grounded Q&A over a SharePoint site, library, or folder — Site Pages + document libraries, Entra device-code sign-in (delegated `Sites.Read.All`), GET-only Graph client — [guide](docs/sharepoint-knowledge.md) |
 
 ## What each agent does — and why it matters at work
 
@@ -156,6 +157,23 @@ root are refused; the service is read-only on the filesystem.
 every org asks — this answers it with the same citations-and-refusal
 guarantees, and nothing needs a server or a token.
 *Try:* `/local-ask` · [guide](docs/local-knowledge.md)
+
+### sharepoint-knowledge
+The same engine pointed at SharePoint Online — a site URL indexes its Site
+Pages **and every document library**, a library/folder URL just that subtree.
+Site-page canvas HTML and file downloads (docx/pdf/pptx/xlsx…) flow through
+the same extraction/index/retrieval pipeline. Sign-in is Entra **device
+code** — delegated `Sites.Read.All` only, so the index can never contain
+more than the signed-in user could already read, and there are no PATs or
+secrets to rotate (token cache lives in the OS keyring). The Graph client is
+GET-only with an endpoint allowlist; downloads go through Microsoft's own
+pre-signed `downloadUrl` so the bearer never leaves `graph.microsoft.com`.
+*Why:* SharePoint is where most enterprises keep their real documentation —
+this answers "what does our site say about X" with the same verified
+citations, while staying inside the org's existing permission model.
+*Enterprise gate:* the Entra app registration needs IT once per tenant —
+`setup` prints the exact steps. *Try:* `/sharepoint-ask` ·
+[guide](docs/sharepoint-knowledge.md)
 
 ## Usage
 
