@@ -171,8 +171,9 @@ def main() -> None:
             return
         r = subprocess.run(cmd, check=False)
         if r.returncode == 0:
-            print("\nupdated — models are pinned and unchanged; "
-                  "run `confluence-knowledge doctor` to confirm")
+            print("\nupdated — run `confluence-knowledge prepare-models` "
+                  "(new releases may pin new model artifacts) then "
+                  "`confluence-knowledge doctor`")
         sys.exit(r.returncode)
     if args.cmd == "register":
         from .registration import register

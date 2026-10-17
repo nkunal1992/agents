@@ -32,11 +32,15 @@ def resolve_root(path: str) -> Path:
     return p.resolve()
 
 
+from confluence_knowledge.retrieval import EMBED_MODEL_ID as _MODEL_ID
+
+
 class LocalCrawler:
-    def __init__(self, index: Index, root: Path, embedder=None):
+    def __init__(self, index: Index, root: Path, embedder=None, sparse=None):
         self.index = index
         self.root = root      # realpath — everything indexed must live under it
         self.embedder = embedder
+        self.sparse = sparse
 
     def start(self) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -176,21 +180,24 @@ class LocalCrawler:
                 continue
             for c in chunks:
                 c.chunk_id = f"{rel}:{page['content_hash'][:8]}:{c.ordinal}"
-            vecs = None
+            vecs, sparse_vecs = None, None
             if self.embedder is not None and chunks:
-                vecs = self.embedder.embed(
-                    [f"{c.heading_path}\n{c.text}" for c in chunks])
+                texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+                vecs = self.embedder.embed(texts)
+                if self.sparse is not None:
+                    sparse_vecs = self.sparse.embed(texts)
             self.index.upsert_page({
                 "page_id": rel, "parent_id": None, "title": page["title"],
                 "url": page["url"], "level": levels.get(rel, path_s.count("/")),
                 "version": page["version"], "content_hash": page["content_hash"],
-                "warnings": page["warnings"]}, chunks, vecs)
+                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs)
             seen.add(rel)
 
         # persist final seen/levels/warns too — the in-loop checkpoint runs
         # before each item is processed, so the last item would undercount
         self._checkpoint(job_id, queue, errors, seen, levels, warns)
         self.index.publish(seen)
+        self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             queue, errors)
         return {"job_id": job_id,

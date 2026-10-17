@@ -70,7 +70,7 @@ Refresh = same URL again; changed items update, deleted items drop out.
 | sign-in fails "admin consent required" | IT grants consent on the app registration — not user-fixable |
 | `device code` never appears | "Allow public client flows" isn't enabled on the app |
 | a page/folder missing from answers | the signed-in user can't see it either, or it was skipped — check crawl warnings |
-| ARM64 Windows | install the x64 python.org build; torch lacks win-arm64 wheels |
+| any Windows | models run on ONNX Runtime — no torch needed, ARM64 included |
 
 ## Uninstall
 

@@ -25,6 +25,11 @@ class FakeReranker:
         return np.arange(len(docs), dtype=np.float32)[::-1]
 
 
+class FakeSparse:
+    def embed(self, texts):
+        return [{} for _ in texts]
+
+
 @pytest.fixture()
 def sp_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SP_KNOWLEDGE_HOME", str(tmp_path / "home"))
@@ -40,6 +45,7 @@ def sp_env(tmp_path, monkeypatch):
 
     server_sp._EMBEDDER = FakeEmbedder()
     server_sp._RERANKER = FakeReranker()
+    server_sp._SPARSE = FakeSparse()
     server_sp._models_ready.set()
 
     # the real client goes through httpx — replace it with the fake

@@ -47,8 +47,8 @@ or replacing search when you just need a filename.
 3. First use: the agent installs the service itself — bundled `service/` →
    bundled `.whl` → `pip install local-knowledge[models]` (PyPI or your
    internal mirror) → asks where the zip was extracted, in that order.
-4. One reload — done. `prepare-models` fetches two small Apache-2.0 models
-   (~175 MB) into `~/.local-knowledge/models/`.
+4. One reload — done. `prepare-models` fetches the ONNX models (~1.3 GB, MIT/Apache-2.0)
+   (~1.3 GB) into `~/.local-knowledge/models/`.
 
 Install sources, in the order the agent tries them: `service/` source → the
 bundled `local_knowledge-*.whl` → `pip install local-knowledge[models]` → a
@@ -79,7 +79,7 @@ the same command; changed files update, deleted files drop out.
 | `local-knowledge/*` tools missing | run bootstrap — the agent does it, or Manual Setup in the agent file |
 | models not ready | `…/venv/bin/local-knowledge prepare-models` (or `…\Scripts\` on Windows) |
 | a file isn't found in answers | check crawl `warnings` — it was skipped (unsupported type / secret-looking / too large) |
-| ARM64 Windows | install the x64 python.org build; torch lacks win-arm64 wheels |
+| any Windows | models run on ONNX Runtime — no torch needed, ARM64 included |
 
 ## Uninstall
 

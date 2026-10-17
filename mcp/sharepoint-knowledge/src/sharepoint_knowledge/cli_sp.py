@@ -84,7 +84,7 @@ def _setup() -> int:
     ensure_gitignore(workdir(), [AUTH_FILE_NAME,
                                  f"{INDEX_DIR_NAME}/"])
 
-    if input("\nDownload the two local models now (~175 MB, one-time)? "
+    if input("\nDownload the local models now (~1.3 GB, one-time)? "
              "[Y/n] ").strip().lower() not in ("n", "no"):
         for line in prepare_models(home()):
             print(line)
@@ -152,8 +152,9 @@ def main() -> None:
             return
         r = subprocess.run(cmd, check=False)
         if r.returncode == 0:
-            print("\nupdated — models are pinned and unchanged; "
-                  "run `sharepoint-knowledge doctor` to confirm")
+            print("\nupdated — run `sharepoint-knowledge prepare-models` "
+                  "(new releases may pin new model artifacts) then "
+                  "`sharepoint-knowledge doctor`")
         sys.exit(r.returncode)
     if args.cmd == "register":
         results = _register(

@@ -32,7 +32,7 @@ REQUEST_TIMEOUT = 20  # seconds; IDE clients time out around this order
 
 async def main() -> None:
     home = Path(os.environ.get("CONF_KNOWLEDGE_HOME", "")).expanduser()
-    if not (home / "models" / "all-MiniLM-L6-v2").exists():
+    if not (home / "models" / "bge-m3").exists():
         raise SystemExit("prepare models first: CONF_KNOWLEDGE_HOME=<dir> "
                          "confluence-knowledge prepare-models")
     srv, base, _hits = serve()

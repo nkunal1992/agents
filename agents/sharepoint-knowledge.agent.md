@@ -34,7 +34,7 @@ first-run installation.
 
 Announce: "The SharePoint service isn't responding — checking whether it's
 already installed. If not, I'll install it: create a virtual environment,
-install the service, download two small local models, and register the IDE
+install the service, download the local models (~1.3 GB once), and register the IDE
 config — then you'll do a one-time Entra sign-in in your own terminal and
 reload once." Then run the steps below end-to-end.
 
@@ -138,7 +138,9 @@ python3 -m venv ~/.sharepoint-knowledge/venv
    Callable but sign-in expired → user re-runs `setup` (device code, once).
 2. **Connect.** Ask for the URL — a site (`https://tenant.sharepoint.com/
    sites/name` → pages + all libraries) or a library/folder path inside it.
-   Call `connect`; report the cache status.
+   Call `connect`; report the cache status. If `stale_model` is true, tell
+   the user the index needs one rebuild after a model upgrade and run
+   `start_crawl` — search refuses on stale indexes.
 3. **Freshness nudge.** `cached` true → "I found a previously cached index
    of this scope from `<cached_as_of>`. Use it, or refresh first?" — wait.
 4. **Crawl.** `start_crawl` → **background crawl**; poll `crawl_step` every

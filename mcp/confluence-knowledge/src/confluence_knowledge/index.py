@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   chunk_id TEXT PRIMARY KEY, page_id TEXT, heading TEXT, kind TEXT,
   ordinal INTEGER, text TEXT, active INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS vectors (chunk_id TEXT PRIMARY KEY, vec BLOB);
+CREATE TABLE IF NOT EXISTS sparse_vectors (chunk_id TEXT PRIMARY KEY, payload BLOB);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   chunk_id UNINDEXED, text);
 CREATE TABLE IF NOT EXISTS jobs (
@@ -110,7 +111,8 @@ class Index:
                 "errors": job["errors"]}
 
     # ---- content ----
-    def upsert_page(self, page: dict, chunks: list, vecs: np.ndarray | None) -> None:
+    def upsert_page(self, page: dict, chunks: list, vecs: np.ndarray | None,
+                    sparse: list[dict[int, float]] | None = None) -> None:
         with self.lock, self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO pages VALUES (?,?,?,?,?,?,?,?,?,0)",
@@ -123,6 +125,7 @@ class Index:
             for cid in old:
                 self.db.execute("DELETE FROM chunks_fts WHERE chunk_id=?", (cid,))
                 self.db.execute("DELETE FROM vectors WHERE chunk_id=?", (cid,))
+                self.db.execute("DELETE FROM sparse_vectors WHERE chunk_id=?", (cid,))
             self.db.execute("DELETE FROM chunks WHERE page_id=?", (page["page_id"],))
             for i, c in enumerate(chunks):
                 self.db.execute(
@@ -134,6 +137,37 @@ class Index:
                     self.db.execute(
                         "INSERT INTO vectors VALUES (?,?)",
                         (c.chunk_id, vecs[i].astype(np.float32).tobytes()))
+                if sparse is not None and i < len(sparse) and sparse[i]:
+                    idx_arr = np.fromiter(sparse[i].keys(), dtype=np.int32)
+                    val_arr = np.fromiter(sparse[i].values(), dtype=np.float32)
+                    self.db.execute(
+                        "INSERT INTO sparse_vectors VALUES (?,?)",
+                        (c.chunk_id,
+                         idx_arr.tobytes() + val_arr.tobytes()))
+
+    def sparse_for(self, chunk_ids: list[str]) -> dict[str, dict[int, float]]:
+        if not chunk_ids:
+            return {}
+        q = ",".join("?" * len(chunk_ids))
+        out = {}
+        with self.lock:
+            for cid, blob in self.db.execute(
+                    f"SELECT chunk_id,payload FROM sparse_vectors "
+                    f"WHERE chunk_id IN ({q})", chunk_ids):
+                # layout: int32[n] indices + float32[n] values → n = len/8
+                k = len(blob) // 8
+                idx = np.frombuffer(blob[:4 * k], dtype=np.int32)
+                vals = np.frombuffer(blob[4 * k:], dtype=np.float32)
+                out[cid] = dict(zip(idx.tolist(), vals.tolist()))
+        return out
+
+    def model_id(self) -> str | None:
+        return self.meta_get("embed_model")
+
+    def set_model_id(self, model_id: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('embed_model', ?)",
+                            (model_id,))
 
     def publish(self, seen_page_ids: set[str]) -> None:
         """Atomically make exactly the crawled page set the active snapshot."""

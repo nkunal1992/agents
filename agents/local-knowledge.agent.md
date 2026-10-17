@@ -31,7 +31,7 @@ first-run installation.
 
 Announce: "The local-knowledge service isn't responding — checking whether
 it's already installed. If not, I'll install it: create a virtual
-environment, install the service, download two small local models, and
+environment, install the service, download the local models (~1.3 GB once), and
 register the IDE config — then reload once. **No credentials needed.**"
 Then run the steps below end-to-end without pausing.
 
@@ -146,7 +146,9 @@ accounts — the entire install is local files + models.
 1. **Status.** Call `local-knowledge/status`. Not callable → bootstrap mode.
    Callable but models missing → run `prepare-models` (or tell the user to).
 2. **Connect.** Ask for the path if not supplied — a file OR a folder, either
-   works. Call `connect`. Report the cache status it returns.
+   works. Call `connect`. Report the cache status it returns. If
+   `stale_model` is true, tell the user the index needs one rebuild after a
+   model upgrade and run `start_crawl` — search refuses on stale indexes.
 3. **Freshness nudge.** If `cached` is true:
    "I found a previously cached index of this path from `<cached_as_of>`.
    I will use this to answer your question. Would you like me to refresh it

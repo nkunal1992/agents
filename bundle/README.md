@@ -83,7 +83,7 @@ Manual install (if preferred):
 ```powershell
 py -m venv %USERPROFILE%\.confluence-knowledge\venv           # python3 -m venv ~/.confluence-knowledge/venv on macOS/Linux
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\python -m pip install "C:\path\to\service[models]"
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~175 MB, Apache-2.0 models
+%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~1.3 GB, MIT/Apache-2.0 ONNX models
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe setup            # env + site URL + PAT (hidden input)
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
 ```
@@ -130,8 +130,8 @@ cache instantly; ask it to refresh whenever docs change.
 
 ## Requirements
 
-- Python ≥ 3.11 (any platform — Windows/macOS/Linux; on ARM64 Windows use the
-  x64 Python build so the model dependencies have wheels)
+- Python ≥ 3.11 (any platform — Windows/macOS/Linux; on ARM64 Windows any
+  Python build works — models run on ONNX Runtime, no torch)
 - GitHub Copilot with agent + MCP support (VS Code or JetBrains)
 - A Confluence read token: **Data Center** — Personal Access Token
   (profile → Settings → Personal Access Tokens); **Cloud** — API token from
@@ -171,7 +171,7 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
 | "loading local models" | First call per session warms the models; retry the tool call |
 | `no stored token` | Run `confluence-knowledge setup` in your own terminal |
 | Two `python.exe` processes on Windows | Normal — a venv `python.exe` is a launcher that starts the base interpreter as its child |
-| Model download blocked | Copy `all-MiniLM-L6-v2/` and `ms-marco-MiniLM-L6-v2/` into `~/.confluence-knowledge/models/` from a colleague or mirror |
+| Model download blocked | Copy the `bge-m3`, `bge-reranker-v2-m3-ONNX`, and `fastembed` dirs into `~/.confluence-knowledge/models/` from a colleague or mirror |
 
 `confluence-knowledge doctor` is the first diagnostic — it checks config,
 credentials, models and the connection in one shot.

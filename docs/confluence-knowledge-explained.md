@@ -57,14 +57,14 @@ plain RAG fails in a predictable way:
 | **Coverage + freshness reporting** | Every answer states how many pages were indexed, when, and which were unreachable | Users know *which book* the open-book exam used — and whether some pages were missing. |
 | **Scoped indexes** | Each root page gets its own index partition | Questions about one space never leak into another; refresh of one scope doesn't touch the rest. |
 | **Resumable crawl** | The index queue/checkpoints live in the DB; an interrupted crawl resumes | Real corporate trees have hundreds of pages and flaky networks — losing everything at page 400 of 500 is unacceptable. |
-| **Local-only models** | Embeddings + reranker run on-device | The text never leaves the laptop; no per-call cost; works fully offline after a one-time ~175 MB download. |
+| **Local-only models** | Embeddings + reranker run on-device | The text never leaves the laptop; no per-call cost; works fully offline after a one-time ~1.3 GB download. |
 
 ## The steps, in order — what each does and why
 
 ### 1. Bootstrap & registration (`setup`, `register`, `doctor`)
 
 **What:** on first use the agent installs a small local service (a Python
-program that does the crawling and searching), downloads two small AI models,
+program that does the crawling and searching), downloads the local AI models (ONNX — no GPU needed),
 stores your Confluence token in the OS credential store, and writes the IDE's
 config file itself.
 
@@ -124,7 +124,7 @@ because it slices mid-sentence and loses which section a chunk came from.
 ### 5. Embed & index
 
 **What:** every chunk is turned into a vector (a list of numbers that encodes
-its meaning) by a small local model (`all-MiniLM-L6-v2`, ~90 MB). Vectors go
+its meaning) by a local ONNX model (`bge-m3`, quantized). Vectors go
 into SQLite alongside a full-text (keyword) index. When a crawl finishes, the
 new set of pages is "published" atomically — a half-finished refresh never
 clobbers the last good index.
@@ -166,7 +166,7 @@ trust at the exact point users care about.
 - **Zero inference cost per question** — the models run on the laptop; there
   are no paid API calls for embeddings, reranking, or generation of the index.
 - **No infrastructure** — no server, no database, no shared platform to run.
-  Costs = one venv, ~175 MB of models, ~300 MB of disk.
+  Costs = one venv, ~1.3 GB of models, ~1 GB of disk.
 - **Reuses what's already licensed** — it lives inside the Copilot seat
   people already have; no extra per-user SaaS bill (contrast with per-seat
   RAG/AI doc products).

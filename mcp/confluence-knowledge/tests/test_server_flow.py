@@ -44,6 +44,7 @@ def wired(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_client_for", lambda p: _FakeClient())
     monkeypatch.setattr(server, "_embedder", lambda: None)
     monkeypatch.setattr(server, "_reranker", lambda: None)
+    monkeypatch.setattr(server, "_sparse", lambda: None)
     monkeypatch.setattr(server, "_models_ready", threading.Event())
     monkeypatch.setattr(server, "_warm_started", False)
     real_connect = sqlite3.connect

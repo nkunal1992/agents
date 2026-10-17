@@ -111,13 +111,17 @@ def _fetch_page_dc(client: ConfluenceClient, page_id: str) -> dict:
     }
 
 
+from .retrieval import EMBED_MODEL_ID as _MODEL_ID
+
+
 class Crawler:
     def __init__(self, client: ConfluenceClient, index: Index, env: str,
-                 embedder=None, site_url: str | None = None):
+                 embedder=None, sparse=None, site_url: str | None = None):
         self.client = client
         self.index = index
         self.env = env
         self.embedder = embedder  # retrieval.LocalEmbedder or None
+        self.sparse = sparse      # retrieval.LocalSparseEmbedder or None
         # fallback base for page links when a response carries no _links.base
         if site_url and env == "cloud" and not site_url.rstrip("/").endswith("/wiki"):
             site_url = site_url.rstrip("/") + "/wiki"
@@ -208,15 +212,17 @@ class Crawler:
             chunks, warns = extract_chunks(page["storage"])
             for c in chunks:
                 c.chunk_id = f"{pid}:{content_hash[:8]}:{c.ordinal}"
-            vecs = None
+            vecs, sparse_vecs = None, None
             if self.embedder is not None and chunks:
-                vecs = self.embedder.embed(
-                    [f"{c.heading_path}\n{c.text}" for c in chunks])
+                texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+                vecs = self.embedder.embed(texts)
+                if self.sparse is not None:
+                    sparse_vecs = self.sparse.embed(texts)
             self.index.upsert_page({
                 "page_id": pid, "parent_id": None, "title": page["title"],
                 "url": page["url"], "level": levels.get(pid, 0),
                 "version": page["version"], "content_hash": content_hash,
-                "warnings": warns}, chunks, vecs)
+                "warnings": warns}, chunks, vecs, sparse_vecs)
             seen.add(pid)
             for cid, ctype in self._children(pid, is_folder=False):
                 if cid not in seen:
@@ -230,6 +236,7 @@ class Crawler:
             state = "running"
         else:
             self.index.publish(seen)
+            self.index.set_model_id(_MODEL_ID)
             self.index.save_job(job_id, "done", [], errors)
             state = "done"
         return {"job_id": job_id, "state": state, "remaining": len(queue),

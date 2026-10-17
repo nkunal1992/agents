@@ -65,6 +65,7 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
 | `SP_KNOWLEDGE_HOME` | install root (`~/.sharepoint-knowledge`) |
 | `SP_KNOWLEDGE_WORKDIR` | index location (`~/.sharepoint-knowledge/work`) |
 | `SP_KNOWLEDGE_TOKEN` | pre-baked access token (tests/CI — bypasses MSAL) |
+| `SP_KNOWLEDGE_RERANKER` | `onnx-community/bge-reranker-base-ONNX` for a faster English reranker |
 | `SP_KNOWLEDGE_GRAPH_BASE` | Graph base URL override (e2e fake) |
 | `SP_KNOWLEDGE_AUTH_BASE` | Entra authority override (e2e fake) |
 

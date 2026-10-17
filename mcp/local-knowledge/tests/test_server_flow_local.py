@@ -24,12 +24,18 @@ class FakeReranker:
         return np.arange(len(docs), dtype=np.float32)[::-1]
 
 
+class FakeSparse:
+    def embed(self, texts):
+        return [{} for _ in texts]
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_KNOWLEDGE_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("LOCAL_KNOWLEDGE_WORKDIR", str(tmp_path / "work"))
     monkeypatch.setattr(server_local, "_EMBEDDER", FakeEmbedder())
     monkeypatch.setattr(server_local, "_RERANKER", FakeReranker())
+    monkeypatch.setattr(server_local, "_SPARSE", FakeSparse())
     server_local._models_ready.set()
     yield
     server_local._scopes.clear()

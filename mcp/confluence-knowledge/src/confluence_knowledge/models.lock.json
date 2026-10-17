@@ -1,15 +1,30 @@
 {
-  "comment": "Pinned local model artifacts. Embeddings and reranking are local-only at runtime; cloud embedding APIs are never used. Both models are Apache-2.0.",
+  "comment": "Pinned ONNX model artifacts. Retrieval is local-only — torch and cloud embedding APIs are never used. 'files' limits the snapshot to what the runtime needs.",
   "models": {
     "embed": {
-      "repo": "sentence-transformers/all-MiniLM-L6-v2",
-      "revision": "e9a7bebe3474e74e8193da1a05abb5b5291dcb6a",
-      "license": "Apache-2.0"
+      "repo": "Xenova/bge-m3",
+      "revision": "4de13258303883538bd53b696b452bf8099f0858",
+      "license": "MIT",
+      "files": ["onnx/sentence_transformers_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "sentencepiece.bpe.model", "special_tokens_map.json", "README.md"]
+    },
+    "sparse": {
+      "repo": "Qdrant/bm25",
+      "revision": "22b8d2af71a76161e18dd432d2cee0eefa66e412",
+      "license": "Apache-2.0",
+      "note": "downloaded through fastembed's own cache (models/fastembed)"
     },
     "rerank": {
-      "repo": "cross-encoder/ms-marco-MiniLM-L6-v2",
-      "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
-      "license": "Apache-2.0"
+      "repo": "onnx-community/bge-reranker-v2-m3-ONNX",
+      "revision": "6f5ff65298512715a1e669753bc754d2bc8f367b",
+      "license": "MIT",
+      "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"]
+    },
+    "rerank_light": {
+      "repo": "onnx-community/bge-reranker-base-ONNX",
+      "revision": "f131ae72114cb18333648a2ee6b0942849e8ab95",
+      "license": "MIT",
+      "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"],
+      "note": "downloaded only when *_RERANKER env selects it"
     }
   }
 }

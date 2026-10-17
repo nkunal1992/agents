@@ -23,6 +23,8 @@ from confluence_knowledge.settings import SetupError
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 20_000
 
+from confluence_knowledge.retrieval import EMBED_MODEL_ID as _MODEL_ID
+
 
 def resolve_root(client: ConfluenceClient, url: str) -> tuple[str, str]:
     """SharePoint URL → (root queue entry, site webUrl for citations).
@@ -77,10 +79,11 @@ def _paged(client: ConfluenceClient, path: str, params: dict | None = None):
 
 class SPCrawler:
     def __init__(self, client: ConfluenceClient, index: Index, embedder=None,
-                 downloader=None):
+                 downloader=None, sparse=None):
         self.client = client
         self.index = index
         self.embedder = embedder
+        self.sparse = sparse
         self.downloader = downloader  # injected for tests; real one in server
 
     # ---- expansions ----
@@ -255,20 +258,23 @@ class SPCrawler:
                 continue
             for c in chunks:
                 c.chunk_id = f"{pid}:{page['content_hash'][:8]}:{c.ordinal}"
-            vecs = None
+            vecs, sparse_vecs = None, None
             if self.embedder is not None and chunks:
-                vecs = self.embedder.embed(
-                    [f"{c.heading_path}\n{c.text}" for c in chunks])
+                texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+                vecs = self.embedder.embed(texts)
+                if self.sparse is not None:
+                    sparse_vecs = self.sparse.embed(texts)
             self.index.upsert_page({
                 "page_id": pid, "parent_id": None, "title": page["title"],
                 "url": page["url"], "level": levels.get(pid, 0),
                 "version": page["version"],
                 "content_hash": page["content_hash"],
-                "warnings": page["warnings"]}, chunks, vecs)
+                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs)
             seen.add(pid)
 
         self._checkpoint(job_id, queue, errors, seen, levels, warns)
         self.index.publish(seen)
+        self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             queue, errors)
         return {"job_id": job_id,

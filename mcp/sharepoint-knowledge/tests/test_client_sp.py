@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytest
 from confluence_knowledge.client import SecurityException
-
 from sharepoint_knowledge.client_sp import GRAPH_RULES, download_file, make_client
 
 

@@ -14,7 +14,7 @@ Everything runs in a sandboxed $HOME so the test never touches the real
 
 --service defaults to the dist/ bundle copy when present (test what ships),
 else the repo source tree. First run downloads the models for real; set
-CK_MODEL_CACHE=/path/to/models to pre-seed them (~175 MB).
+CK_MODEL_CACHE=/path/to/models to pre-seed them (~1.3 GB).
 """
 
 from __future__ import annotations
@@ -96,11 +96,11 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False):
     # 3. models — reuse a cache dir if provided, else download for real
     cache = os.environ.get("CK_MODEL_CACHE")
     models_dir = ck_home / "models"
-    if cache and (Path(cache) / "all-MiniLM-L6-v2").exists():
+    if cache and (Path(cache) / "bge-m3").exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")
     else:
-        run([str(cli), "prepare-models"], env, "prepare-models (~175 MB real download)")
+        run([str(cli), "prepare-models"], env, "prepare-models (~1.3 GB real download)")
 
     # 4. credentials — the wizard writes profile.json + keyring; the keyring
     #    part is interactive, so we emulate the env-var credential path the

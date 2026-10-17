@@ -31,7 +31,7 @@ first-run installation.
 
 Announce: "The Confluence service isn't responding — checking whether it's
 already installed. If not, I'll install it for you: create a virtual
-environment, install the service, download two small local models, and
+environment, install the service, download the local models (~1.3 GB once), and
 register the IDE config — then you'll do a one-time credential setup in your
 own terminal and reload once." Then run the steps below end-to-end without
 pausing between them; the user sees each command anyway.
@@ -81,7 +81,7 @@ pausing between them; the user sees each command anyway.
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
 3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
-   prepare-models` — downloads two Apache-2.0 models (embedding + reranker)
+   prepare-models` — downloads the pinned local models — bge-m3 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
    into `~/.confluence-knowledge/models/`. If the network blocks Hugging
    Face, tell the user to drop the model dirs there from their internal
    mirror — never switch to a cloud embedding API.
@@ -186,7 +186,9 @@ wheel path for the install step — everything else is identical.
    to run `confluence-knowledge setup` / `prepare-models` in a terminal, or
    offer to run `doctor` to pinpoint it.
 2. **Connect.** Ask for the root page URL or pageId if not supplied; call
-   `connect`. Report the cache status it returns.
+   `connect`. Report the cache status it returns. If `stale_model` is true,
+   tell the user the index needs one rebuild after a model upgrade and run
+   `start_crawl` — do not ask, just do it (search refuses on stale indexes).
 3. **Freshness nudge.** If `cached` is true:
    "I found a previously cached version of this documentation from
    `<cached_as_of>`. I will use this to answer your question. Would you like
@@ -208,7 +210,8 @@ wheel path for the install step — everything else is identical.
    When done, report pages indexed + any `errors` (inaccessible pages are
    disclosed, never hidden).
 5. **Answer.** `search` (if it returns `note: loading local models`, call it
-   again) → `get_evidence` for fuller text if needed →
+   again; if `coverage: stale_model`, run `start_crawl` once and search again)
+   → `get_evidence` for fuller text if needed →
    synthesize a concise answer mapping every factual sentence to a chunk →
    `verify_citations` with claim→chunk→quote mappings → fix or drop flagged
    claims → respond with citations + freshness footer.

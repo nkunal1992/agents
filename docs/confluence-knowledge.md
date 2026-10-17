@@ -30,8 +30,8 @@ answer with [Source: Page Title](url) on every claim
   non-GET request with a `SecurityException` before it reaches the network,
   and every path is checked against a read-only endpoint allowlist. The agent
   profile itself has no shell/edit/fetch tools — only the MCP operations.
-- **Local retrieval, always.** Embeddings (`all-MiniLM-L6-v2`) and reranking
-  (`ms-marco-MiniLM-L6-v2`) run on your machine — Apache-2.0 licensed, pinned
+- **Local retrieval, always.** Embeddings (`bge-m3`, quantized ONNX) and reranking
+  (`bge-reranker-v2-m3`, quantized ONNX) run on your machine — MIT licensed, pinned
   revisions. No document text ever goes to a cloud embedding API.
 - **One caveat to know:** the final answer is written by Copilot using the
   retrieved passages, so those passages do reach your company's approved
@@ -111,7 +111,8 @@ Manual fallback — `.vscode/mcp.json`:
 
 The index lives in `~/.confluence-knowledge/work` by default, shared by the CLI
 and the server. Set `"env": { "CONF_KNOWLEDGE_WORKDIR": "<folder>" }` only to
-put it elsewhere.
+put it elsewhere. For a faster English-only reranker on slow machines, set
+`"env": { "CONF_KNOWLEDGE_RERANKER": "onnx-community/bge-reranker-base-ONNX" }`.
 
 JetBrains: same command/args in Copilot's MCP settings (stdio). The agent
 writes the exact block for your OS during bootstrap if you prefer.

@@ -141,7 +141,7 @@ The last row matters most: instructions ask nicely; the verifier *checks*.
 | Infrastructure | **None** — runs on the user's laptop |
 | Per-question API | **None** — embeddings/reranking are local |
 | Licence | Reuses the **Copilot seat** they already have |
-| Models | One-time ~175 MB download (Apache-2.0) |
+| Models | One-time ~1.3 GB download (MIT/Apache-2.0, ONNX — no GPU needed) |
 | Ops | One zip to distribute; `doctor` self-checks |
 
 > Compare: hosted RAG platforms charge per seat **and** run a shared index on someone else's server — including our page content.

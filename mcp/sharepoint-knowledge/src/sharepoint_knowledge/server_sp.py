@@ -10,8 +10,10 @@ import threading
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.index import Index
 from confluence_knowledge.retrieval import (
+    EMBED_MODEL_ID,
     LocalEmbedder,
     LocalReranker,
+    LocalSparseEmbedder,
     check_citations,
     retrieve,
 )
@@ -31,6 +33,7 @@ _indexes: dict[str, Index] = {}
 _clients: dict[str, object] = {}
 _EMBEDDER = None
 _RERANKER = None
+_SPARSE = None
 _model_lock = threading.Lock()
 _models_ready = threading.Event()
 _warm_lock = threading.Lock()
@@ -62,10 +65,19 @@ def _reranker():
     return _RERANKER
 
 
+def _sparse():
+    global _SPARSE
+    with _model_lock:
+        if _SPARSE is None:
+            _SPARSE = LocalSparseEmbedder(home(), APP_NAME)
+    return _SPARSE
+
+
 def _warm_models() -> None:
     try:
         _embedder()
         _reranker()
+        _sparse()
     except SetupError:
         pass
     finally:
@@ -140,8 +152,10 @@ def status() -> dict:
     return {
         "configured": configured,
         "profile": cfg,
-        "embedding_model_ready": (models / "all-MiniLM-L6-v2").exists(),
-        "reranker_model_ready": (models / "ms-marco-MiniLM-L6-v2").exists(),
+        "embedding_model_ready": (models / "bge-m3").exists(),
+        "reranker_model_ready": (models / "bge-reranker-v2-m3-ONNX").exists()
+            or (models / "bge-reranker-base-ONNX").exists(),
+        "sparse_model_ready": (models / "fastembed").exists(),
         "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
         "index_root": str(index_root()),
         "live_scopes": sorted(_scopes),
@@ -166,6 +180,7 @@ def connect(root: str) -> dict:
     _scopes[handle] = {"key": scope_key, "root_entry": root_entry,
                        "site_web": site_web, "client": cli}
     _start_warmup()
+    stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
     return {
         "scope_handle": handle,
         "root": root_entry,
@@ -173,6 +188,9 @@ def connect(root: str) -> dict:
         "cached": st["pages"] > 0,
         "cached_pages": st["pages"],
         "cached_as_of": st["as_of"],
+        "stale_model": stale,
+        "note": ("index was built with an older model — run start_crawl once "
+                 "to rebuild it with the current models" if stale else None),
     }
 
 
@@ -186,7 +204,7 @@ def _worker_loop(s: dict, job_id: str) -> None:
     try:
         _models_ready.wait()
         c = SPCrawler(s["client"], idx, embedder=_embedder(),
-                      downloader=download_file)
+                      downloader=download_file, sparse=_sparse())
         r = c.step(job_id)
         while r["state"] == "running":
             r = c.step(job_id)
@@ -280,7 +298,11 @@ def search(scope_handle: str, question: str) -> dict:
                 "note": "nothing indexed — run a crawl first"}
     if not _models_loaded(10.0):
         return {"evidence": [], "coverage": "loading", "note": LOADING_NOTE}
-    ev = retrieve(idx, question, _embedder(), _reranker())
+    if idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID:
+        return {"evidence": [], "coverage": "stale_model",
+                "note": "this index was built with an older embedding model "
+                        "— run start_crawl once to rebuild it, then search again"}
+    ev = retrieve(idx, question, _embedder(), _reranker(), sparse=_sparse())
     set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
     _evidence_sets[set_id] = ev
     return {

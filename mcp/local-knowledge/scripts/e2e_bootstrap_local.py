@@ -10,7 +10,7 @@ No fake server needed — there is no HTTP path at all. Run from the repo:
     python scripts/e2e_bootstrap_local.py [--service <path>] [--wheel]
 
 --service defaults to the dist/ bundle copy when present. Set
-CK_MODEL_CACHE=/path/to/models to pre-seed the two models (~175 MB download
+CK_MODEL_CACHE=/path/to/models to pre-seed the models (~1.3 GB download
 otherwise).
 """
 
@@ -112,12 +112,12 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool):
 
     cache = os.environ.get("CK_MODEL_CACHE")
     models_dir = lk_home / "models"
-    if cache and (Path(cache) / "all-MiniLM-L6-v2").exists():
+    if cache and (Path(cache) / "bge-m3").exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")
     else:
         run([str(cli), "prepare-models"], env,
-            "prepare-models (~175 MB real download)")
+            "prepare-models (~1.3 GB real download)")
 
     # register — no credentials step at all (there is no `setup`)
     ws = sandbox / "repo"

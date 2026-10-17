@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "confluence-knowledge"
-version = "0.4.1"
+version = "0.5.0"
 description = "Local, GET-only Confluence subtree indexer + grounded-Q&A MCP service"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,7 +31,10 @@ Issues = "https://github.com/nkunal1992/agents/issues"
 
 [project.optional-dependencies]
 models = [
-    "sentence-transformers>=3.0,<4.0",
+    # ONNX stack — no torch: ~40 MB runtime vs 2.4 GB, native ARM64 Windows
+    "onnxruntime>=1.17",
+    "tokenizers>=0.15",
+    "fastembed>=0.9",          # sparse leg (Qdrant/bm25 ONNX)
     "huggingface-hub>=0.26",
 ]
 files = [

@@ -17,7 +17,14 @@ from .auth import get_credential
 from .client import AccessError, ConfluenceClient, SecurityException, make_client
 from .crawl import Crawler
 from .index import Index
-from .retrieval import LocalEmbedder, LocalReranker, check_citations, retrieve
+from .retrieval import (
+    EMBED_MODEL_ID,
+    LocalEmbedder,
+    LocalReranker,
+    LocalSparseEmbedder,
+    check_citations,
+    retrieve,
+)
 from .settings import (
     SetupError,
     SiteProfile,
@@ -36,6 +43,7 @@ _indexes: dict[str, Index] = {}  # one connection per DB for the server lifetime
 _clients: dict[str, ConfluenceClient] = {}  # one HTTP pool per credential
 _EMBEDDER = None
 _RERANKER = None
+_SPARSE = None
 _model_lock = threading.Lock()
 _models_ready = threading.Event()
 _warm_lock = threading.Lock()
@@ -91,10 +99,19 @@ def _reranker():
     return _RERANKER
 
 
+def _sparse():
+    global _SPARSE
+    with _model_lock:
+        if _SPARSE is None:
+            _SPARSE = LocalSparseEmbedder(_home())
+    return _SPARSE
+
+
 def _warm_models() -> None:
     try:
         _embedder()
         _reranker()
+        _sparse()
     except SetupError:
         pass  # reported by the tool that needs the model
     finally:
@@ -102,7 +119,7 @@ def _warm_models() -> None:
 
 
 def _start_warmup() -> None:
-    """Load torch + both models off the request path; the first load can take
+    """Load the ONNX sessions off the request path; the first load can take
     longer than an IDE's request timeout."""
     global _warm_started
     with _warm_lock:
@@ -143,8 +160,10 @@ def status() -> dict:
     return {
         "configured": "error" not in cfg,
         "profile": cfg,
-        "embedding_model_ready": (models / "all-MiniLM-L6-v2").exists(),
-        "reranker_model_ready": (models / "ms-marco-MiniLM-L6-v2").exists(),
+        "embedding_model_ready": (models / "bge-m3").exists(),
+        "reranker_model_ready": (models / "bge-reranker-v2-m3-ONNX").exists()
+            or (models / "bge-reranker-base-ONNX").exists(),
+        "sparse_model_ready": (models / "fastembed").exists(),
         "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
         "index_root": str(workspace_index_root(_workdir())),
         "live_scopes": sorted(_scopes),
@@ -167,6 +186,7 @@ def connect(root: str) -> dict:
     handle = f"scope:{scope_key}:{root_id}"
     _scopes[handle] = {"key": scope_key, "profile": profile, "root": root_id}
     _start_warmup()
+    stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
     return {
         "scope_handle": handle,
         "root_page_id": root_id,
@@ -174,12 +194,16 @@ def connect(root: str) -> dict:
         "cached": st["pages"] > 0,
         "cached_pages": st["pages"],
         "cached_as_of": st["as_of"],
+        "stale_model": stale,
+        "note": ("index was built with an older model — run start_crawl once "
+                 "to rebuild it with the current models" if stale else None),
     }
 
 
-def _crawler(s: dict, embedder=None) -> Crawler:
+def _crawler(s: dict, embedder=None, sparse=None) -> Crawler:
     return Crawler(_client_for(s["profile"]), _index_for(s["key"]), s["profile"].env,
-                   embedder=embedder, site_url=s["profile"].base_url)
+                   embedder=embedder, sparse=sparse,
+                   site_url=s["profile"].base_url)
 
 
 # background crawl workers — a crawl runs to completion server-side so a big
@@ -195,7 +219,7 @@ def _worker_loop(s: dict, job_id: str) -> None:
     try:
         # models may still be warming; the worker waits, not the tool call
         _models_ready.wait()
-        c = _crawler(s, embedder=_embedder())
+        c = _crawler(s, embedder=_embedder(), sparse=_sparse())
         while True:
             r = c.step(job_id, batch=None, budget_s=None)
             if r["state"] != "running":
@@ -286,7 +310,11 @@ def search(scope_handle: str, question: str) -> dict:
                 "note": "no pages indexed — run a crawl first"}
     if not _models_loaded(_step_seconds()):
         return {"evidence": [], "coverage": "loading", "note": LOADING_NOTE}
-    ev = retrieve(idx, question, _embedder(), _reranker())
+    if idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID:
+        return {"evidence": [], "coverage": "stale_model",
+                "note": "this index was built with an older embedding model "
+                        "— run start_crawl once to rebuild it, then search again"}
+    ev = retrieve(idx, question, _embedder(), _reranker(), sparse=_sparse())
     set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
     _evidence_sets[set_id] = ev
     return {
