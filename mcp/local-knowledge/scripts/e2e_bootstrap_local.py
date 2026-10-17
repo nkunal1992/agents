@@ -140,8 +140,9 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool):
           "register: points at the venv python")
 
     doctor = run([str(cli), "doctor"], env, "doctor: models ready")
-    check('"embedding_model_ready": true' in doctor.stdout,
-          "doctor reports both models")
+    check('"flag": "model_embed"' in doctor.stdout and
+          '"ok": true' in doctor.stdout,
+          "doctor reports models via checks", doctor.stdout)
 
     return vpy, env
 
@@ -157,8 +158,9 @@ async def qa_roundtrip(vpy: Path, env: dict, docs: Path) -> None:
                "get_evidence", "verify_citations"} <= tools,
               "fresh venv: all tools registered")
         st = await call(session, "status")
-        check("models" in str(st) or st.get("embedding_model_ready"),
-              "status: models ready")
+        check(st.get("checks") and all(c["ok"] for c in st["checks"]
+              if c["flag"].startswith("model_")),
+              "status: models ready via checks", st)
         c = await call(session, "connect", {"root": str(docs)})
         check(c["kind"] == "folder", "connect: folder scope")
         job = await call(session, "start_crawl",
