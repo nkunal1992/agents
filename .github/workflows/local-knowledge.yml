@@ -59,10 +59,12 @@ jobs:
       - name: Bootstrap e2e — fresh install → crawl → cited answer
         shell: bash
         env:
+          PYTHONIOENCODING: utf-8
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: python mcp/local-knowledge/scripts/e2e_bootstrap_local.py
       - name: Failure e2e — break the install, verify doctor flags + recovery
         shell: bash
         env:
+          PYTHONIOENCODING: utf-8
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: python mcp/local-knowledge/scripts/e2e_failure_local.py

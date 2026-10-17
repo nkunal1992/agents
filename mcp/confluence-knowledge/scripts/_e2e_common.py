@@ -97,9 +97,14 @@ from datetime import timedelta as _timedelta
 
 
 def check(cond, msg, detail=None):
-    print(("PASS " if cond else "FAIL ") + msg
-          + ("" if cond or detail is None else f"\n  got: {detail}"),
-          flush=True)
+    line = ("PASS " if cond else "FAIL ") + msg \
+        + ("" if cond or detail is None else f"\n  got: {detail}")
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        # Windows runner consoles are cp1252 — arrows/checkmarks in doctor
+        # output crash print(); degrade to ? rather than fail the e2e
+        print(line.encode("ascii", "replace").decode("ascii"), flush=True)
     if not cond:
         import sys as _sys
         _sys.stdout.flush()  # os._exit skips the buffered tail
