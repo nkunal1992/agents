@@ -23,8 +23,9 @@ jobs:
       - name: Install engine + package + dev deps
         run: |
           pip install -e './mcp/confluence-knowledge[dev]'
-          pip install setuptools wheel  # no-build-isolation below needs them
-          pip install --no-build-isolation -e './mcp/sharepoint-knowledge[dev]'
+          # pip_system_certs' .pth imports distutils early → _distutils_hack
+          # assert on py3.11; stdlib mode skips the hack (harmless on 3.12+)
+          SETUPTOOLS_USE_DISTUTILS=stdlib pip install -e './mcp/sharepoint-knowledge[dev]'
       - name: Lint
         run: ruff check mcp/sharepoint-knowledge/src mcp/sharepoint-knowledge/tests
       - name: Unit tests (offline — no models, no network)
