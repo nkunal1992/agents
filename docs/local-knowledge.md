@@ -84,3 +84,22 @@ uploads to PyPI (same `PYPI_API_TOKEN` secret as confluence-knowledge).
 `service/scripts/e2e_bootstrap_local.py` replays a fresh install end to end
 against a generated doc tree — real venv, real models, real stdio MCP —
 finishing with `E2E BOOTSTRAP OK`. No network or fake server needed.
+
+
+## Doctor health flags
+
+`doctor` prints a `checks` block — every red flag carries a `remediation`
+(the agent follows these automatically; the table is for manual runs):
+
+| Flag | Means | Fix |
+|---|---|---|
+| `deps` | an install was interrupted — a dep isn't importable | `pip install -U <cli>[models]` |
+| `model_embed / model_rerank / model_rerank_light / model_sparse` | partial model download (dir exists, locked file missing) | `prepare-models` |
+| `registration` | no IDE config contains the server | `register --ide auto` |
+| `index:<scope>` | `corrupt` → delete index, re-crawl; `older model` → one `start_crawl` rebuild | `clean` / `start_crawl` |
+| `creds_valid` | token rejected or missing (401) | `setup` again |
+| `disk_free` | < 2 GB free — models won't fit | free space |
+| `python` | venv interpreter < 3.11 | rebuild venv on 3.11+ |
+| `proxy` | informational — shows HTTPS_PROXY/HTTP_PROXY visibility | — |
+
+`doctor` exits non-zero while any flag is red.

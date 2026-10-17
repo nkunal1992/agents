@@ -80,6 +80,7 @@ the same command; changed files update, deleted files drop out.
 | models not ready | `…/venv/bin/local-knowledge prepare-models` (or `…\Scripts\` on Windows) |
 | a file isn't found in answers | check crawl `warnings` — it was skipped (unsupported type / secret-looking / too large) |
 | any Windows | models run on ONNX Runtime — no torch needed, ARM64 included |
+| doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |
 
 ## Uninstall
 

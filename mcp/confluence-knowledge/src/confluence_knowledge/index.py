@@ -43,7 +43,14 @@ class Index:
         # checkpoint) instead of failing instantly; check_same_thread: the
         # crawl worker and tool-call threads share this one connection —
         # `self.lock` serializes every access so writes never interleave
-        self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
+        try:
+            self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
+            self.db.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+        except sqlite3.DatabaseError as e:
+            from .settings import SetupError
+            raise SetupError(
+                f"index unreadable at {path} — delete it and re-crawl "
+                "(or run `clean` to drop every index)") from e
         self.lock = threading.RLock()
         with self.lock:
             self.db.executescript(SCHEMA)
@@ -217,6 +224,16 @@ class Index:
                     for cid, b in self.db.execute(
                         f"SELECT chunk_id,vec FROM vectors WHERE chunk_id IN ({q})",
                         chunk_ids)}
+
+    def integrity(self) -> bool:
+        """PRAGMA integrity_check — False means the DB file is damaged and
+        should be deleted + rebuilt (never auto-repaired here)."""
+        try:
+            with self.lock:
+                row = self.db.execute("PRAGMA integrity_check").fetchone()
+            return bool(row and row[0] == "ok")
+        except sqlite3.DatabaseError:
+            return False
 
     def stats(self) -> dict:
         with self.lock:

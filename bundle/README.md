@@ -172,6 +172,7 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
 | `no stored token` | Run `confluence-knowledge setup` in your own terminal |
 | Two `python.exe` processes on Windows | Normal — a venv `python.exe` is a launcher that starts the base interpreter as its child |
 | Model download blocked | Copy the `bge-m3`, `bge-reranker-v2-m3-ONNX`, and `fastembed` dirs into `~/.confluence-knowledge/models/` from a colleague or mirror |
+| doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |
 
 `confluence-knowledge doctor` is the first diagnostic — it checks config,
 credentials, models and the connection in one shot.

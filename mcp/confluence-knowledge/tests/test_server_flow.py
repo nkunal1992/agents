@@ -127,9 +127,11 @@ def test_full_agent_flow_with_models(wired, monkeypatch):
 
 def test_search_during_crawl_says_crawling(wired, monkeypatch):
     # keep the worker parked on the model-warmup gate so the job stays
-    # "running" deterministically — a 1-page crawl finishes before the race
-    # could otherwise resolve
+    # "running" deterministically: a never-set event AND warmup disabled —
+    # otherwise the warmup thread sets the event, the worker finishes the
+    # 1-page crawl, and search reaches retrieve instead of the early return
     monkeypatch.setattr(server, "_models_ready", threading.Event())
+    monkeypatch.setattr(server, "_start_warmup", lambda: None)
     c = server.connect("1")
     server.start_crawl(c["scope_handle"])
     res = server.search(c["scope_handle"], "text")

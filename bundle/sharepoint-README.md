@@ -71,6 +71,7 @@ Refresh = same URL again; changed items update, deleted items drop out.
 | `device code` never appears | "Allow public client flows" isn't enabled on the app |
 | a page/folder missing from answers | the signed-in user can't see it either, or it was skipped — check crawl warnings |
 | any Windows | models run on ONNX Runtime — no torch needed, ARM64 included |
+| doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |
 
 ## Uninstall
 

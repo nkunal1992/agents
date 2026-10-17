@@ -25,7 +25,7 @@ from confluence_knowledge.settings import SetupError
 from mcp.server.fastmcp import FastMCP
 
 from .crawl_local import LocalCrawler, resolve_root
-from .settings_local import APP_NAME, LocalProfile, home, index_root
+from .settings_local import APP_NAME, LocalProfile, home, index_root, workdir
 
 mcp = FastMCP("local-knowledge")
 
@@ -113,19 +113,17 @@ def _scope(scope_handle: str) -> dict:
 @mcp.tool()
 def status() -> dict:
     """Report setup readiness — no credentials exist for this agent."""
-    models = home() / "models"
     try:
         profile = LocalProfile.load()
         cfg = {"root": profile.root_path, "device": profile.device}
     except SetupError as e:
         cfg = {"error": str(e)}
+    from confluence_knowledge.health import health_checks
     return {
         "configured": "error" not in cfg,
         "profile": cfg,
-        "embedding_model_ready": (models / "bge-m3").exists(),
-        "reranker_model_ready": (models / "bge-reranker-v2-m3-ONNX").exists()
-            or (models / "bge-reranker-base-ONNX").exists(),
-        "sparse_model_ready": (models / "fastembed").exists(),
+        "checks": health_checks(home(), workdir(), APP_NAME, "local-knowledge",
+                                index_root=index_root()),
         "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
         "index_root": str(index_root()),
         "live_scopes": sorted(_scopes),

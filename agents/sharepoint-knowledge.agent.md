@@ -41,13 +41,23 @@ reload once." Then run the steps below end-to-end.
 0. **Already installed?** If `~/.sharepoint-knowledge/venv` (or
    `%USERPROFILE%\.sharepoint-knowledge\venv`) exists, run its
    `sharepoint-knowledge doctor` first:
-   - `configured: true` + models ready → the service is FINE; the MCP
-     registration is what is missing — run `register` (step 4) + reload.
-     Never re-run install/prepare-models on a healthy setup.
-   - `configured: false` or a model missing → run ONLY the missing step
-     (setup / prepare-models) — do not reinstall.
+   `sharepoint-knowledge doctor` prints a **checks** block — each flag maps
+   to exactly one fix; run ONLY that fix, never reinstall on red flags:
+   - `configured: false` or `creds_valid ✗` → `setup` (re-sign-in — device
+     code; if the Entra error mentions admin consent, tell the user their
+     IT must grant it — nothing they type fixes it)
+   - `deps ✗` → `"$VENV_PY" -m pip install -U "sharepoint-knowledge[models]"`
+   - `model_embed / model_rerank / model_rerank_light / model_sparse ✗` →
+     `prepare-models`
+   - `registration ✗` → `register --ide auto --workspace "<repo>"`
+   - `index:* corrupt` → `clean` then re-crawl the affected scope
+   - `index:* older model` → `start_crawl` on that scope (one rebuild)
+   - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
+   - `python ✗` → venv was built on <3.11 — rebuild it from step 1
    - `update available` → upgrade via `"$VENV_PY" -m pip install -U
-     "sharepoint-knowledge[models]"`, then re-doctor.
+     "sharepoint-knowledge[models]"`, then `prepare-models`, then re-doctor.
+   - all green but tools still absent → `register` (step 4) + reload.
+     Never re-run install/prepare-models on a healthy setup.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
    order, keep the first ≥3.11: `python3.13`, `python3.12`, `python3.11`,
    `python3`, `python`, `py` (Windows). Call the winner `$PY`; check

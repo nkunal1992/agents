@@ -28,4 +28,43 @@ jobs:
         run: |
           pip install -e './mcp/confluence-knowledge' --quiet
           confluence-knowledge --help >/dev/null
-          confluence-knowledge doctor; test $? -le 3
+          confluence-knowledge doctor; test $? -le 4
+
+  e2e:
+    # real bootstrap replay — fake server, no secrets; catches what unit
+    # tests can't (venv layout, pip install, register paths, path quoting)
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install engine + deps for prepare-models
+        run: pip install -e './mcp/confluence-knowledge[models]'
+      - name: Cache model artifacts
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: ~/.cache/ck-models
+          key: ck-models-${{ hashFiles('mcp/confluence-knowledge/src/confluence_knowledge/models.lock.json') }}-${{ runner.os }}
+      - name: Warm model cache (only on lock change)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -c "from pathlib import Path; from confluence_knowledge.retrieval import prepare_models; prepare_models(Path.home()/'.cache'/'ck-models')"
+      - name: Bootstrap e2e — fresh install → crawl → cited answer
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+        run: python mcp/confluence-knowledge/scripts/e2e_bootstrap.py --service ./mcp/confluence-knowledge
+      - name: Failure e2e — break the install, verify doctor flags + recovery
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+        run: python mcp/confluence-knowledge/scripts/e2e_failure.py

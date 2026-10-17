@@ -156,16 +156,31 @@ def status() -> dict:
         cfg = {"env": profile.env, "site": profile.base_url}
     except SetupError as e:
         cfg = {"error": str(e)}
-    models = home / "models"
+    from .health import health_checks
+    from .registration import SERVER_ID
+    idx_root = workspace_index_root(_workdir())
+    checks = health_checks(home, _workdir(), SERVER_ID, "confluence-knowledge",
+                           index_root=idx_root)
+    if "error" not in cfg:
+        # cheap liveness: a 401 here means the saved token died — point at
+        # setup, not at the docs
+        try:
+            client = _client_for(profile)
+            ep = ("wiki/rest/api/user/current" if profile.env == "cloud"
+                  else "rest/api/user/current")
+            client.get(ep)
+            ok, detail = True, "token valid"
+        except (AccessError, SetupError) as e:
+            ok, detail = False, str(e)
+        checks.append({"flag": "creds_valid", "ok": ok, "detail": detail,
+                       "remediation": None if ok else
+                       "confluence-knowledge setup (rotate the token)"})
     return {
         "configured": "error" not in cfg,
         "profile": cfg,
-        "embedding_model_ready": (models / "bge-m3").exists(),
-        "reranker_model_ready": (models / "bge-reranker-v2-m3-ONNX").exists()
-            or (models / "bge-reranker-base-ONNX").exists(),
-        "sparse_model_ready": (models / "fastembed").exists(),
+        "checks": checks,
         "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
-        "index_root": str(workspace_index_root(_workdir())),
+        "index_root": str(idx_root),
         "live_scopes": sorted(_scopes),
     }
 

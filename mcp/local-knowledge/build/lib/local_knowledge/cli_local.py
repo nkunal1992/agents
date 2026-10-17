@@ -30,6 +30,13 @@ def _doctor() -> int:
     from .server_local import status
     s = status()
     print(json.dumps(s, indent=2))
+    bad = [c for c in s.get("checks", []) if not c["ok"]]
+    if bad:
+        print("\nhealth flags:")
+        for c in bad:
+            print(f"  ✗ {c['flag']}: {c['detail']}")
+            if c.get("remediation"):
+                print(f"    → {c['remediation']}")
     upd = check("local-knowledge")
     if upd["installed"]:
         line = f"version: {upd['installed']}"
@@ -41,7 +48,7 @@ def _doctor() -> int:
     if upd["update_available"]:
         print("update available: run `local-knowledge update` "
               "(or pip install -U local-knowledge[models])")
-    return 0
+    return 4 if bad else 0
 
 
 def main() -> None:

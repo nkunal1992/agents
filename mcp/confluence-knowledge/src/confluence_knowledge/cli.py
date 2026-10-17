@@ -98,6 +98,13 @@ def _doctor() -> int:
     try:
         s = status()
         print(json.dumps(s, indent=2))
+        bad = [c for c in s.get("checks", []) if not c["ok"]]
+        if bad:
+            print("\nhealth flags:")
+            for c in bad:
+                print(f"  ✗ {c['flag']}: {c['detail']}")
+                if c.get("remediation"):
+                    print(f"    → {c['remediation']}")
         upd = check("confluence-knowledge")
         if upd["installed"]:
             line = f"version: {upd['installed']}"
@@ -122,7 +129,7 @@ def _doctor() -> int:
             except (AccessError, SetupError) as e:
                 print(f"heartbeat: FAILED — {e}", file=sys.stderr)
                 return 3
-        return 0
+        return 4 if bad else 0
     except SetupError as e:
         print(f"setup error: {e}", file=sys.stderr)
         return 2

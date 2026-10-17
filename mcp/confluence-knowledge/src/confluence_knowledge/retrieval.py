@@ -238,6 +238,21 @@ def _license_ok_upstream(dest: Path, spec: dict, snapshot_download) -> None:
         return
 
 
+def models_complete(home: Path) -> dict:
+    """Per-model completeness vs the lock — a dir that exists but lacks a
+    locked file is a partial download, not a prepared model."""
+    lock = _load_lock()["models"]
+    out = {}
+    for key in ("embed", "rerank", "rerank_light"):
+        spec = lock[key]
+        dest = _models_dir(home) / spec["repo"].split("/")[-1]
+        missing = [f for f in spec["files"] if not (dest / f).exists()]
+        out[key] = {"ok": not missing, "missing": missing}
+    fe = _models_dir(home) / "fastembed"
+    out["sparse"] = {"ok": fe.exists() and any(fe.iterdir()), "missing": []}
+    return out
+
+
 def _license_ok(dest: Path) -> bool:
     for md in list(dest.glob("*.md")) + list(dest.glob("LICENSE*")):
         head = md.read_text(errors="ignore")[:6000].lower()

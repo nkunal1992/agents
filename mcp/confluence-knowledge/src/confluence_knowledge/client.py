@@ -114,7 +114,8 @@ class ConfluenceClient:
     def _describe(resp: httpx.Response) -> str:
         s = resp.status_code
         return {
-            401: "authentication failed (401) — check the token and account",
+            401: "authentication failed (401) — re-run `setup` to rotate "
+                 "the credential",
             403: "permission denied (403) — your account can't view this content",
             404: "not found (404) — check the page ID/space and base URL",
             429: "rate limited (429) — retry after the server's Retry-After",

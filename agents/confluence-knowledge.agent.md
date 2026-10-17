@@ -39,15 +39,24 @@ pausing between them; the user sees each command anyway.
 0. **Already installed?** If `~/.confluence-knowledge/venv` (or
    `%USERPROFILE%\.confluence-knowledge\venv`) exists, run its
    `confluence-knowledge doctor` first:
-   - `configured: true` + models ready → the service is FINE; the MCP
-     registration is what is missing — run `register` (step 4) + reload
-     handoff. Never re-run install/prepare-models on a healthy setup.
-   - `configured: false` or a model missing → run ONLY the missing step
-     (setup / prepare-models) — do not reinstall the package.
+   `confluence-knowledge doctor` prints a **checks** block — each flag maps
+   to exactly one fix; run ONLY that fix, never reinstall on red flags:
+   - `configured: false` or `creds_valid ✗` → `setup` (rotate credentials)
+   - `deps ✗` → `"$VENV_PY" -m pip install -U "confluence-knowledge[models]"`
+   - `model_embed / model_rerank / model_rerank_light / model_sparse ✗` →
+     `prepare-models` (a partial download — never pip reinstall)
+   - `registration ✗` → `register --ide auto --workspace "<repo>"`
+   - `index:* corrupt` → `clean` then re-crawl the affected scope
+   - `index:* older model` → `start_crawl` on that scope (one rebuild)
+   - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
+   - `python ✗` → venv was built on <3.11 — rebuild it from step 1
    - `update available` in doctor's output → upgrade once via the venv
      python (`"$VENV_PY" -m pip install -U "confluence-knowledge[models]"` —
      works on every OS; the `update` subcommand prints this same command on
-     Windows where a running exe can't self-replace), then re-doctor.
+     Windows where a running exe can't self-replace), then `prepare-models`,
+     then re-doctor.
+   - all green but tools still absent → `register` (step 4) + reload
+     handoff. Never re-run install/prepare-models on a healthy setup.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
    order and keep the first that prints ≥3.11: `python3.13`, `python3.12`,
    `python3.11`, `python3`, `python`, `py` (Windows). On macOS the system

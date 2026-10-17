@@ -23,7 +23,7 @@ from mcp.server.fastmcp import FastMCP
 from .auth_sp import acquire_token
 from .client_sp import download_file, make_client
 from .crawl_sp import SPCrawler, resolve_root
-from .settings_sp import APP_NAME, SPProfile, graph_base, home, index_root
+from .settings_sp import APP_NAME, SPProfile, graph_base, home, index_root, workdir
 
 mcp = FastMCP("sharepoint-knowledge")
 
@@ -126,7 +126,6 @@ def _scope(scope_handle: str) -> dict:
 @mcp.tool()
 def status() -> dict:
     """Report setup readiness — profile present, token reachable, models."""
-    models = home() / "models"
     try:
         profile = SPProfile.load()
         try:
@@ -149,13 +148,19 @@ def status() -> dict:
         except AccessError as e:
             cfg["auth"] = str(e)
             configured = False
+    from confluence_knowledge.health import health_checks
+    checks = health_checks(home(), workdir(), APP_NAME, "sharepoint-knowledge",
+                           index_root=index_root())
+    checks.append({
+        "flag": "creds_valid", "ok": configured,
+        "detail": cfg.get("auth") if configured
+                  else cfg.get("auth") or "no profile",
+        "remediation": None if configured
+                       else "sharepoint-knowledge setup (re-sign-in)"})
     return {
         "configured": configured,
         "profile": cfg,
-        "embedding_model_ready": (models / "bge-m3").exists(),
-        "reranker_model_ready": (models / "bge-reranker-v2-m3-ONNX").exists()
-            or (models / "bge-reranker-base-ONNX").exists(),
-        "sparse_model_ready": (models / "fastembed").exists(),
+        "checks": checks,
         "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
         "index_root": str(index_root()),
         "live_scopes": sorted(_scopes),
