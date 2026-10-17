@@ -24,8 +24,12 @@ jobs:
         run: |
           pip install -e './mcp/confluence-knowledge[dev]'
           # pip_system_certs' .pth imports distutils early → _distutils_hack
-          # assert on py3.11; stdlib mode skips the hack (harmless on 3.12+)
-          SETUPTOOLS_USE_DISTUTILS=stdlib pip install -e './mcp/local-knowledge[dev]'
+          # assert on py3.11 only (3.12+ has no stdlib distutils to poison;
+          # stdlib mode there would break setuptools entirely)
+          if python -c "import sys; sys.exit(0 if sys.version_info < (3,12) else 1)"; then
+            export SETUPTOOLS_USE_DISTUTILS=stdlib
+          fi
+          pip install -e './mcp/local-knowledge[dev]'
       - name: Lint
         run: ruff check mcp/local-knowledge/src mcp/local-knowledge/tests
       - name: Unit tests (offline — no models, no network)
