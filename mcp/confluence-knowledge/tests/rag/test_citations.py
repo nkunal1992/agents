@@ -36,7 +36,7 @@ def test_citation_rejects_wrong_chunk(rag_index):
 def test_stale_content_not_retrievable_after_recrawl(tmp_path):
     """Content changed → recrawl → old text must be gone; this is the
     'the agent cited a doc that's since been rewritten' symptom."""
-    from tests.rag.corpus import CORPUS
+    from rag.corpus import CORPUS
     v1 = [CORPUS[1]]  # password policy
     idx = build_index(tmp_path, v1)
     pid = "p0"
@@ -59,7 +59,7 @@ def test_stale_content_not_retrievable_after_recrawl(tmp_path):
 def test_deleted_page_is_gone_from_all_tables(tmp_path):
     """Publish GC: a page dropped from `seen` loses its chunks, fts rows,
     dense vectors AND sparse vectors — nothing half-visible."""
-    from tests.rag.corpus import CORPUS
+    from rag.corpus import CORPUS
     idx = build_index(tmp_path, CORPUS[:2])
     assert idx.stats()["pages"] == 2
     idx.publish({"p0"})   # p1 removed from the source

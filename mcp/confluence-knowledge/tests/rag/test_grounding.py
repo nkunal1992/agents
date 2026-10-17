@@ -5,7 +5,7 @@ import pytest
 
 from confluence_knowledge import retrieval
 from rag.conftest import HashEmbedder, ToySparse
-from tests.rag.corpus import CORPUS, NO_ANSWER
+from rag.corpus import CORPUS, NO_ANSWER
 
 
 def test_irrelevant_query_yields_no_evidence(rag_index):
@@ -54,7 +54,7 @@ def test_noise_floor_still_drops_junk(rag_index):
 
 def test_real_model_no_answer_queries(tmp_path, real_models):
     """On the real stack: no-answer queries must return empty evidence."""
-    from tests.rag.conftest import build_index
+    from rag.conftest import build_index
     idx = build_index(tmp_path, CORPUS)
     emb, rr, sp = real_models
     misses = []
