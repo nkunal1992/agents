@@ -1,8 +1,9 @@
 """health_checks flags: each failure mode → exactly one remediation."""
 
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from confluence_knowledge.health import health_checks
 from confluence_knowledge.index import Index

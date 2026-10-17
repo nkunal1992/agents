@@ -13,7 +13,6 @@ import re
 from urllib.parse import urlparse
 
 import httpx
-
 from confluence_knowledge.client import (
     AccessError,
     ConfluenceClient,
