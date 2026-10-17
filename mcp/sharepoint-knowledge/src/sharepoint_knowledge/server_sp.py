@@ -30,7 +30,7 @@ from .settings_sp import APP_NAME, SPProfile, graph_base, home, index_root, work
 mcp = FastMCP("sharepoint-knowledge")
 
 _scopes: dict[str, dict] = {}
-_evidence_sets: dict[str, list[dict]] = {}
+_evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}
 _clients: dict[str, object] = {}
 _EMBEDDER = None
@@ -311,7 +311,10 @@ def search(scope_handle: str, question: str) -> dict:
                         "— run start_crawl once to rebuild it, then search again"}
     ev = retrieve(idx, question, _embedder(), _reranker(), sparse=_sparse())
     set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
-    _evidence_sets[set_id] = ev
+    # bound the session cache — sets are never reused after the turn ends
+    while len(_evidence_sets) >= 32:
+        _evidence_sets.pop(next(iter(_evidence_sets)))
+    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev}
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -319,7 +322,9 @@ def search(scope_handle: str, question: str) -> dict:
         "evidence": [
             {"chunk_id": e["chunk_id"], "page_title": e["page_title"],
              "page_url": e["page_url"], "heading": e["heading"],
-             "score": e.get("rerank_score"), "text": e["text"][:2000]}
+             "score": e.get("rerank_score"), "text": e["text"][:12000],
+             "low_confidence": e.get("low_confidence", False),
+             "truncated": len(e["text"]) > 12000}
             for e in ev
         ],
     }
@@ -345,12 +350,12 @@ def get_evidence(scope_handle: str, chunk_ids: list[str]) -> dict:
 @mcp.tool()
 def verify_citations(scope_handle: str, evidence_set: str,
                      mappings: list[dict]) -> dict:
-    _scope(scope_handle)
-    ev = _evidence_sets.get(evidence_set)
-    if ev is None or not evidence_set.endswith(_scopes[scope_handle]["key"][:8]):
+    s = _scope(scope_handle)
+    rec = _evidence_sets.get(evidence_set)
+    if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
-    return check_citations(ev, mappings)
+    return check_citations(rec["ev"], mappings)
 
 
 def main() -> None:

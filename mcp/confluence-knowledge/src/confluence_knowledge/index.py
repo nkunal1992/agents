@@ -195,7 +195,9 @@ class Index:
                             (model_id,))
 
     def publish(self, seen_page_ids: set[str]) -> None:
-        """Atomically make exactly the crawled page set the active snapshot."""
+        """Atomically make exactly the crawled page set the active snapshot.
+        Content belonging to pages no longer seen is DELETED — inactive rows
+        are unreachable forever anyway and would otherwise bloat every table."""
         with self.lock, self.db:
             self.db.execute("UPDATE pages SET active=0")
             self.db.execute("UPDATE chunks SET active=0")
@@ -204,6 +206,20 @@ class Index:
                 ids = list(seen_page_ids)
                 self.db.execute(f"UPDATE pages SET active=1 WHERE page_id IN ({q})", ids)
                 self.db.execute(f"UPDATE chunks SET active=1 WHERE page_id IN ({q})", ids)
+            # gc: drop chunks (and their retrieval rows) of inactive pages,
+            # then the inactive page rows themselves
+            dead_chunks = [r[0] for r in self.db.execute(
+                "SELECT chunk_id FROM chunks WHERE page_id IN "
+                "(SELECT page_id FROM pages WHERE active=0)")]
+            if dead_chunks:
+                q = ",".join("?" * len(dead_chunks))
+                for t in ("chunks_fts", "vectors", "sparse_vectors"):
+                    self.db.execute(
+                        f"DELETE FROM {t} WHERE chunk_id IN ({q})",
+                        dead_chunks)
+                self.db.execute(f"DELETE FROM chunks WHERE chunk_id IN ({q})",
+                                dead_chunks)
+            self.db.execute("DELETE FROM pages WHERE active=0")
 
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:

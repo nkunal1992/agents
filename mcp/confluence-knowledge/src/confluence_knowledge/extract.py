@@ -38,6 +38,28 @@ def _table_to_text(tbl) -> str:
     return "\n".join(out)
 
 
+def split_table_text(t: str) -> list[str]:
+    """An oversized table becomes several ≤MAX_WORDS chunks, each carrying
+    the header line — one unbounded chunk would exceed the embedder and the
+    reranker's token limits and silently lose its tail rows."""
+    if len(t.split()) <= MAX_WORDS:
+        return [t]
+    lines = t.split("\n")
+    header, rows = lines[0], lines[1:]
+    hw = len(header.split())
+    segs, buf, w = [], [], hw + 2
+    for r in rows:
+        rw = len(r.split())
+        if buf and w + rw > MAX_WORDS:
+            segs.append(header + "\n" + "\n".join(buf))
+            buf, w = [], hw + 2
+        buf.append(r)
+        w += rw
+    if buf:
+        segs.append(header + "\n" + "\n".join(buf))
+    return segs
+
+
 def extract_chunks(storage_html: str) -> tuple[list[Chunk], list[str]]:
     """Return (chunks, extraction warnings)."""
     soup = BeautifulSoup(storage_html, "html.parser")  # stdlib parser; no ext entities
@@ -110,8 +132,9 @@ def extract_chunks(storage_html: str) -> tuple[list[Chunk], list[str]]:
         elif el.name == "table":
             flush()
             t = _table_to_text(el)
-            if t:
-                chunks.append(Chunk(t, " > ".join(heading_path), "table", len(chunks)))
+            for seg in split_table_text(t):
+                chunks.append(Chunk(seg, " > ".join(heading_path), "table",
+                                    len(chunks)))
         else:
             buf.append(el.get_text(" ", strip=True))
     flush()

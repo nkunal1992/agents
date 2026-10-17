@@ -228,6 +228,11 @@ wheel path for the install step — everything else is identical.
 5. **Answer.** `search` (if it returns `note: loading local models`, call it
    again; if `coverage: stale_model`, run `start_crawl` once and search again)
    → `get_evidence` for fuller text if needed →
+   Evidence items carry two honesty flags: `low_confidence: true`
+   means the reranker is weakly confident — answer but say the
+   match was partial and suggest a narrower page; `truncated:
+   true` means text was capped at 12000 chars — call
+   `get_evidence` for the full chunk before quoting.
    synthesize a concise answer mapping every factual sentence to a chunk →
    `verify_citations` with claim→chunk→quote mappings → fix or drop flagged
    claims → respond with citations + freshness footer.

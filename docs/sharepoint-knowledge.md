@@ -100,3 +100,19 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
 | `proxy` | informational — shows HTTPS_PROXY/HTTP_PROXY visibility | — |
 
 `doctor` exits non-zero while any flag is red.
+
+## Retrieval limits (by design)
+
+- Evidence text returned by `search` is capped at 12000 chars per chunk;
+  `truncated: true` flags it — `get_evidence` returns the full text.
+- FTS indexes at most the first 16 whitespace-separated query terms;
+  the dense + sparse legs carry longer questions.
+- Evidence scoring below ~0.3 rerank probability is flagged
+  `low_confidence: true`; below ~0.02 nothing is returned at all.
+- Whole-scope search caps at 100k chunks — connect a narrower scope on
+  bigger indexes.
+- The sparse leg is word-piece based: it adds little for CJK content
+  (dense + FTS still work); multilingual quality lives mostly in the
+  dense model.
+- `scripts/eval_rag.py` runs the opt-in real-model regression eval —
+  `CK_MODEL_HOME=<prepared-dir> python scripts/eval_rag.py`.

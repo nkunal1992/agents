@@ -197,6 +197,9 @@ class SPCrawler:
 
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
+        # deny/gone errors drop the item from the snapshot; transient
+        # failures keep the previously-indexed content
+        keep_failed: set[str] = set()
         # Mid-crawl model change: already-embedded pages live in the OLD
         # vector space — finishing would publish mixed dims. Wipe + fail;
         # start_crawl rebuilds under the new model.
@@ -264,6 +267,13 @@ class SPCrawler:
                     continue
             except AccessError as e:
                 errors.append(f"{entry}: {e}")
+                if not any(m in str(e) for m in
+                           ("401", "403", "404", "permission", "not found")):
+                    # seen stores the built page_id — page: / file: prefixed
+                    last = entry.split(":")[-1]
+                    keep_failed.add(
+                        f"page:{last}" if entry.startswith("page:")
+                        else f"file:{last}")
                 continue
             pid = page["page_id"]
             if pid in seen:
@@ -285,7 +295,7 @@ class SPCrawler:
             seen.add(pid)
 
         self._checkpoint(job_id, queue, errors, seen, levels, warns)
-        self.index.publish(seen)
+        self.index.publish(seen | keep_failed)
         self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             queue, errors)

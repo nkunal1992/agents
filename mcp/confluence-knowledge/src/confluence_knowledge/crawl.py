@@ -172,6 +172,9 @@ class Crawler:
 
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
+        # pages that fail with deny/gone errors are meant to drop out of the
+        # snapshot; transient failures keep their previously-indexed content
+        keep_failed: set[str] = set()
 
         # Mid-crawl model change: already-embedded pages live in the OLD
         # vector space — finishing this job would publish a mixed-dimension
@@ -216,6 +219,9 @@ class Crawler:
                 page = self._page(pid)
             except AccessError as e:
                 errors.append(f"page {pid}: {e}")
+                if not any(m in str(e) for m in
+                           ("401", "403", "404", "permission", "not found")):
+                    keep_failed.add(pid)
                 continue
             if pid != job["root_page"]:
                 anc = page.get("ancestors") or []
@@ -250,7 +256,7 @@ class Crawler:
             self.index.save_job(job_id, "running", queue, errors)
             state = "running"
         else:
-            self.index.publish(seen)
+            self.index.publish(seen | keep_failed)
             self.index.set_model_id(_MODEL_ID)
             self.index.save_job(job_id, "done", [], errors)
             state = "done"

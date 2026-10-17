@@ -39,7 +39,8 @@ MODEL_MARKER = f"{EMBED_MODEL_ID}+{SPARSE_MODEL_ID}"
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
 RERANK_MAX = 25          # bounds cross-encoder latency on CPU
-MIN_RERANK_SCORE = 0.3   # sigmoid floor — below this a hit is "least bad"
+MIN_RERANK_SCORE = 0.02  # noise floor — real reranker zeros junk at ~0.00
+LOW_CONFIDENCE_SCORE = 0.3  # below this the hit is surfaced but flagged
 MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
 EMBED_MAX_TOKENS = 512   # quantized model input cap (chunks stay under)
 RERANK_MAX_TOKENS = 512
@@ -374,11 +375,14 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
         evidence = []
         for i in order:
             if scores[i] < MIN_RERANK_SCORE:
-                # below the floor the reranker is only ranking "least bad" —
-                # surfacing it would ground the answer on noise
+                # below the noise floor the reranker is only ranking "least
+                # bad" — surfacing it would ground the answer on junk
                 continue
             c = dict(scored[i])
             c["rerank_score"] = float(scores[i])
+            # borderline matches are surfaced but flagged — the agent can
+            # caveat instead of answering on silently-weak evidence
+            c["low_confidence"] = bool(scores[i] < LOW_CONFIDENCE_SCORE)
             evidence.append(c)
     else:
         evidence = [dict(c, rerank_score=None) for c in candidates[:TOP_K_EVIDENCE]]

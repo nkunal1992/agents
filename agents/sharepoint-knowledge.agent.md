@@ -165,5 +165,10 @@ python3 -m venv ~/.sharepoint-knowledge/venv
    (skipped secrets, missing download URLs, oversized files). **Never call
    `search` while running.**
 5. **Answer.** `search` → `get_evidence` → synthesize with per-claim
+   Evidence items carry two honesty flags: `low_confidence: true`
+   means the reranker is weakly confident — answer but say the
+   match was partial and suggest a narrower page; `truncated:
+   true` means text was capped at 12000 chars — call
+   `get_evidence` for the full chunk before quoting.
    citations → `verify_citations` → fix/drop flagged claims → answer +
    coverage + freshness footer.

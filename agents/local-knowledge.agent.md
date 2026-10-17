@@ -173,6 +173,11 @@ accounts — the entire install is local files + models.
    unreadable files, unsupported types) — disclose, never hide.
    **Never call `search` while the crawl is running.**
 5. **Answer.** `search` → `get_evidence` for fuller text if needed →
+   Evidence items carry two honesty flags: `low_confidence: true`
+   means the reranker is weakly confident — answer but say the
+   match was partial and suggest a narrower page; `truncated:
+   true` means text was capped at 12000 chars — call
+   `get_evidence` for the full chunk before quoting.
    synthesize a concise answer mapping every factual sentence to a chunk →
    `verify_citations` → fix or drop flagged claims → respond with file
    citations + freshness footer.

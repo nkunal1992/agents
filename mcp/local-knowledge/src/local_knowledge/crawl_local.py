@@ -133,6 +133,7 @@ class LocalCrawler:
 
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
+        keep_failed: set[str] = set()  # transient read fails keep old content
         # Mid-crawl model change: already-embedded pages live in the OLD
         # vector space — finishing would publish mixed dims. Wipe + fail;
         # start_crawl rebuilds under the new model.
@@ -186,6 +187,7 @@ class LocalCrawler:
                 page, chunks = self._page(path)
             except SetupError as e:
                 errors.append(str(e))
+                keep_failed.add(self._rel(path))
                 continue
             rel = page["page_id"]
             if rel in seen:
@@ -208,7 +210,7 @@ class LocalCrawler:
         # persist final seen/levels/warns too — the in-loop checkpoint runs
         # before each item is processed, so the last item would undercount
         self._checkpoint(job_id, queue, errors, seen, levels, warns)
-        self.index.publish(seen)
+        self.index.publish(seen | keep_failed)
         self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             queue, errors)

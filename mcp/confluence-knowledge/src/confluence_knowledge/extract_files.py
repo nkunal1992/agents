@@ -12,7 +12,7 @@ import csv
 import io
 import zipfile
 
-from .extract import Chunk, extract_chunks
+from .extract import Chunk, extract_chunks, split_table_text
 from .settings import SetupError
 
 MAX_FILE_WORDS = 200_000   # ~1MB of text — beyond that, index metadata only
@@ -111,7 +111,9 @@ def _docx_chunks(data: bytes) -> list[Chunk]:
                 header, *body = rows
                 t = "\n".join([f"Table — columns: {header}"]
                               + [f"row {i}: {r}" for i, r in enumerate(body, 1)])
-                chunks.extend(_text_chunks(t, " > ".join(heading), "table"))
+                for seg in split_table_text(t):
+                    chunks.append(Chunk(seg, " > ".join(heading), "table",
+                                        len(chunks)))
     flush()
     return chunks
 
@@ -157,7 +159,9 @@ def _xlsx_chunks(data: bytes) -> list[Chunk]:
         header, *body = rows
         text = "\n".join([f"Table — columns: {header}"]
                          + [f"row {i}: {r}" for i, r in enumerate(body, 1)])
-        chunks.extend(_text_chunks(text, f"Sheet: {ws.title}", "table"))
+        for seg in split_table_text(text):
+            chunks.append(Chunk(seg, f"Sheet: {ws.title}", "table",
+                                len(chunks)))
     wb.close()
     return chunks
 
@@ -191,7 +195,8 @@ def _csv_chunks(data: bytes) -> list[Chunk]:
     header, *body = rows
     out = "\n".join([f"Table — columns: {' | '.join(header)}"]
                     + [f"row {i}: {' | '.join(r)}" for i, r in enumerate(body, 1)])
-    return _text_chunks(out, "", "table")
+    return [Chunk(seg, "", "table", i)
+            for i, seg in enumerate(split_table_text(out))]
 
 
 def extract_file_chunks(filename: str, data: bytes) -> tuple[list[Chunk], list[str]]:
