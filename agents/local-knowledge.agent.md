@@ -42,6 +42,10 @@ Then run the steps below end-to-end without pausing.
      missing — run `register` (step 3) + reload handoff. Never re-run
      install/prepare-models on a healthy setup.
    - a model missing → run ONLY `prepare-models` — do not reinstall.
+   - `update available` in doctor's output → upgrade once via the venv
+     python (`"$VENV_PY" -m pip install -U "local-knowledge[models]"` —
+     works on every OS; the `update` subcommand prints this same command on
+     Windows where a running exe can't self-replace), then re-doctor.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
    order and keep the first that prints ≥3.11: `python3.13`, `python3.12`,
    `python3.11`, `python3`, `python`, `py` (Windows). On macOS the system

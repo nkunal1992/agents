@@ -44,6 +44,10 @@ pausing between them; the user sees each command anyway.
      handoff. Never re-run install/prepare-models on a healthy setup.
    - `configured: false` or a model missing → run ONLY the missing step
      (setup / prepare-models) — do not reinstall the package.
+   - `update available` in doctor's output → upgrade once via the venv
+     python (`"$VENV_PY" -m pip install -U "confluence-knowledge[models]"` —
+     works on every OS; the `update` subcommand prints this same command on
+     Windows where a running exe can't self-replace), then re-doctor.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
    order and keep the first that prints ≥3.11: `python3.13`, `python3.12`,
    `python3.11`, `python3`, `python`, `py` (Windows). On macOS the system
@@ -90,11 +94,21 @@ pausing between them; the user sees each command anyway.
    mcp.json`) and the workspace `.vscode/mcp.json`, merging with any existing
    servers and backing up first. If it reports "backup-replaced", tell the
    user their old config was moved to `<file>.bak` and to re-add other servers.
-5. **Credentials — the only manual step.** Tell the user to run, **in their own
-   terminal** (input is hidden, goes to the OS keyring): `confluence-knowledge
-   setup` — the wizard asks Cloud vs Data Center, prints the exact
-   token-creation steps, and heartbeats the connection. Never ask them to
-   paste a token into chat. If heartbeat fails with
+5. **Credentials — the only manual step.** First brief the user so the token
+   already exists before the wizard asks for it — print:
+   "Before we continue you'll need a Confluence token:
+   - **Cloud** (`*.atlassian.net`): sign in to `id.atlassian.com` →
+     Security → Create and manage API tokens → Create API token (Confluence
+     read scopes if offered).
+   - **Data Center / corporate Confluence**: sign in to *your Confluence
+     site* → profile picture → Settings → **Personal Access Tokens** →
+     Create token (read access is enough). `id.atlassian.com` doesn't apply
+     to corporate sites — the token is created inside Confluence itself.
+   Keep the token and your site URL handy."
+   Then tell them to run, **in their own terminal** (input is hidden, goes
+   to the OS keyring): `confluence-knowledge setup` — the wizard asks Cloud
+   vs Data Center, repeats these steps, and heartbeats the connection.
+   Never ask them to paste a token into chat. If heartbeat fails with
    `SSL: CERTIFICATE_VERIFY_FAILED`, the fix is
    `$VENV/bin/python -m pip install pip-system-certs` (bundled in ≥0.1.5 —
    only needed for older installs).

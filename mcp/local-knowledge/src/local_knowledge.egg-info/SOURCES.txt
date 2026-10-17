@@ -11,6 +11,7 @@ src/local_knowledge.egg-info/dependency_links.txt
 src/local_knowledge.egg-info/entry_points.txt
 src/local_knowledge.egg-info/requires.txt
 src/local_knowledge.egg-info/top_level.txt
+tests/test_agent_doc_consistency.py
 tests/test_crawl_local.py
 tests/test_extract_files.py
 tests/test_server_flow_local.py

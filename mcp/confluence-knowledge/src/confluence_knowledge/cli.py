@@ -94,9 +94,21 @@ def _wizard() -> int:
 
 def _doctor() -> int:
     from .server import status
+    from .update import check
     try:
         s = status()
         print(json.dumps(s, indent=2))
+        upd = check("confluence-knowledge")
+        if upd["installed"]:
+            line = f"version: {upd['installed']}"
+            if upd["latest"]:
+                line += f" (latest: {upd['latest']})"
+            elif upd["latest"] is None:
+                line += " (latest: unchecked — offline or internal mirror)"
+            print(line)
+        if upd["update_available"]:
+            print("update available: run `confluence-knowledge update` "
+                  "(or pip install -U confluence-knowledge[models])")
         if s.get("configured"):
             from .server import _client_for  # internal but fine in CLI
             profile = SiteProfile.load(default_home())
@@ -122,6 +134,7 @@ def main() -> None:
     sub.add_parser("setup", help="guided credential + config setup")
     sub.add_parser("doctor", help="verify config, credentials, models")
     sub.add_parser("prepare-models", help="download the pinned local models")
+    sub.add_parser("update", help="upgrade this package via pip -U")
     reg = sub.add_parser(
         "register",
         help="write this server into the IDE's MCP config (no manual paste)")
@@ -145,6 +158,22 @@ def main() -> None:
         for line in prepare_models(default_home()):
             print(line)
         return
+    if args.cmd == "update":
+        import subprocess
+        cmd = [sys.executable, "-m", "pip", "install", "-U",
+               "confluence-knowledge[models]"]
+        if os.name == "nt":
+            # this exe is the running process on Windows — pip can't replace
+            # a file that's in use; hand the user the equivalent python -m
+            # pip command instead (same mechanism `pip install -U pip` uses)
+            print("on Windows, upgrade via the venv python directly:\n  "
+                  + " ".join(f'"{c}"' if " " in c else c for c in cmd))
+            return
+        r = subprocess.run(cmd, check=False)
+        if r.returncode == 0:
+            print("\nupdated — models are pinned and unchanged; "
+                  "run `confluence-knowledge doctor` to confirm")
+        sys.exit(r.returncode)
     if args.cmd == "register":
         from .registration import register
         try:
