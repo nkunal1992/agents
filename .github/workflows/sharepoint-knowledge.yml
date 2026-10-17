@@ -36,6 +36,7 @@ jobs:
       - name: Unit tests (offline — no models, no network)
         run: pytest mcp/sharepoint-knowledge/tests -q
       - name: CLI smoke
+        shell: bash
         run: sharepoint-knowledge --help >/dev/null
 
   e2e:

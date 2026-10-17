@@ -36,6 +36,7 @@ jobs:
       - name: Unit tests (offline — no models, no network)
         run: pytest mcp/local-knowledge/tests -q
       - name: CLI smoke
+        shell: bash
         run: local-knowledge --help >/dev/null
 
   e2e:
