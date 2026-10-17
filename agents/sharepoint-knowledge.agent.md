@@ -39,7 +39,10 @@ config — then you'll do a one-time Entra sign-in in your own terminal and
 reload once." Then run the steps below end-to-end.
 
 0. **Already installed?** If `~/.sharepoint-knowledge/venv` (or
-   `%USERPROFILE%\.sharepoint-knowledge\venv`) exists, run its
+   `%USERPROFILE%\.sharepoint-knowledge\venv`) exists, first verify the
+   venv python itself works — `"$VENV_PY" --version` must print ≥3.11
+   (a partially deleted/broken venv still LOOKS installed; rebuild from
+   step 1 if it fails) — then run its
    `sharepoint-knowledge doctor` first:
    `sharepoint-knowledge doctor` prints a **checks** block — each flag maps
    to exactly one fix; run ONLY that fix, never reinstall on red flags:
@@ -71,6 +74,10 @@ reload once." Then run the steps below end-to-end.
       `"$VENV_PY" -m pip install "<wheel>[models]"`
    c. **Pip index** — `"$VENV_PY" -m pip install "sharepoint-knowledge[models]"`
    d. **Ask the user** where they extracted the bundle → install from that path.
+   Note: if a pip *source* install fails inside the build environment with
+   an `AssertionError` mentioning `_distutils_hack`/`distutils` (a known
+   `pip-system-certs` conflict on Python ≤3.11), rerun the same command
+   with `SETUPTOOLS_USE_DISTUTILS=stdlib` prepended.
    Only if all four fail → Manual Setup block below.
    Venv first (Windows: `py -m venv "%USERPROFILE%\.sharepoint-knowledge\venv"`;
    macOS/Linux: `"$PY" -m venv ~/.sharepoint-knowledge/venv`), then use its

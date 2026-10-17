@@ -153,6 +153,9 @@ def main() -> None:
         import subprocess
         cmd = [sys.executable, "-m", "pip", "install", "-U",
                "sharepoint-knowledge[models]"]
+        # a running MCP server holds open files — quit the IDE first
+        print("note: quit the IDE (or stop the MCP server) before updating —"
+              " a running server can't be replaced cleanly", flush=True)
         if os.name == "nt":
             print("on Windows, upgrade via the venv python directly:\n  "
                   + " ".join(f'"{c}"' if " " in c else c for c in cmd))

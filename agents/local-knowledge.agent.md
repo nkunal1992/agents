@@ -36,7 +36,10 @@ register the IDE config — then reload once. **No credentials needed.**"
 Then run the steps below end-to-end without pausing.
 
 0. **Already installed?** If `~/.local-knowledge/venv` (or
-   `%USERPROFILE%\.local-knowledge\venv`) exists, run its
+   `%USERPROFILE%\.local-knowledge\venv`) exists, first verify the
+   venv python itself works — `"$VENV_PY" --version` must print ≥3.11
+   (a partially deleted/broken venv still LOOKS installed; rebuild from
+   step 1 if it fails) — then run its
    `local-knowledge doctor` prints a **checks** block — each flag maps to
    exactly one fix; run ONLY that fix, never reinstall on red flags:
    - `deps ✗` → `"$VENV_PY" -m pip install -U "local-knowledge[models]"`
@@ -73,6 +76,10 @@ Then run the steps below end-to-end without pausing.
    d. **Ask the user** — "Where did you extract the local-knowledge bundle
       zip? I'll install the `service/` (or the `.whl`) from that path."
       → install from the given path.
+   Note: if a pip *source* install fails inside the build environment with
+   an `AssertionError` mentioning `_distutils_hack`/`distutils` (a known
+   `pip-system-certs` conflict on Python ≤3.11), rerun the same command
+   with `SETUPTOOLS_USE_DISTUTILS=stdlib` prepended.
    Only if all four fail, give the Manual Setup block below.
 
    First create the venv once (Windows: `py -m venv

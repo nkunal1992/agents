@@ -169,6 +169,11 @@ def main() -> None:
         import subprocess
         cmd = [sys.executable, "-m", "pip", "install", "-U",
                "confluence-knowledge[models]"]
+        # a running MCP server holds open files — on Windows pip can't
+        # replace them and on any OS the old code keeps serving until the
+        # IDE restarts. Say it plainly before doing anything.
+        print("note: quit the IDE (or stop the MCP server) before updating —"
+              " a running server can't be replaced cleanly", flush=True)
         if os.name == "nt":
             # this exe is the running process on Windows — pip can't replace
             # a file that's in use; hand the user the equivalent python -m

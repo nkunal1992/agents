@@ -18,7 +18,9 @@ from .client import AccessError, ConfluenceClient, SecurityException, make_clien
 from .crawl import Crawler
 from .index import Index
 from .retrieval import (
-    EMBED_MODEL_ID,
+    MODEL_MARKER as EMBED_MODEL_ID,
+)
+from .retrieval import (
     LocalEmbedder,
     LocalReranker,
     LocalSparseEmbedder,

@@ -125,10 +125,18 @@ def register(ide: str = "auto", workspace: Path | None = None,
     return [(f, _merge(f, entry, server_id)) for f in files]
 
 
-def registered_paths(server_id: str = SERVER_ID) -> list[Path]:
-    """Existing config files that already contain our server — for doctor."""
+def registered_paths(server_id: str = SERVER_ID,
+                     workspace: Path | None = None) -> list[Path]:
+    """Existing config files that already contain our server — for doctor.
+    `workspace` also probes workspace-scoped mcp.json files (a
+    `register --ide vscode --workspace <repo>` leaves no user-level trace)."""
     out = []
-    for p in targets("all"):
+    probes = targets("all")
+    if workspace:
+        probes += [_workspace_mcp(p) for p in
+                   {workspace, workspace / ".vscode" if workspace.name != ".vscode"
+                     else workspace.parent}]
+    for p in dict.fromkeys(q for q in probes if q):
         try:
             servers = json.loads(p.read_text()).get("servers", {})
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):

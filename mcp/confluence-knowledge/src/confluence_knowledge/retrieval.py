@@ -33,10 +33,14 @@ RERANK_ONNX = "onnx/model_quantized.onnx"
 RERANK_BASE_REPO = "onnx-community/bge-reranker-base-ONNX"  # light override
 
 EMBED_MODEL_ID = "bge-m3-onnx-quantized"
+SPARSE_MODEL_ID = "qdrant-bm25-fastembed"
+MODEL_MARKER = f"{EMBED_MODEL_ID}+{SPARSE_MODEL_ID}"
 
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
 RERANK_MAX = 25          # bounds cross-encoder latency on CPU
+MIN_RERANK_SCORE = 0.3   # sigmoid floor — below this a hit is "least bad"
+MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
 EMBED_MAX_TOKENS = 512   # quantized model input cap (chunks stay under)
 RERANK_MAX_TOKENS = 512
 
@@ -188,13 +192,21 @@ def prepare_models(home: Path) -> list[str]:
         spec = lock["models"][key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         if dest.exists():
-            complete = all((dest / f).exists() for f in spec["files"])
-            if complete:
+            files_ok = all((dest / f).exists() for f in spec["files"])
+            stamp = dest / ".revision"
+            if files_ok and not stamp.exists():
+                # pre-stamp install — verify files, then stamp in place
+                stamp.write_text(spec["revision"])
+            if files_ok and stamp.read_text().strip() == spec["revision"]:
                 out.append(f"already prepared: {spec['repo']}")
                 continue
-            shutil.rmtree(dest)  # partial/interrupted → refetch
+            if stamp.exists() and stamp.read_text().strip() != spec["revision"]:
+                shutil.rmtree(dest)  # wrong revision — untrusted, refetch
+            # else: missing files but right revision — snapshot_download
+            # resumes/skips valid files; only the gaps re-download
         snapshot_download(repo_id=spec["repo"], revision=spec["revision"],
                           local_dir=dest, allow_patterns=spec["files"])
+        (dest / ".revision").write_text(spec["revision"])
         if not _license_ok(dest):
             _license_ok_upstream(dest, spec, snapshot_download)
         if not _license_ok(dest):
@@ -212,6 +224,16 @@ def prepare_models(home: Path) -> list[str]:
         out.append(f"prepared {spec['repo']} ({spec['license']})")
     except Exception as e:
         raise SetupError(f"couldn't fetch sparse model {spec['repo']}: {e}") from e
+
+    # GC: remove model dirs not owned by the current lock — superseded
+    # revisions and legacy models (e.g. the old MiniLM stack) otherwise
+    # accumulate ~600 MB each in the user's home.
+    owned = {lock["models"][k]["repo"].split("/")[-1]
+             for k in ("embed", "rerank", "rerank_light")} | {"fastembed"}
+    for d in models.iterdir():
+        if d.is_dir() and d.name not in owned:
+            shutil.rmtree(d, ignore_errors=True)
+            out.append(f"removed stale model dir: {d.name}")
     return out
 
 
@@ -247,7 +269,13 @@ def models_complete(home: Path) -> dict:
         spec = lock[key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         missing = [f for f in spec["files"] if not (dest / f).exists()]
-        out[key] = {"ok": not missing, "missing": missing}
+        wrong_rev = (dest.exists() and not missing
+                     and (dest / ".revision").exists()
+                     and (dest / ".revision").read_text().strip()
+                         != spec["revision"])
+        out[key] = {"ok": not missing and not wrong_rev,
+                    "missing": missing or (["<wrong revision>"]
+                                            if wrong_rev else [])}
     fe = _models_dir(home) / "fastembed"
     out["sparse"] = {"ok": fe.exists() and any(fe.iterdir()), "missing": []}
     return out
@@ -275,6 +303,12 @@ def _cosine(q: np.ndarray, mat: dict[str, np.ndarray]) -> list[tuple[str, float]
     if not mat:
         return []
     ids = list(mat)
+    # a model swap can leave mismatched-dim blobs — skip, never crash
+    good = [i for i in ids if mat[i].shape == q.shape]
+    if len(good) < len(ids):
+        ids = good
+    if not ids:
+        return []
     m = np.stack([mat[i] for i in ids])
     m = m / (np.linalg.norm(m, axis=1, keepdims=True) + 1e-9)
     q = q / (np.linalg.norm(q) + 1e-9)
@@ -299,14 +333,22 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     chunks = index.active_chunks()
     if not chunks:
         return []
+    if len(chunks) > MAX_SEARCHABLE_CHUNKS:
+        from .settings import SetupError
+        raise SetupError(
+            f"index holds {len(chunks):,} chunks — searching the whole scope "
+            "at once is unsupported. Connect a narrower scope (or re-index "
+            "with a smaller root).")
 
     # dense leg
     qvec = embedder.embed([query])[0]
     vecs = index.vectors_for([c["chunk_id"] for c in chunks])
     dense_rank = [cid for cid, _ in _cosine(qvec, vecs)][:TOP_K_RETRIEVE]
 
-    # keyword leg
-    fts_rank = [cid for cid, _ in index.fts_search(query)][:TOP_K_RETRIEVE]
+    # keyword leg — reuse the fetched set; fts_search would re-load it
+    active_ids = {c["chunk_id"] for c in chunks}
+    fts_rank = [cid for cid, _ in
+                index.fts_search(query, active=active_ids)][:TOP_K_RETRIEVE]
 
     # sparse leg (optional — learned term weights)
     sparse_rank: list[str] = []
@@ -331,6 +373,10 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
         order = np.argsort(-scores)[:TOP_K_EVIDENCE]
         evidence = []
         for i in order:
+            if scores[i] < MIN_RERANK_SCORE:
+                # below the floor the reranker is only ranking "least bad" —
+                # surfacing it would ground the answer on noise
+                continue
             c = dict(scored[i])
             c["rerank_score"] = float(scores[i])
             evidence.append(c)
@@ -356,7 +402,18 @@ def check_citations(evidence: list[dict], mappings: list[dict]) -> dict:
             bad.append({"claim": m.get("claim", "")[:80], "reason": "chunk not in evidence set"})
             continue
         quote = m.get("quote", "")
-        if quote and quote not in ch["text"]:
+        if quote and _norm(quote) not in _norm(ch["text"]):
             bad.append({"claim": m.get("claim", "")[:80],
                         "reason": "quote not present verbatim in cited chunk"})
     return {"ok": not bad, "violations": bad}
+
+
+def _norm(s: str) -> str:
+    """Typography-insensitive form for citation matching — docx extraction
+    leaves smart quotes/NBSP/dashes that shouldn't fail a true quote."""
+    import unicodedata
+    s = unicodedata.normalize("NFKC", s)
+    for a, b in (("‘", "'"), ("’", "'"), ("“", '"'), ("”", '"'),
+                 ("–", "-"), ("—", "-"), (" ", " "), ("−", "-")):
+        s = s.replace(a, b)
+    return " ".join(s.split())

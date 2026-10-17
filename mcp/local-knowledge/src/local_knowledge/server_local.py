@@ -14,7 +14,9 @@ import threading
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.index import Index
 from confluence_knowledge.retrieval import (
-    EMBED_MODEL_ID,
+    MODEL_MARKER as EMBED_MODEL_ID,
+)
+from confluence_knowledge.retrieval import (
     LocalEmbedder,
     LocalReranker,
     LocalSparseEmbedder,

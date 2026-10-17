@@ -88,8 +88,7 @@ def main() -> None:
     check(flags.get("creds_valid"), "valid token → creds flag green", flags)
 
     # break 1: partial model
-    (home / "models" / "bge-m3" / "onnx" /
-     "sentence_transformers_quantized.onnx").unlink()
+    (home / "models" / "bge-m3" / "tokenizer_config.json").unlink()
     d = run([str(cli), "doctor"], env, check_rc=False)
     check("model_embed" in d.stdout and d.returncode != 0,
           "partial model flagged + non-zero", d.stdout)

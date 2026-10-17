@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 from confluence_knowledge import retrieval
+from confluence_knowledge.extract import Chunk
 from confluence_knowledge.index import Index
+from confluence_knowledge.retrieval import MODEL_MARKER
 
 
 class _C:
@@ -74,5 +76,55 @@ def test_sparse_leg_optional(tmp_path):
 def test_model_marker(tmp_path):
     idx = Index(tmp_path / "i.db")
     assert idx.model_id() is None           # pre-0.5 index → no marker
-    idx.set_model_id("bge-m3-onnx-quantized")
-    assert idx.model_id() == "bge-m3-onnx-quantized"
+    idx.set_model_id(MODEL_MARKER)
+    assert idx.model_id() == MODEL_MARKER
+
+
+def test_sparse_id_int64_range(tmp_path):
+    """fastembed Qdrant/bm25 emits int64 hashed ids — int32 packing would
+    silently wrap ids >2^31 and kill the sparse leg (C-4 hunt bug)."""
+    idx = Index(tmp_path / "i.db")
+    huge = 2**31 + 12345      # > int32 range — wraps negative if packed as i4
+    c = Chunk(text="word", heading_path="", kind="text", ordinal=0,
+              chunk_id="c1")
+    p = {"page_id": "p", "parent_id": None, "title": "t", "url": "u",
+         "level": 0, "version": "", "warnings": ""}
+    idx.upsert_page(p, [c], vecs=None, sparse=[{huge: 1.5}])
+    idx.publish({"p"})
+    got = idx.sparse_for(["c1"])
+    assert huge in got["c1"], "sparse id >2^31 must round-trip intact"
+    assert got["c1"][huge] == pytest.approx(1.5)
+
+
+def test_cosine_mixed_dims_skips(tmp_path):
+    """A model swap can leave mismatched-dim blobs — retrieval must skip
+    them, not crash np.stack (C-1 hunt bug)."""
+    q = np.ones(8, dtype=np.float32)
+    mat = {"ok": np.ones(8, dtype=np.float32),
+           "stale": np.ones(4, dtype=np.float32)}
+    ranked = retrieval._cosine(q, mat)
+    assert [cid for cid, _ in ranked] == ["ok"]
+
+
+def test_step_aborts_on_stale_model_mid_crawl(tmp_path):
+    """Job checkpointed under an old model must not resume mixing dims —
+    scope is wiped and the job errors so start_crawl rebuilds (C-1)."""
+    idx = Index(tmp_path / "i.db")
+    idx.set_model_id("old-model-marker")
+    # a page already indexed under the old model
+    c = Chunk(text="stale", heading_path="", kind="text", ordinal=0,
+              chunk_id="c1")
+    idx.upsert_page({"page_id": "p1", "parent_id": None, "title": "t",
+                     "url": "u", "level": 0, "version": "", "warnings": ""},
+                    [c], vecs=None, sparse=None)
+    idx.create_job("j1", "root")
+    idx.save_job("j1", "running", ["page:2", "page:3"], [])
+    idx.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", ("seen:j1", '["p1"]')); idx.db.commit()
+
+    from confluence_knowledge.crawl import Crawler
+    cr = Crawler(client=None, index=idx, env="datacenter")
+    r = cr.step("j1", batch=None, budget_s=None)
+    assert r["state"] == "error"
+    assert "model changed" in r["errors"][0]
+    assert idx.model_id() is None            # marker wiped
+    assert idx.active_chunks() == []         # stale content cleared

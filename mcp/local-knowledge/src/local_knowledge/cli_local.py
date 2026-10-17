@@ -79,6 +79,9 @@ def main() -> None:
         import subprocess
         cmd = [sys.executable, "-m", "pip", "install", "-U",
                "local-knowledge[models]"]
+        # a running MCP server holds open files — quit the IDE first
+        print("note: quit the IDE (or stop the MCP server) before updating —"
+              " a running server can't be replaced cleanly", flush=True)
         if os.name == "nt":
             # this exe is the running process on Windows — pip can't replace
             # a file that's in use; hand the user the equivalent command

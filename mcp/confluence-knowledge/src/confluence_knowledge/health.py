@@ -43,7 +43,7 @@ def _models_checks(home: Path, cli: str) -> list[dict]:
 def _index_checks(index_root: Path) -> list[dict]:
     """Per-scope index: integrity + stale-model marker. Detection only."""
     from .index import Index
-    from .retrieval import EMBED_MODEL_ID
+    from .retrieval import MODEL_MARKER as EMBED_MODEL_ID
     if not index_root.exists():
         return []
     out = []
@@ -86,7 +86,7 @@ def health_checks(home: Path, workdir: Path, server_id: str, cli: str,
 
     try:
         from .registration import registered_paths
-        regs = registered_paths(server_id=server_id)
+        regs = registered_paths(server_id=server_id, workspace=workdir)
         ok = bool(regs)
         checks.append({"flag": "registration", "ok": ok,
                        "detail": (", ".join(str(p) for p in regs) if regs

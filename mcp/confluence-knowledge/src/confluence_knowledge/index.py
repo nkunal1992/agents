@@ -149,7 +149,8 @@ class Index:
                         "INSERT INTO vectors VALUES (?,?)",
                         (c.chunk_id, vecs[i].astype(np.float32).tobytes()))
                 if sparse is not None and i < len(sparse) and sparse[i]:
-                    idx_arr = np.fromiter(sparse[i].keys(), dtype=np.int32)
+                    # bm25 ids are int64 — int32 silently wraps high hashes
+                    idx_arr = np.fromiter(sparse[i].keys(), dtype=np.int64)
                     val_arr = np.fromiter(sparse[i].values(), dtype=np.float32)
                     self.db.execute(
                         "INSERT INTO sparse_vectors VALUES (?,?)",
@@ -165,15 +166,28 @@ class Index:
             for cid, blob in self.db.execute(
                     f"SELECT chunk_id,payload FROM sparse_vectors "
                     f"WHERE chunk_id IN ({q})", chunk_ids):
-                # layout: int32[n] indices + float32[n] values → n = len/8
-                k = len(blob) // 8
-                idx = np.frombuffer(blob[:4 * k], dtype=np.int32)
-                vals = np.frombuffer(blob[4 * k:], dtype=np.float32)
+                # layout: int64[n] indices + float32[n] values → n = len/12
+                k = len(blob) // 12
+                idx = np.frombuffer(blob[:8 * k], dtype=np.int64)
+                vals = np.frombuffer(blob[8 * k:], dtype=np.float32)
                 out[cid] = dict(zip(idx.tolist(), vals.tolist()))
         return out
 
     def model_id(self) -> str | None:
         return self.meta_get("embed_model")
+
+    def clear_scope(self) -> None:
+        """Drop all indexed content (pages/chunks/vectors) + the model
+        marker. Job rows are kept for history. Used when a model change
+        makes the existing vector space invalid."""
+        with self.lock:
+            for t in ("pages", "chunks", "chunks_fts", "vectors",
+                      "sparse_vectors"):
+                self.db.execute(f"DELETE FROM {t}")
+            self.db.execute(
+                "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
+                " OR key LIKE 'levels:%'")
+            self.db.commit()
 
     def set_model_id(self, model_id: str) -> None:
         with self.lock, self.db:
@@ -205,7 +219,8 @@ class Index:
                     for r in self.db.execute(
                         "SELECT chunk_id,page_id,heading,kind,text FROM chunks WHERE active=1")]
 
-    def fts_search(self, query: str, limit: int = 30) -> list[tuple[str, float]]:
+    def fts_search(self, query: str, limit: int = 30,
+                   active: set[str] | None = None) -> list[tuple[str, float]]:
         with self.lock:
             try:
                 rows = self.db.execute(
@@ -216,7 +231,8 @@ class Index:
                      limit)).fetchall()
             except sqlite3.OperationalError:
                 return []
-        active = {c["chunk_id"] for c in self.active_chunks()}
+        if active is None:
+            active = {c["chunk_id"] for c in self.active_chunks()}
         return [(r[0], -r[1]) for r in rows if r[0] in active]
 
     def vectors_for(self, chunk_ids: list[str]) -> dict[str, np.ndarray]:

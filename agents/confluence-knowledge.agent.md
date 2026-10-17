@@ -37,8 +37,11 @@ own terminal and reload once." Then run the steps below end-to-end without
 pausing between them; the user sees each command anyway.
 
 0. **Already installed?** If `~/.confluence-knowledge/venv` (or
-   `%USERPROFILE%\.confluence-knowledge\venv`) exists, run its
-   `confluence-knowledge doctor` first:
+   `%USERPROFILE%\.confluence-knowledge\venv`) exists, first verify the
+   venv python itself works — `"$VENV_PY" --version` must print ≥3.11
+   (a partially deleted/broken venv still LOOKS installed; rebuild from
+   step 1 if it fails) — then run its
+   `confluence-knowledge doctor`:
    `confluence-knowledge doctor` prints a **checks** block — each flag maps
    to exactly one fix; run ONLY that fix, never reinstall on red flags:
    - `configured: false` or `creds_valid ✗` → `setup` (rotate credentials)
@@ -81,6 +84,10 @@ pausing between them; the user sees each command anyway.
    d. **Ask the user** — "Where did you extract the confluence-knowledge
       bundle zip? I'll install the `service/` (or the `.whl`) from that
       path." → install from the given path.
+   Note: if a pip *source* install fails inside the build environment with
+   an `AssertionError` mentioning `_distutils_hack`/`distutils` (a known
+   `pip-system-certs` conflict on Python ≤3.11), rerun the same command
+   with `SETUPTOOLS_USE_DISTUTILS=stdlib` prepended.
    Only if all four fail, give the Manual Setup block below.
 
    First create the venv once (Windows: `py -m venv

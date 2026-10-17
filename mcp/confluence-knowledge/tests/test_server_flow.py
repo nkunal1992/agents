@@ -100,7 +100,8 @@ class _FakeEmbedder:
 class _FakeReranker:
     def score(self, query, docs):
         import numpy as np
-        return np.arange(len(docs), dtype=np.float32)
+        # descending 0.9, 0.8, … — above the 0.3 evidence floor
+        return np.linspace(0.9, 0.5, len(docs), dtype=np.float32)
 
 
 def test_full_agent_flow_with_models(wired, monkeypatch):

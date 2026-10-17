@@ -32,7 +32,7 @@ def resolve_root(path: str) -> Path:
     return p.resolve()
 
 
-from confluence_knowledge.retrieval import EMBED_MODEL_ID as _MODEL_ID
+from confluence_knowledge.retrieval import MODEL_MARKER as _MODEL_ID
 
 
 class LocalCrawler:
@@ -133,6 +133,18 @@ class LocalCrawler:
 
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
+        # Mid-crawl model change: already-embedded pages live in the OLD
+        # vector space — finishing would publish mixed dims. Wipe + fail;
+        # start_crawl rebuilds under the new model.
+        stamped = self.index.model_id()
+        if stamped is not None and stamped != _MODEL_ID and queue:
+            self.index.clear_scope()
+            errors = errors + [
+                (f"model changed mid-crawl ({stamped} → {_MODEL_ID}) — "
+                 "index cleared; run start_crawl")]
+            self.index.save_job(job_id, "error", [], errors)
+            return {"job_id": job_id, "state": "error",
+                    "remaining": 0, "errors": errors}
         seen_raw = self.index.meta_get(f"seen:{job_id}")
         seen: set[str] = set(json.loads(seen_raw)) if seen_raw else set()
         levels_raw = self.index.meta_get(f"levels:{job_id}")

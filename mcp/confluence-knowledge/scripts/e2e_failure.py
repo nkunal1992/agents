@@ -70,8 +70,7 @@ def main() -> None:
         run([str(cli), "prepare-models"], env, "prepare-models")
 
     # ---- break 1: partial model dir ------------------------------------
-    onnx = (home / "models" / "bge-m3" / "onnx" /
-            "sentence_transformers_quantized.onnx")
+    onnx = (home / "models" / "bge-m3" / "tokenizer_config.json")
     onnx.unlink()
     d = run([str(cli), "doctor"], env, check_rc=False)
     check("model_embed" in d.stdout and "prepare-models" in d.stdout,

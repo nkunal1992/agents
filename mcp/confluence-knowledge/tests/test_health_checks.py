@@ -2,9 +2,11 @@
 
 
 import pytest
+from pathlib import Path
 
 from confluence_knowledge.health import health_checks
 from confluence_knowledge.index import Index
+from confluence_knowledge.retrieval import MODEL_MARKER
 from confluence_knowledge.settings import SetupError
 
 
@@ -78,7 +80,7 @@ def test_index_healthy_passes(tmp_path):
     idx_root = tmp_path / "idx"
     idx_root.mkdir()
     idx = Index(idx_root / "scope1.db")
-    idx.set_model_id("bge-m3-onnx-quantized")
+    idx.set_model_id(MODEL_MARKER)
     checks = health_checks(tmp_path / "home", tmp_path / "work", "sid", "ck",
                            index_root=idx_root)
     f = [c for c in checks if c["flag"].startswith("index:")]
@@ -118,3 +120,25 @@ def test_every_red_flag_has_a_remediation(tmp_path, monkeypatch):
     assert red  # some flags SHOULD be red on a bare tmp home
     for c in red:
         assert c["remediation"], f"red flag {c['flag']} has no remediation"
+
+
+def test_documented_flags_exist(tmp_path, monkeypatch):
+    """Every flag named in the agent's remediation table must be a flag
+    doctor can actually emit — drift silently strands users (hunt F)."""
+    import re
+    monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(tmp_path))
+    monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path / "w"))
+    idx_root = tmp_path / "idx"
+    idx_root.mkdir()
+    Index(idx_root / "scope.db")  # so index:* flags are emitted
+    checks = health_checks(tmp_path / "home", tmp_path / "w",
+                           "confluence-knowledge", "confluence-knowledge",
+                           index_root=idx_root)
+    emitted = {c["flag"].split(":")[0] for c in checks}
+    emitted.add("creds_valid")  # network flag — status() level, not here
+    agent = (Path(__file__).parents[3] / "agents"
+             / "confluence-knowledge.agent.md").read_text()
+    documented = set(re.findall(r"`(deps|model_\w+|registration|index|"
+                              r"disk_free|python|proxy|creds_valid)", agent))
+    missing = documented - emitted
+    assert not missing, f"agent documents flags doctor never emits: {missing}"
