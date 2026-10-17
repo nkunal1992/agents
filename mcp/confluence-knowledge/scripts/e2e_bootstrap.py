@@ -39,9 +39,9 @@ REPO_SVC = Path(__file__).resolve().parents[1]
 BUNDLE_SVC = REPO_SVC.parents[1] / "dist" / "confluence-knowledge-bundle" / "service"
 
 
-def run(argv, env, ok_msg):
+def run(argv, env, ok_msg, check_rc=True):
     p = subprocess.run(argv, check=False, env=env, capture_output=True, text=True, timeout=600)
-    if p.returncode != 0:
+    if check_rc and p.returncode != 0:
         print(f"FAIL: {' '.join(map(str, argv))}\n{p.stdout}\n{p.stderr}",
               flush=True)
         os._exit(1)
@@ -109,8 +109,12 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False):
     (ck_home / "profile.json").write_text(json.dumps(
         {"env": "datacenter", "base_url": base, "email": None,
          "credential_ref": "e2e"}))
-    doctor = run([str(cli), "doctor"], env, "doctor: configured + models + heartbeat")
+    # pre-register doctor: registration flag is correctly red (exit 4)
+    doctor = run([str(cli), "doctor"], env,
+                 "doctor: configured + models + heartbeat", check_rc=False)
     check('"configured": true' in doctor.stdout, "doctor reports configured")
+    check('"flag": "registration"' in doctor.stdout,
+          "pre-register doctor flags missing registration", doctor.stdout)
 
     # 5. register — the new step: agent writes IDE config itself
     ws = sandbox / "repo"
@@ -133,6 +137,12 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False):
           "register: merged existing .vscode/mcp.json without clobbering")
     entry = merged["servers"]["confluence-knowledge"]
     check(entry["command"] == str(vpy), "register: points at the venv python")
+
+    # post-register doctor: all flags green → exit 0
+    doctor = run([str(cli), "doctor"], env,
+                 "doctor green after register", check_rc=False)
+    check(doctor.returncode == 0 and '"ok": false' not in doctor.stdout,
+          "all health flags green after register", doctor.returncode)
 
     return vpy, env, srv, base, hits
 

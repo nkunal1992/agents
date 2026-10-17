@@ -78,9 +78,10 @@ def main() -> None:
     check(d.returncode != 0, "doctor exits non-zero on red flag", d.returncode)
     run([str(cli), "prepare-models"], env, "remediation: re-fetch model")
     d = run([str(cli), "doctor"], env, check_rc=False)
-    tail = d.stdout.split("health flags")[-1]
-    check("model_embed" not in tail,
-          "model flag cleared after prepare-models", tail)
+    flags = {c["flag"]: c["ok"] for c in
+             __import__("json").JSONDecoder().raw_decode(d.stdout)[0]
+             .get("checks", [])}
+    check(flags.get("model_embed") is True, "model flag cleared", flags)
 
     # ---- break 2: corrupt index ----------------------------------------
     idx_root = work / ".conf_knowledge_index"
@@ -125,8 +126,10 @@ def main() -> None:
     run([str(cli), "register", "--ide", "all", "--workspace", str(ws)], env,
         "re-register")
     d = run([str(cli), "doctor"], env, check_rc=False)
-    tail = d.stdout.split("health flags")[-1]
-    check("registration" not in tail, "registration flag cleared", tail)
+    flags = {c["flag"]: c["ok"] for c in
+             __import__("json").JSONDecoder().raw_decode(d.stdout)[0]
+             .get("checks", [])}
+    check(flags.get("registration"), "registration flag cleared", flags)
 
     print("\nE2E FAILURE-MODE OK")
     srv.shutdown()

@@ -81,8 +81,10 @@ def main() -> None:
         "tenant_id": "e2e", "client_id": "e2e", "site_url": site_url,
         "credential_ref": "e2e"}))
     d = run([str(cli), "doctor"], env, check_rc=False)
-    tail = d.stdout.split("health flags")[-1]
-    check("creds_valid" not in tail, "valid token → creds flag green", tail)
+    flags = {c["flag"]: c["ok"] for c in
+             __import__("json").JSONDecoder().raw_decode(d.stdout)[0]
+             .get("checks", [])}
+    check(flags.get("creds_valid"), "valid token → creds flag green", flags)
 
     # break 1: partial model
     (home / "models" / "bge-m3" / "onnx" /
