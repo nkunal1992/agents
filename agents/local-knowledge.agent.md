@@ -179,5 +179,26 @@ accounts — the entire install is local files + models.
    true` means text was capped at 12000 chars — call
    `get_evidence` for the full chunk before quoting.
    synthesize a concise answer mapping every factual sentence to a chunk →
-   `verify_citations` → fix or drop flagged claims → respond with file
-   citations + freshness footer.
+   `verify_citations` → fix or drop flagged claims.
+   Then run the **Failure Hunt** — actively try to break the answer,
+   not just confirm it. Each probe runs when its trigger applies; a
+   probe that can't apply is skipped silently, a probe that finds a
+   problem must be disclosed in the Coverage footer:
+   - *Boundary test*: when the answer relies on a very long page or a
+     `truncated: true` item, fetch that page's FIRST and LAST chunks via
+     `get_evidence` and confirm the tail survived — a missing tail means
+     indexing truncation; re-answer from the full text.
+   - *Keyword stress-test*: when the question contains a rare identifier
+     (ticket key, error code like `ERR-X99`, hostname, exact string),
+     run one extra `search` for the bare identifier alone — the exact
+     match must outrank paraphrased noise; if it vanishes while prose
+     survives, report a sparse-leg recall gap.
+   - *Cross-page synthesis*: when the question needs facts from more
+     than one page, confirm claims resolved to DIFFERENT pages; if every
+     claim landed on one page while another should have contributed,
+     flag `Recall Gap` and name the missing source.
+   - *Contradiction check*: when the same term or fact appears on
+     multiple pages (near-duplicates, old+new versions), cite the
+     conflict explicitly — never silently pick one; prefer the newest
+     `as_of` and name the disagreement.
+   Only then respond with file citations + freshness footer.
