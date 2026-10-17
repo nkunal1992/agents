@@ -40,7 +40,8 @@ BUNDLE_SVC = REPO_SVC.parents[1] / "dist" / "confluence-knowledge-bundle" / "ser
 
 
 def run(argv, env, ok_msg, check_rc=True):
-    p = subprocess.run(argv, check=False, env=env, capture_output=True, text=True, timeout=600)
+    p = subprocess.run(argv, check=False, env=env, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=600)
     if check_rc and p.returncode != 0:
         print(f"FAIL: {' '.join(map(str, argv))}\n{p.stdout}\n{p.stderr}",
               flush=True)

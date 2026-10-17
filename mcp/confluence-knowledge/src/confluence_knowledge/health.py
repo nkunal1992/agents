@@ -49,6 +49,7 @@ def _index_checks(index_root: Path) -> list[dict]:
     out = []
     for db in sorted(index_root.glob("*.db")):
         scope = db.stem[:24]
+        idx = None
         try:
             idx = Index(db)
             ok = idx.integrity()
@@ -56,6 +57,9 @@ def _index_checks(index_root: Path) -> list[dict]:
                 idx.model_id() != EMBED_MODEL_ID
         except Exception:  # noqa: BLE001 — unreadable = corrupt
             ok, stale = False, False
+        finally:
+            if idx is not None:
+                idx.db.close()  # Windows locks the file while a conn is open
         out.append({
             "flag": f"index:{scope}", "ok": ok and not stale,
             "detail": ("corrupt — delete the index and re-crawl" if not ok

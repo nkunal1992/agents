@@ -40,7 +40,8 @@ BUNDLE_SVC = REPO_SVC.parents[1] / "dist" / "local-knowledge-bundle" / "service"
 
 def run(argv, env, ok_msg):
     p = subprocess.run(argv, check=False, env=env, capture_output=True,
-                       text=True, timeout=600)
+                       text=True, encoding="utf-8",
+                       errors="replace", timeout=600)
     if p.returncode != 0:
         print(f"FAIL: {' '.join(map(str, argv))}\n{p.stdout}\n{p.stderr}",
               flush=True)

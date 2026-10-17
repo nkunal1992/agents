@@ -47,6 +47,10 @@ class Index:
             self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
             self.db.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
         except sqlite3.DatabaseError as e:
+            # close before raising — Windows keeps the file locked otherwise
+            from contextlib import suppress
+            with suppress(Exception):
+                self.db.close()
             from .settings import SetupError
             raise SetupError(
                 f"index unreadable at {path} — delete it and re-crawl "

@@ -26,9 +26,9 @@ jobs:
         run: pytest mcp/confluence-knowledge/tests -q
       - name: CLI smoke
         run: |
-          pip install -e './mcp/confluence-knowledge' --quiet
+          SETUPTOOLS_USE_DISTUTILS=stdlib pip install -e './mcp/confluence-knowledge' --quiet
           confluence-knowledge --help >/dev/null
-          confluence-knowledge doctor; test $? -le 4
+          confluence-knowledge doctor || test $? -le 4
 
   e2e:
     # real bootstrap replay — fake server, no secrets; catches what unit
