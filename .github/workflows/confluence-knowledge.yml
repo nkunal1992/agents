@@ -25,6 +25,7 @@ jobs:
       - name: Unit tests (offline — no models, no network)
         run: pytest mcp/confluence-knowledge/tests -q
       - name: CLI smoke
+        shell: bash
         run: |
           if python -c "import sys; sys.exit(0 if sys.version_info < (3,12) else 1)"; then
             export SETUPTOOLS_USE_DISTUTILS=stdlib
