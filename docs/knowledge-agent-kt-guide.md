@@ -130,12 +130,12 @@ the column headers**, and a row is never torn in half.
   Row order is preserved; `<th>`-less tables promote their first row to
   the header; `colspan`/`rowspan` flatten gracefully.
 - **Row-atomic splitting.** If the serialized table exceeds the
-  280-word chunk budget, `split_table_text` emits row-group segments —
+  chunk budget (448 model tokens when the tokenizer is available, else
+  280 words), `split_table_text` emits row-group segments —
   **each segment starts with the same `Table — columns:` header**. A row
   is never split mid-row, so the `Field → Value` relationship survives in
   every chunk's vector.
-- **Why it mattered.** The embedder sees at most 8192 tokens and the
-  reranker 512. A 43 KB single-chunk table meant rows past the token
+- **Why it mattered.** A 43 KB single-chunk table meant rows past the token
   ceiling were *embedded but never retrievable* — the classic silent
   failure. Splitting by rows keeps the whole table findable.
 - **Everywhere.** `extract_files.py` reuses the same function for docx,
@@ -405,7 +405,7 @@ cd mcp/confluence-knowledge && CK_MODEL_HOME=~/.confluence-knowledge \
 | **FTS5** | SQLite's built-in keyword index — literal term match |
 | **RRF** | merge three ranked lists by position, not raw score |
 | **Cross-encoder reranker** | a model that reads question+chunk together and scores the pair |
-| **Chunk** | a ~280-word piece of a page — the unit that gets embedded and cited |
+| **Chunk** | a ~448-token piece of a page (word-bounded offline) — the unit that gets embedded and cited |
 | **Scope** | one root (page/site/folder) + its descendants + your credentials — its own index and feedback store |
 | **MCP** | the protocol Copilot uses to call the local service's tools |
 | **`low_confidence` / `truncated` / `user_corrections`** | honesty flags on evidence — the agent must disclose, not hide |

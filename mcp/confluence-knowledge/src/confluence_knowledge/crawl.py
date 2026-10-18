@@ -111,6 +111,7 @@ def _fetch_page_dc(client: ConfluenceClient, page_id: str) -> dict:
     }
 
 
+from .retrieval import CHUNK_TOKENS
 from .retrieval import MODEL_MARKER as _MODEL_ID
 
 
@@ -126,6 +127,12 @@ class Crawler:
         if site_url and env == "cloud" and not site_url.rstrip("/").endswith("/wiki"):
             site_url = site_url.rstrip("/") + "/wiki"
         self.site_url = site_url
+
+    def _chunk_kwargs(self) -> dict:
+        """Token-aware split params when the embedder can measure tokens;
+        word-based fallback keeps tests/offline extraction working."""
+        measure = getattr(self.embedder, "count_tokens", None)
+        return {"measure": measure, "budget": CHUNK_TOKENS} if measure else {}
 
     def _children(self, pid: str, is_folder: bool = False):
         if self.env == "cloud":
@@ -238,12 +245,14 @@ class Crawler:
                     continue
             content_hash = hashlib.sha256(
                 page["storage"].encode()).hexdigest()
-            chunks, warns = extract_chunks(page["storage"])
+            chunks, warns = extract_chunks(page["storage"],
+                                           **self._chunk_kwargs())
             for c in chunks:
                 c.chunk_id = f"{pid}:{content_hash[:8]}:{c.ordinal}"
             vecs, sparse_vecs = None, None
             if self.embedder is not None and chunks:
-                texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+                texts = [f"{page['title']}\n{c.heading_path}\n{c.text}"
+                         for c in chunks]
                 vecs = self.embedder.embed(texts)
                 if self.sparse is not None:
                     sparse_vecs = self.sparse.embed(texts)

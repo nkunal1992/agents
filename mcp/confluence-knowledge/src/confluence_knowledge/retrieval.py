@@ -42,8 +42,14 @@ RERANK_MAX = 25          # bounds cross-encoder latency on CPU
 MIN_RERANK_SCORE = 0.02  # noise floor — real reranker zeros junk at ~0.00
 LOW_CONFIDENCE_SCORE = 0.3  # below this the hit is surfaced but flagged
 MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
-EMBED_MAX_TOKENS = 512   # quantized model input cap (chunks stay under)
-RERANK_MAX_TOKENS = 512
+# Chunking is token-aware at CHUNK_TOKENS; the raised caps below are the
+# safety margin for row-atomic chunks that must exceed the budget (a single
+# huge table row) — 2048 stays far under the models' 8k context, bounding
+# worst-case cross-encoder cost (measured: no p50 change at real chunk sizes).
+EMBED_MAX_TOKENS = 2048
+RERANK_MAX_TOKENS = 2048
+CHUNK_TOKENS = 448       # token-aware split target — leaves room for
+                         # heading path + page title inside the embed input
 
 
 def _models_dir(home: Path) -> Path:
@@ -96,6 +102,13 @@ class LocalEmbedder:
         self._tok = _tokenizer(dest)
         self._tok.enable_padding()
         self._tok.enable_truncation(EMBED_MAX_TOKENS)
+
+    def count_tokens(self, text: str) -> int:
+        """Content-token length under the model tokenizer — used for
+        token-aware chunk splitting (R16) instead of word counts. Special
+        tokens excluded: packers call this per unit and specials would
+        overcount massively; the embed path adds them once per input."""
+        return len(self._tok.encode(text, add_special_tokens=False).ids)
 
     def embed(self, texts: list[str]) -> np.ndarray:
         enc = self._tok.encode_batch(texts, add_special_tokens=True)

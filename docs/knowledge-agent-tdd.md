@@ -43,7 +43,7 @@ The crawl is a resumable breadth-first walk driven interactively —
 | Component | Problem it solves |
 |---|---|
 | `_table_to_text` | Converts `<table>` DOM into a structured text form where the row/column relationship survives embedding. |
-| `split_table_text` | An oversized table's tail rows were *unfindable*: one giant chunk exceeded the embedder (8192 tok) and reranker (512 tok) windows, so BGE-M3 never "saw" rows past the cutoff. Row-group splitting with header preservation keeps every row retrievable. |
+| `split_table_text` | An oversized table's tail rows were *unfindable*: one giant chunk exceeded the embedder and reranker windows, so BGE-M3 never "saw" rows past the cutoff. Row-group splitting with header preservation keeps every row retrievable; chunking is token-aware (448-token budget) when the embedder's tokenizer is available, word-based otherwise. |
 
 Serialization format (per chunk):
 
@@ -68,7 +68,7 @@ row 2: …
 
 | Component | Problem it solves |
 |---|---|
-| `Xenova/bge-m3` quantized ONNX (`sentence_transformers_quantized.onnx`, ~570 MB) | 1024-dim normalized dense vectors, multilingual, 8k-token context — headroom vs. the 280-word chunk budget. |
+| `Xenova/bge-m3` quantized ONNX (`sentence_transformers_quantized.onnx`, ~570 MB) | 1024-dim normalized dense vectors, multilingual, 8k-token context — token-aware chunk budget (448 tokens) plus the page title prepended to the embedded text; runtime input cap 2048 covers row-atomic oversize. |
 | `Qdrant/bm25` via fastembed `SparseTextEmbedding` | Learned sparse term-weights leg. (Honest substitution: no ONNX export of BGE-M3 exposes the lexical head — bm25 learned-sparse fills the same RRF slot.) |
 | `onnx-community/bge-reranker-v2-m3-ONNX` quantized (~600 MB) | Cross-encoder reranker; `<APP>_RERANKER` env swaps to the ~4× lighter `bge-reranker-base` for weak hardware. |
 | ONNX Runtime + `tokenizers` | No torch/sentence-transformers (~2.4 GB → ~250 MB footprint); wheels exist for linux/win-arm64/macos arm64. |
@@ -136,7 +136,7 @@ sequenceDiagram
 ### 2.2 Reranker
 
 Top-25 fused candidates → `bge-reranker-v2-m3` sigmoid scorer
-(`RERANK_MAX_TOKENS = 512`). Score tiers, measured on the real model:
+(`RERANK_MAX_TOKENS = 2048`). Score tiers, measured on the real model:
 
 - `≥ 0.3` — confident evidence
 - `0.02–0.3` — returned but flagged `low_confidence: true` (agent must
