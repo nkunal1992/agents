@@ -98,3 +98,22 @@ def test_duplicate_content_pages_both_citable(tmp_path):
     for e in ev:
         # citation fields resolve to the page the chunk came from
         assert e["page_url"].endswith(e["page_id"])
+
+
+def test_table_edge_cases(tmp_path):
+    """th-less header, empty cells, colspan — tables must survive without
+    breaking the structured row format."""
+    from confluence_knowledge.extract import extract_chunks, split_table_text
+    # th-less: first row still becomes the header
+    chunks, _ = extract_chunks("""<table>
+        <tr><td>K</td><td>V</td></tr><tr><td>a</td><td>1</td></tr></table>""")
+    assert any("columns: K | V" in c.text and "row 1: a | 1" in c.text
+               for c in chunks)
+    # empty + colspan cells don't crash and keep row shape
+    chunks, _ = extract_chunks("""<table>
+        <tr><th>A</th><th>B</th></tr>
+        <tr><td>x</td><td></td></tr>
+        <tr><td colspan="2">merged</td></tr></table>""")
+    assert any("row 2: merged" in c.text for c in chunks)
+    # single-row table = header only
+    assert split_table_text("Table — columns: h") == ["Table — columns: h"]

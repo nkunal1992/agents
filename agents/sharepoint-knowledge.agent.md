@@ -2,7 +2,7 @@
 name: sharepoint-knowledge
 description: Grounded Q&A over a SharePoint site, library, or folder — Site Pages + docx/pdf/pptx/xlsx/csv/md/txt crawled and indexed locally via a self-installed MCP service, Entra device-code sign-in, per-claim citations, explicit "not documented" refusals.
 argument-hint: Give a SharePoint site, library, or folder URL and your question
-tools: ["sharepoint-knowledge/status", "sharepoint-knowledge/connect", "sharepoint-knowledge/start_crawl", "sharepoint-knowledge/crawl_step", "sharepoint-knowledge/search", "sharepoint-knowledge/get_evidence", "sharepoint-knowledge/verify_citations", "read", "edit", "execute"]
+tools: ["sharepoint-knowledge/status", "sharepoint-knowledge/connect", "sharepoint-knowledge/start_crawl", "sharepoint-knowledge/crawl_step", "sharepoint-knowledge/search", "sharepoint-knowledge/get_evidence", "sharepoint-knowledge/verify_citations", "sharepoint-knowledge/submit_feedback", "sharepoint-knowledge/feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload
@@ -148,6 +148,14 @@ python3 -m venv ~/.sharepoint-knowledge/venv
   can already read — never say it covers more.
 - **Skipped secrets are disclosed, not hidden.** If warnings list
   secret-looking files or unreadable items, say so — never retry them.
+- **Corrections are disclosed, never swallowed.** When `search` returns
+  `user_corrections`, the answer must mention each: "the documentation says
+  X, but a colleague correction (dated N days ago) notes Y." Corrections
+  annotate, never replace, the documented claim.
+- **When the user corrects the agent** ("that's wrong", "outdated",
+  "actually it's…"), call `submit_feedback` with their exact correction —
+  then echo what was stored. `feedback_report` summarizes recurring
+  corrections into "these docs look outdated" suggestions.
 
 ## Interaction flow
 
@@ -188,6 +196,15 @@ python3 -m venv ~/.sharepoint-knowledge/venv
      than one page, confirm claims resolved to DIFFERENT pages; if every
      claim landed on one page while another should have contributed,
      flag `Recall Gap` and name the missing source.
+   - *Table-Probe*: when a claim comes from a `kind=table` chunk, run one
+     `search` for the value's row terms (e.g. `svc-0800`) and verify the
+     returned `row N:` line carries the exact field→value pair — a cell
+     pulled from an adjacent row is a `Table mismatch`; disclose it in
+     the Coverage footer.
+   - *Feedback check*: when `search` returns `user_corrections`, the
+     answer MUST disclose each one — "the docs say X, but a colleague
+     correction (dated D) notes Y". Corrections never replace the doc
+     claim and are never silently dropped.
    - *Contradiction check*: when the same term or fact appears on
      multiple pages (near-duplicates, old+new versions), cite the
      conflict explicitly — never silently pick one; prefer the newest

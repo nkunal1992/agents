@@ -157,7 +157,8 @@ async def qa_roundtrip(vpy: Path, env: dict) -> None:
         await session.initialize()
         tools = {t.name for t in (await session.list_tools()).tools}
         check({"status", "connect", "start_crawl", "crawl_step", "search",
-               "get_evidence", "verify_citations"} <= tools,
+               "get_evidence", "verify_citations", "submit_feedback",
+               "feedback_report"} <= tools,
               "fresh venv: all tools registered")
         st = await call(session, "status")
         check(st["configured"], "status: configured")
@@ -178,6 +179,23 @@ async def qa_roundtrip(vpy: Path, env: dict) -> None:
               and res["evidence"][0]["page_title"] == "Deploy Windows",
               "fresh install: grounded answer with citations")
 
+        # feedback loop: correction stored → same-topic search surfaces it
+        fb = await call(session, "submit_feedback",
+                        {"scope_handle": c["scope_handle"],
+                         "question": "when can we deploy",
+                         "correction": "freeze now starts December 15",
+                         "note": "deploy calendar changed"})
+        check(fb["stored"], "submit_feedback stores a correction")
+        res2 = await call(session, "search",
+                          {"scope_handle": c["scope_handle"],
+                           "question": "when are production deploys allowed"})
+        check(res2["user_corrections"]
+              and "December 15" in res2["user_corrections"][0]["correction"],
+              "search auto-discloses matching correction")
+        rep = await call(session, "feedback_report",
+                         {"scope_handle": c["scope_handle"]})
+        check(rep["count"] == 1, "feedback_report aggregates")
+
 
 def main() -> None:
     use_wheel = "--wheel" in sys.argv
@@ -192,6 +210,19 @@ def main() -> None:
     check(all(h.startswith("/") for h in hits), "no outbound beyond localhost",
           hits[:5])
     srv.shutdown()
+
+    # golden-set regression gate — evaluate the live post-crawl index
+    work = sandbox / "work"
+    idx_dbs = sorted((work / ".conf_knowledge_index").glob("*.db"))
+    if idx_dbs and (Path(__file__).parent / "golden_set.sample.json").exists():
+        gv = run([str(vpy), str(Path(__file__).parent / "eval_rag.py"),
+                  "--golden", str(Path(__file__).parent
+                                  / "golden_set.sample.json"),
+                  "--index", str(idx_dbs[0]),
+                  "--report", str(sandbox / "eval_report.json")],
+                 env, "golden-set eval")
+        check("EVAL OK" in gv.stdout, "golden-set gate", gv.stdout[-800:])
+
     print("\nE2E BOOTSTRAP OK")
 
 

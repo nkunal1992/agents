@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-knowledge"
-version = "0.2.3"
+version = "0.2.4"
 description = "Local file/folder indexer + grounded-Q&A MCP service — same engine as confluence-knowledge, no credentials needed"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 models = [
-    "confluence-knowledge[models]>=0.5.3",
+    "confluence-knowledge[models]>=0.5.4",
 ]
 dev = [
     "pytest>=8.0",

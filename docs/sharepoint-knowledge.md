@@ -116,3 +116,34 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
   dense model.
 - `scripts/eval_rag.py` runs the opt-in real-model regression eval —
   `CK_MODEL_HOME=<prepared-dir> python scripts/eval_rag.py`.
+
+## Benchmarking (golden set)
+
+`scripts/eval_rag.py` runs a golden-set regression eval against a live index
+(`--index <scope.db>`) or the built-in test corpus:
+
+    CK_MODEL_HOME=<models-dir> python scripts/eval_rag.py \
+        --golden scripts/golden_set.sample.json --index <scope.db> \
+        --report eval_report.json
+
+Metrics: recall@8, required-fact coverage, no-answer honesty, p50/p95
+latency; exits non-zero below thresholds (CI e2e gates on this).
+
+**Judging with Copilot**: the judge persona lives at
+`prompts/rag-judge.prompt.md` — run it in Copilot chat (pick a higher model
+tier for judging if you like). Hybrid mode: point it at `eval_report.json`,
+it writes `judge_verdicts.json`, merge with
+`eval_rag.py --golden <set> --report eval_report.json --merge-verdicts
+judge_verdicts.json`. Standalone mode: the prompt can drive the whole
+benchmark itself.
+
+## Human feedback loop
+
+- `submit_feedback(scope, question, correction, note)` — stores a
+  colleague correction (embedded + similarity-matched).
+- `search` auto-returns `user_corrections` when a stored correction
+  matches the question at cosine ≥ 0.75 (`*_FEEDBACK_MIN_SIM` to tune) —
+  the agent discloses it alongside the docs, never overrides.
+- `feedback_report(scope)` — aggregates corrections → the agent can
+  suggest which pages look outdated/confusing.
+- Stored at `<index_root>/<scope>.feedback.json`; `clean` wipes it.

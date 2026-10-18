@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""Real-model RAG eval — opt-in, NOT run in CI (downloads ~1.5GB models).
+"""Golden-set RAG benchmark — real ONNX models, opt-in (not per-PR CI).
 
-    CK_MODEL_HOME=/path/to/prepared/models python scripts/eval_rag.py
-    # or with a cached dir from prepare-models:
-    CK_MODEL_HOME=$HOME/.confluence-knowledge python scripts/eval_rag.py
+    CK_MODEL_HOME=<prepared-models-dir> python scripts/eval_rag.py \
+        [--golden PATH] [--report PATH] [--merge-verdicts PATH]
 
-Builds the tests/rag corpus against the REAL ONNX stack and reports:
-  - recall@8    — gold snippet found in returned evidence text
-  - honesty     — no-answer queries return empty evidence
-  - p50/p95 ms  — retrieval latency
-Exits non-zero if recall or honesty dip below thresholds.
+Deterministic scores per pair:
+  recall_hit    — a required_pages entry appears among evidence pages
+  facts_covered — every required_facts substring found in evidence text
+  honest_empty  — expect_no_answer pairs return zero evidence
+
+Aggregates: recall@8, fact-coverage %, honesty %, p50/p95 latency.
+
+Writes eval_report.json (question, ideal_answer, evidence, page titles,
+deterministic scores) for the Copilot Judge persona — see
+prompts/rag-judge.prompt.md — then `--merge-verdicts judge_verdicts.json`
+folds the LLM verdicts into benchmark_report.md.
+
+Exits non-zero if recall < 0.80 or honesty < 100% — the regression gate.
 """
 
+import json
 import sys
 import tempfile
 import time
@@ -26,8 +34,6 @@ import os
 os.environ.setdefault("CONF_KNOWLEDGE_HOME",
                       os.environ.get("CK_MODEL_HOME", ""))
 
-from rag.corpus import CORPUS, NO_ANSWER
-
 from confluence_knowledge import retrieval
 from confluence_knowledge.extract import extract_chunks
 from confluence_knowledge.index import Index
@@ -35,56 +41,125 @@ from confluence_knowledge.index import Index
 MIN_RECALL = 0.80
 
 
-def main() -> int:
-    home = Path(os.environ["CONF_KNOWLEDGE_HOME"])
-    emb = retrieval.LocalEmbedder(home)
-    rr = retrieval.LocalReranker(home)
-    sp = retrieval.LocalSparseEmbedder(home)
-    print(f"models loaded: {emb.__class__.__name__} / "
-          f"{rr.__class__.__name__} / {sp.__class__.__name__}")
+def _load_corpus():
+    from rag.corpus import CORPUS
+    return CORPUS
 
-    idx = Index(Path(tempfile.mkdtemp()) / "eval.db")
-    for i, (title, html, _qa) in enumerate(CORPUS):
+
+def _build_index(corpus, emb, sp, tmp):
+    idx = Index(tmp / "eval.db")
+    for i, (title, html, _qa) in enumerate(corpus):
         pid = f"p{i}"
         chunks, _ = extract_chunks(html)
         for c in chunks:
             c.chunk_id = f"{pid}:h:{c.ordinal}"
         texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
         vecs = emb.embed(texts) if texts else None
-        sparse = [d for d in sp.embed(texts)] if texts else None
+        sparse = sp.embed(texts) if texts else None
         idx.upsert_page({"page_id": pid, "parent_id": None, "title": title,
                          "url": f"https://x/{pid}", "level": 0,
                          "version": "", "warnings": ""},
                         chunks, vecs=vecs, sparse=sparse)
-    idx.publish({f"p{i}" for i in range(len(CORPUS))})
+    idx.publish({f"p{i}" for i in range(len(corpus))})
     idx.set_model_id(retrieval.MODEL_MARKER)
-    print(f"indexed {len(CORPUS)} pages "
-          f"({len(idx.active_chunks())} chunks)")
+    return idx
 
-    lat, hit, miss = [], [], []
-    for title, _html, qas in CORPUS:
-        for q, gold in qas:
-            t = time.monotonic()
-            ev = retrieval.retrieve(idx, q, emb, rr, sp)
-            lat.append(time.monotonic() - t)
-            texts = " || ".join(e["text"] for e in ev)
-            (hit if gold in texts else miss).append((title, q, gold))
 
-    honest = sum(1 for q in NO_ANSWER
-                 if not retrieval.retrieve(idx, q, emb, rr, sp))
+def _score(pair, ev):
+    """Deterministic pair score."""
+    if pair.get("expect_no_answer"):
+        return {"recall_hit": True, "facts_covered": True,
+                "honest_empty": not ev}
+    pages = {e.get("page_title", "") + " " + e.get("page_url", "")
+             for e in ev}
+    texts = " || ".join(e["text"] for e in ev)
+    recall = any(any(rp in p for p in pages)
+                 for rp in pair["required_pages"]) if pair["required_pages"] else bool(ev)
+    facts = all(f in texts for f in pair.get("required_facts", []))
+    return {"recall_hit": recall, "facts_covered": facts,
+            "honest_empty": None}
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    golden = Path(args[args.index("--golden") + 1]) if "--golden" in args \
+        else Path(__file__).parents[1] / "tests" / "rag" / "golden.json"
+    report_p = Path(args[args.index("--report") + 1]) if "--report" in args \
+        else Path("eval_report.json")
+
+    # merge-only mode — fold Copilot verdicts into an existing report
+    if "--merge-verdicts" in args:
+        vpath = Path(args[args.index("--merge-verdicts") + 1])
+        rep = json.loads(report_p.read_text())
+        verdicts = {v["question"]: v for v in json.loads(vpath.read_text())}
+        n = 0
+        for pair in rep["pairs"]:
+            v = verdicts.get(pair["question"])
+            if v:
+                pair["judge"] = v
+                n += 1
+        report_p.write_text(json.dumps(rep, indent=2))
+        ok = sum(1 for v in verdicts.values() if v.get("verdict") == "correct")
+        print(f"merged {n}/{len(rep['pairs'])} verdicts — "
+              f"judge: {ok}/{len(verdicts)} correct")
+        return 0
+
+    pairs = json.loads(golden.read_text())["pairs"]
+    home = Path(os.environ["CONF_KNOWLEDGE_HOME"])
+    emb = retrieval.LocalEmbedder(home)
+    rr = retrieval.LocalReranker(home)
+    sp = retrieval.LocalSparseEmbedder(home)
+    print(f"models loaded from {home}")
+
+    if "--index" in args:
+        # evaluate a live, already-crawled index (e.g. post-e2e bootstrap)
+        idx = Index(Path(args[args.index("--index") + 1]))
+    else:
+        idx = _build_index(_load_corpus(), emb, sp, Path(tempfile.mkdtemp()))
+    print(f"index: {len(idx.active_chunks())} chunks — "
+          f"{len(pairs)} golden pairs")
+
+    results, lat = [], []
+    for pair in pairs:
+        t = time.monotonic()
+        ev = retrieval.retrieve(idx, pair["question"], emb, rr, sp)
+        lat.append(time.monotonic() - t)
+        results.append({
+            "question": pair["question"],
+            "ideal_answer": pair["ideal_answer"],
+            "pages": sorted({e.get("page_title", "") for e in ev}),
+            "evidence_texts": [e["text"][:800] for e in ev],
+            "n_evidence": len(ev),
+            **_score(pair, ev),
+        })
+
+    q = [r for r in results if r["honest_empty"] is None]
+    hn = [r for r in results if r["honest_empty"] is not None]
     lat.sort()
-    n = len(hit) + len(miss)
-    print(f"\nrecall@8:  {len(hit)}/{n} ({len(hit)/n:.0%})")
-    print(f"honesty:   {honest}/{len(NO_ANSWER)} no-answer queries empty")
-    print(f"latency:   p50={lat[len(lat)//2]*1000:.0f}ms "
-          f"p95={lat[int(len(lat)*0.95)]*1000:.0f}ms")
-    if miss:
-        print("\nmisses:")
-        for t_, q_, g_ in miss:
-            print(f"  [{t_}] '{q_}' → wanted '{g_}'")
+    recall = sum(r["recall_hit"] for r in q) / max(len(q), 1)
+    facts = sum(r["facts_covered"] for r in q) / max(len(q), 1)
+    honesty = sum(r["honest_empty"] for r in hn) / max(len(hn), 1)
 
-    ok = len(hit) / n >= MIN_RECALL and honest == len(NO_ANSWER)
-    print("\nEVAL", "OK" if ok else "BELOW THRESHOLD")
+    report = {"golden_set": golden.name, "pairs": results,
+              "aggregate": {"recall@8": recall, "fact_coverage": facts,
+                            "honesty": honesty,
+                            "p50_ms": int(lat[len(lat) // 2] * 1000),
+                            "p95_ms": int(lat[int(len(lat) * .95)] * 1000)}}
+    report_p.write_text(json.dumps(report, indent=2))
+
+    print(f"\nrecall@8:       {recall:.0%}  ({sum(r['recall_hit'] for r in q)}/{len(q)})")
+    print(f"fact coverage:  {facts:.0%}")
+    print(f"honesty:        {honesty:.0%}  ({sum(r['honest_empty'] for r in hn)}/{len(hn)})")
+    print(f"latency:        p50={report['aggregate']['p50_ms']}ms "
+          f"p95={report['aggregate']['p95_ms']}ms")
+    for r in results:
+        if r["recall_hit"] is False or r["facts_covered"] is False \
+                or r["honest_empty"] is False:
+            print(f"  miss: {r['question']!r}")
+
+    print(f"\nreport → {report_p}  (judge it via prompts/rag-judge.prompt.md)")
+    ok = recall >= MIN_RECALL and honesty == 1.0
+    print("EVAL", "OK" if ok else "BELOW THRESHOLD")
     return 0 if ok else 1
 
 

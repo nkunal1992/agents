@@ -12,6 +12,7 @@ import socket
 import threading
 
 from confluence_knowledge.client import AccessError, SecurityException
+from confluence_knowledge.feedback import FeedbackStore
 from confluence_knowledge.index import Index
 from confluence_knowledge.retrieval import (
     MODEL_MARKER as EMBED_MODEL_ID,
@@ -34,6 +35,7 @@ mcp = FastMCP("local-knowledge")
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}
+_feedback: dict[str, FeedbackStore] = {}
 _EMBEDDER = None
 _RERANKER = None
 _SPARSE = None
@@ -50,6 +52,13 @@ def _index_for(scope_key: str) -> Index:
     if idx is None:
         idx = _indexes[scope_key] = Index(index_root() / f"{scope_key}.db")
     return idx
+
+def _feedback_for(scope_key: str) -> FeedbackStore:
+    st = _feedback.get(scope_key)
+    if st is None:
+        st = _feedback[scope_key] = FeedbackStore(
+            index_root(), scope_key, "local-knowledge")
+    return st
 
 
 def _embedder():
@@ -267,7 +276,9 @@ def search(scope_handle: str, question: str) -> dict:
         return {"evidence": [], "coverage": "stale_model",
                 "note": "this index was built with an older embedding model "
                         "— run start_crawl once to rebuild it, then search again"}
-    ev = retrieve(idx, question, _embedder(), _reranker(), sparse=_sparse())
+    emb = _embedder()
+    ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse())
+    corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
     set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
     # bound the session cache — sets are never reused after the turn ends
     while len(_evidence_sets) >= 32:
@@ -277,6 +288,7 @@ def search(scope_handle: str, question: str) -> dict:
         "evidence_set": set_id,
         "coverage": _coverage(idx),
         "as_of": st["as_of"],
+        "user_corrections": corrections,
         "evidence": [
             {"chunk_id": e["chunk_id"], "page_title": e["page_title"],
              "page_url": e["page_url"], "heading": e["heading"],
@@ -304,6 +316,30 @@ def get_evidence(scope_handle: str, chunk_ids: list[str]) -> dict:
                     "page_title": p.get("title", ""), "page_url": p.get("url", "")})
     return {"chunks": out}
 
+
+@mcp.tool()
+
+
+@mcp.tool()
+def submit_feedback(scope_handle: str, question: str, correction: str,
+                    note: str = "") -> dict:
+    """Store a colleague correction — disclosed alongside the docs on
+    similar future questions (never overrides them)."""
+    s = _scope(scope_handle)
+    if not _models_loaded(0):
+        return {"stored": False, "note": LOADING_NOTE}
+    qvec = _embedder().embed([question])[0]
+    entry = _feedback_for(s["key"]).add(question, qvec, correction, note)
+    return {"stored": entry["id"],
+            "note": "will be disclosed on similar questions"}
+
+
+@mcp.tool()
+def feedback_report(scope_handle: str) -> dict:
+    """Aggregated corrections — which topics keep getting corrected points
+    at outdated/confusing documentation."""
+    s = _scope(scope_handle)
+    return _feedback_for(s["key"]).report()
 
 @mcp.tool()
 def verify_citations(scope_handle: str, evidence_set: str,
