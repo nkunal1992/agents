@@ -100,27 +100,27 @@ sequenceDiagram
     autonumber
     actor U as User
     participant A as Copilot Agent
-    participant S as MCP search()
+    participant S as MCP search
     participant I as SQLite Index
-    participant D as BGE-M3 (dense)
-    participant B as BM25 (sparse leg)
+    participant D as BGE-M3 dense
+    participant B as BM25 sparse leg
     participant F as FTS5
-    participant R as Cross-Encoder (v2-m3)
+    participant R as Cross-Encoder v2-m3
     participant V as verify_citations
 
     U->>A: question
-    A->>S: search(scope_handle, q)
-    S->>I: active_chunks()  [bounded: 100k cap]
-    S->>D: embed(q) → 1024-dim vec
-    S->>B: embed(q) → term weights
-    S->>F: FTS5 match (≤16 terms)
-    S->>I: vectors_for + sparse_for (active only)
-    Note over S: RRF fusion: 1/(60+rank) per leg → top-30
-    S->>R: score(q, top-25 chunk texts)
-    R-->>S: scores — <0.02 dropped; <0.3 → low_confidence
-    S-->>A: evidence ≤8 chunks + coverage + user_corrections
+    A->>S: search scope_handle q
+    S->>I: active_chunks bounded at 100k
+    S->>D: embed q to 1024-dim vec
+    S->>B: embed q to term weights
+    S->>F: FTS5 match max 16 terms
+    S->>I: vectors_for and sparse_for active only
+    Note over S: RRF fusion of leg ranks → top-30
+    S->>R: score q against top-25 chunk texts
+    R-->>S: scores — under 0.02 dropped, under 0.3 flagged low_confidence
+    S-->>A: evidence up to 8 chunks + coverage + user_corrections
     A->>V: claim→chunk→quote mappings
-    V-->>A: violations[] (normalized verbatim check)
+    V-->>A: violations list after normalization
     A-->>U: cited answer + Coverage footer
 ```
 
@@ -193,14 +193,14 @@ before responding or named there, never hidden.
 
 ```mermaid
 flowchart LR
-    U[User: "that's wrong, it's Y"] --> A[Agent]
+    U["User: 'that's wrong, it's Y'"] --> A[Agent]
     A --> SF[submit_feedback]
-    SF --> FS[(scope.feedback.json<br/>index dir)]
-    Q[future question] --> S[search]
-    FS -. cosine ≥0.75 .-> S
+    SF --> FS[("scope.feedback.json in index dir")]
+    Q["future question"] --> S[search]
+    FS -. "cosine ≥0.75" .-> S
     S --> UC[user_corrections]
-    UC --> ANS[docs say X,<br/>correction says Y]
-    FR[feedback_report] --> AG[agent summarizes →<br/>'these pages look outdated']
+    UC --> ANS["docs say X,<br/>correction says Y"]
+    FR[feedback_report] --> AG["agent summarizes →<br/>'these pages look outdated'"]
 ```
 
 ### 4.1 Persistence
@@ -304,12 +304,12 @@ flowchart TD
         CW --> EX[extract_chunks<br/>HTML→text, macros skipped]
         EX --> TB[split_table_text<br/>row-atomic + header preserved]
         TB --> EM[embed: bge-m3 ONNX + bm25 sparse]
-        EM --> IX[(SQLite per scope<br/>pages+chunks+vectors+sparse+FTS5<br/>atomic publish)]
+        EM --> IX[("SQLite per scope<br/>pages+chunks+vectors+sparse+FTS5<br/>atomic publish")]
     end
     subgraph Retrieval["2 · Search"]
         Q[question] --> HY[dense + sparse + FTS → RRF]
-        HY --> RR[v2-m3 cross-encoder<br/>tiers: ≥0.3 / 0.02–0.3 flag / <0.02 drop]
-        RR --> EV[evidence ≤8 + citations]
+        HY --> RR["v2-m3 cross-encoder<br/>tiers: 0.3+ confident / below 0.3 flag / below 0.02 drop"]
+        RR --> EV["evidence up to 8 chunks + citations"]
     end
     subgraph Verify["3 · Failure Hunt"]
         EV --> VP[verify_citations]
@@ -317,7 +317,7 @@ flowchart TD
         PR --> FOOT[Coverage footer]
     end
     subgraph Learn["4 · Feedback"]
-        FB[submit_feedback] --> ST[(feedback.json per scope)]
+        FB[submit_feedback] --> ST[("feedback.json per scope")]
         ST -->|cosine ≥0.75| Q
         FOOT --> RPT[feedback_report → outdated-page hints]
     end
