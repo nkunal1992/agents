@@ -97,6 +97,27 @@ def test_sparse_id_int64_range(tmp_path):
     assert got["c1"][huge] == pytest.approx(1.5)
 
 
+def test_sparse_idf_prefers_rare_term(tmp_path):
+    """Real BM25: a rare term must outweigh a ubiquitous one — the bug where
+    'OPER-1138' lost to pages full of common words (audit R12)."""
+    idx = Index(tmp_path / "i.db")
+    # 'common' (id 1) appears in every doc; 'rare' (id 2) in only one
+    for i in range(20):
+        _page(idx, f"p{i}", ["filler"], [{1: 1.0}])
+    _page(idx, "target", ["filler"], [{1: 1.0, 2: 1.0}])
+    idx.publish({f"p{i}" for i in range(20)} | {"target"})
+    df, n = idx.term_stats()
+    assert df[2] == 1 and df[1] == 21 and n == 21
+    ranked = retrieval._sparse_rank({1: 1.0, 2: 1.0},
+                                    idx.sparse_for([c["chunk_id"] for c in
+                                                    idx.active_chunks()]),
+                                    df, n)
+    assert ranked[0][0] == "target:c0"
+    # query term absent from the corpus gets max idf but still no match
+    assert retrieval._sparse_rank({99: 1.0}, idx.sparse_for(
+        [c["chunk_id"] for c in idx.active_chunks()]), df, n) == []
+
+
 def test_cosine_mixed_dims_skips(tmp_path):
     """A model swap can leave mismatched-dim blobs — retrieval must skip
     them, not crash np.stack (C-1 hunt bug)."""

@@ -134,9 +134,18 @@ class LocalSparseEmbedder:
                 f"`{cli} prepare-models`.") from e
 
     def embed(self, texts: list[str]) -> list[dict[int, float]]:
-        """One {token_idx: weight} dict per input — the sparse payload."""
+        """One {token_idx: weight} dict per input — BM25 tf/saturation part
+        (IDF is applied at query time from the index's term_stats)."""
         out = []
         for emb in self._m.embed(texts):
+            out.append(dict(zip(emb.indices.tolist(),
+                                emb.values.tolist())))
+        return out
+
+    def query_embed(self, texts: list[str]) -> list[dict[int, float]]:
+        """Query-side encoding — distinct semantics from document embed."""
+        out = []
+        for emb in self._m.query_embed(texts):
             out.append(dict(zip(emb.indices.tolist(),
                                 emb.values.tolist())))
         return out
@@ -316,13 +325,31 @@ def _cosine(q: np.ndarray, mat: dict[str, np.ndarray]) -> list[tuple[str, float]
     return sorted(zip(ids, (m @ q).tolist()), key=lambda t: -t[1])
 
 
-def _sparse_rank(q: dict[int, float],
-                 docs: dict[str, dict[int, float]]) -> list[tuple[str, float]]:
-    """Score = Σ wq[i]·wd[i] over shared token indices — plain dot product."""
+def _sparse_rank(q: dict[int, float], docs: dict[str, dict[int, float]],
+                 df: dict[int, int] | None = None,
+                 n_docs: int = 0) -> list[tuple[str, float]]:
+    """BM25 score = Σ_{t ∈ q ∩ d} idf(t)·wq[t]·wd[t].
+
+    wd is fastembed's document weight (tf saturation + length norm); idf comes
+    from the index's term_stats (Robertson form, always ≥ 0). Without stats —
+    e.g. an index last published before stats existed — falls back to plain
+    tf weighting. Documents sharing no term with the query never rank.
+    """
+    import math
     if not docs or not q:
         return []
-    scores = [(cid, sum(q[i] * w for i, w in d.items() if i in q))
-              for cid, d in docs.items()]
+
+    def idf(t: int) -> float:
+        if not df or not n_docs:
+            return 1.0
+        d = df.get(t, 0)
+        return math.log((n_docs - d + 0.5) / (d + 0.5) + 1.0)
+
+    scores = []
+    for cid, d in docs.items():
+        s = sum(q[i] * w * idf(i) for i, w in d.items() if i in q)
+        if s > 0:
+            scores.append((cid, s))
     scores.sort(key=lambda t: -t[1])
     return scores
 
@@ -351,13 +378,17 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     fts_rank = [cid for cid, _ in
                 index.fts_search(query, active=active_ids)][:TOP_K_RETRIEVE]
 
-    # sparse leg (optional — learned term weights)
+    # sparse leg (optional — BM25: tf-saturated doc weights × corpus idf)
     sparse_rank: list[str] = []
     if sparse is not None:
-        q_sparse = sparse.embed([query])[0]
+        q_sparse = (sparse.query_embed([query])[0]
+                    if hasattr(sparse, "query_embed")
+                    else sparse.embed([query])[0])
         doc_sparse = index.sparse_for([c["chunk_id"] for c in chunks])
+        df, n_docs = index.term_stats()
         sparse_rank = [cid for cid, _ in
-                       _sparse_rank(q_sparse, doc_sparse)][:TOP_K_RETRIEVE]
+                       _sparse_rank(q_sparse, doc_sparse, df, n_docs)
+                       ][:TOP_K_RETRIEVE]
 
     # reciprocal-rank fusion over 2-3 legs
     rrf: dict[str, float] = {}

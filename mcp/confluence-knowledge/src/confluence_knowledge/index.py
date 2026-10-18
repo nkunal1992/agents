@@ -35,6 +35,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 CREATE TABLE IF NOT EXISTS jobs (
   job_id TEXT PRIMARY KEY, root_page TEXT, state TEXT, created_at REAL,
   queue TEXT, errors TEXT);
+-- per-term document frequency over the LIVE sparse vectors — rebuilt inside
+-- every publish transaction so BM25 idf always matches the snapshot
+CREATE TABLE IF NOT EXISTS term_stats (term_id INTEGER PRIMARY KEY, df INTEGER NOT NULL);
 -- job-scoped staging: crawl writes land here, never in the live tables
 CREATE TABLE IF NOT EXISTS pages_stage (
   job_id TEXT NOT NULL, page_id TEXT NOT NULL, parent_id TEXT, title TEXT,
@@ -234,7 +237,7 @@ class Index:
         model change makes the existing vector space invalid."""
         with self.lock:
             for t in ("pages", "chunks", "chunks_fts", "vectors",
-                      "sparse_vectors") + _STAGE_TABLES:
+                      "sparse_vectors", "term_stats") + _STAGE_TABLES:
                 self.db.execute(f"DELETE FROM {t}")
             self.db.execute(
                 "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
@@ -246,6 +249,33 @@ class Index:
         with self.lock, self.db:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('embed_model', ?)",
                             (model_id,))
+
+    def _rebuild_term_stats(self) -> None:
+        """Recompute per-term document frequency from the live sparse vectors.
+        Called inside the publish transaction so BM25 idf is always in step
+        with the snapshot. Must run inside a transaction on self.db."""
+        counts: dict[int, int] = {}
+        n = 0
+        for (blob,) in self.db.execute("SELECT payload FROM sparse_vectors"):
+            k = len(blob) // 12
+            n += 1
+            for t in np.unique(np.frombuffer(blob[:8 * k], dtype=np.int64)):
+                counts[int(t)] = counts.get(int(t), 0) + 1
+        self.db.execute("DELETE FROM term_stats")
+        self.db.executemany("INSERT INTO term_stats VALUES (?,?)",
+                            sorted(counts.items()))
+        self.db.execute("INSERT OR REPLACE INTO meta VALUES ('bm25_docs', ?)",
+                        (str(n),))
+
+    def term_stats(self) -> tuple[dict[int, int], int]:
+        """(term → document frequency, docs-with-sparse-vectors) for BM25 idf.
+        Empty stats mean the index predates stats support — callers fall back
+        to unweighted tf scoring until the next publish rebuilds them."""
+        with self.lock:
+            raw = self.meta_get("bm25_docs")
+            df = {t: d for t, d in self.db.execute(
+                "SELECT term_id, df FROM term_stats")}
+        return df, int(raw) if raw else 0
 
     def snapshot_epoch(self) -> int:
         """Monotonic publish counter — evidence/citation handles compare
@@ -306,6 +336,7 @@ class Index:
             for t in _STAGE_TABLES:
                 self.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job_id,))
             self._purge_dead_stage()
+            self._rebuild_term_stats()
             self.db.execute(
                 "INSERT OR REPLACE INTO meta VALUES ('snapshot_epoch', ?)",
                 (str(self.snapshot_epoch() + 1),))
