@@ -175,7 +175,8 @@ class SPCrawler:
         self.index.save_job(job_id, "running", [root_entry], [])
         return job_id
 
-    def _checkpoint(self, job_id, queue, errors, seen, levels, warns) -> None:
+    def _checkpoint(self, job_id, queue, errors, seen, levels, warns,
+                    keep=()) -> None:
         with self.index.lock, self.index.db:
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"seen:{job_id}", json.dumps(sorted(seen))))
@@ -183,6 +184,8 @@ class SPCrawler:
                                   (f"levels:{job_id}", json.dumps(levels)))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"warns:{job_id}", json.dumps(warns)))
+            self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                                  (f"keep:{job_id}", json.dumps(sorted(keep))))
             self.index.db.execute(
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
@@ -198,8 +201,10 @@ class SPCrawler:
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
         # deny/gone errors drop the item from the snapshot; transient
-        # failures keep the previously-indexed content
-        keep_failed: set[str] = set()
+        # failures keep the previously-indexed content — durable across
+        # steps and restarts via the job checkpoint
+        keep_raw = self.index.meta_get(f"keep:{job_id}")
+        keep_failed: set[str] = set(json.loads(keep_raw)) if keep_raw else set()
         # Mid-crawl model change: already-embedded pages live in the OLD
         # vector space — finishing would publish mixed dims. Wipe + fail;
         # start_crawl rebuilds under the new model.
@@ -226,7 +231,8 @@ class SPCrawler:
                 queue.clear()
                 break
             if processed:
-                self._checkpoint(job_id, queue, errors, seen, levels, warns)
+                self._checkpoint(job_id, queue, errors, seen, levels, warns,
+                                 keep_failed)
             entry = queue.pop(0)
             processed += 1
             try:
@@ -291,12 +297,22 @@ class SPCrawler:
                 "url": page["url"], "level": levels.get(pid, 0),
                 "version": page["version"],
                 "content_hash": page["content_hash"],
-                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs)
+                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs,
+                job_id=job_id)
             seen.add(pid)
 
-        self._checkpoint(job_id, queue, errors, seen, levels, warns)
-        self.index.publish(seen | keep_failed)
-        self.index.set_model_id(_MODEL_ID)
+        self._checkpoint(job_id, queue, errors, seen, levels, warns,
+                         keep_failed)
+        # fence: an abandoned/superseded job must never publish or resurrect
+        current = self.index.job(job_id)
+        if current is None or current["state"] != "running":
+            return {"job_id": job_id,
+                    "state": current["state"] if current else "abandoned",
+                    "remaining": len(queue), "pages_seen": len(seen),
+                    "errors": errors, "warnings": warns}
+        if not queue:
+            self.index.publish(seen | keep_failed, job_id=job_id)
+            self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             queue, errors)
         return {"job_id": job_id,

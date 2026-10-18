@@ -38,7 +38,6 @@ def index(tmp_path):
     idx.db.close()
 
 
-@defect("R01")
 def test_previous_snapshot_survives_unpublished_refresh(index):
     put(index)
     index.publish({"1"})
@@ -46,7 +45,6 @@ def test_previous_snapshot_survives_unpublished_refresh(index):
     assert [c["text"] for c in index.active_chunks()] == ["old policy"]
 
 
-@defect("R01")
 def test_independent_connection_sees_previous_snapshot(tmp_path):
     writer = Index(tmp_path / "two.db")
     reader = Index(tmp_path / "two.db")
@@ -60,7 +58,6 @@ def test_independent_connection_sees_previous_snapshot(tmp_path):
         writer.db.close()
 
 
-@defect("R02")
 def test_transient_keep_set_survives_step_boundary(index):
     for pid in ("1", "2", "3"):
         put(index, pid)
@@ -83,7 +80,6 @@ def test_transient_keep_set_survives_step_boundary(index):
     assert "2" in index.active_pages()
 
 
-@defect("R13")
 def test_superseded_crawler_cannot_publish(index):
     entered, release = threading.Event(), threading.Event()
 

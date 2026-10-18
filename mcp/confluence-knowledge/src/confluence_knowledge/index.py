@@ -1,7 +1,9 @@
 """Local persistent index: SQLite metadata + FTS5 keyword + vector blobs.
 
-One DB per scope (site+account+root). Single-writer transactions; a completed
-crawl is published atomically so a failed refresh never clobbers a good index.
+One DB per scope (site+account+root). Crawl output is written to job-scoped
+staging tables; `publish` swaps it into the live tables in a single
+transaction, so a running or interrupted refresh never disturbs the snapshot
+readers see. Transient-failed pages carry their previous live rows forward.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -33,7 +35,33 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 CREATE TABLE IF NOT EXISTS jobs (
   job_id TEXT PRIMARY KEY, root_page TEXT, state TEXT, created_at REAL,
   queue TEXT, errors TEXT);
+-- job-scoped staging: crawl writes land here, never in the live tables
+CREATE TABLE IF NOT EXISTS pages_stage (
+  job_id TEXT NOT NULL, page_id TEXT NOT NULL, parent_id TEXT, title TEXT,
+  url TEXT, level INTEGER, version TEXT, fetched_at REAL, content_hash TEXT,
+  warnings TEXT, PRIMARY KEY(job_id, page_id));
+CREATE TABLE IF NOT EXISTS chunks_stage (
+  job_id TEXT NOT NULL, chunk_id TEXT NOT NULL, page_id TEXT, heading TEXT,
+  kind TEXT, ordinal INTEGER, text TEXT, PRIMARY KEY(job_id, chunk_id));
+CREATE TABLE IF NOT EXISTS vectors_stage (
+  job_id TEXT NOT NULL, chunk_id TEXT NOT NULL, vec BLOB,
+  PRIMARY KEY(job_id, chunk_id));
+CREATE TABLE IF NOT EXISTS sparse_vectors_stage (
+  job_id TEXT NOT NULL, chunk_id TEXT NOT NULL, payload BLOB,
+  PRIMARY KEY(job_id, chunk_id));
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_stage USING fts5(
+  job_id UNINDEXED, chunk_id UNINDEXED, text);
 """
+
+_STAGE_TABLES = ("pages_stage", "chunks_stage", "vectors_stage",
+                 "sparse_vectors_stage", "chunks_fts_stage")
+# writes that bypass the job system (tests, tools) use this stage owner
+SCRATCH_JOB = ""
+
+
+def _batches(ids: list[str], size: int = 5000):
+    for i in range(0, len(ids), size):
+        yield ids[i:i + size]
 
 
 class Index:
@@ -59,7 +87,7 @@ class Index:
         with self.lock:
             self.db.executescript(SCHEMA)
             self.db.execute(
-                "INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
+                "INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),))
             # an uncommitted INSERT holds the write lock for the connection's
             # lifetime and deadlocks every other connection (#68)
@@ -67,12 +95,12 @@ class Index:
 
     # ---- jobs ----
     def create_job(self, job_id: str, root_page: str) -> None:
-        with self.lock:
+        with self.lock, self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?)",
                 (job_id, root_page, "queued", time.time(),
                  json.dumps([root_page]), "[]"))
-            self.db.commit()
+            self._purge_dead_stage()
 
     def job(self, job_id: str) -> dict | None:
         with self.lock:
@@ -121,40 +149,64 @@ class Index:
                 "pages_seen": len(json.loads(seen)) if seen else 0,
                 "errors": job["errors"]}
 
+    def _purge_dead_stage(self) -> None:
+        """Drop staging rows of jobs that can never publish (abandoned/done/
+        error). Must run inside a transaction on self.db."""
+        for t in _STAGE_TABLES:
+            self.db.execute(
+                f"DELETE FROM {t} WHERE job_id != ? AND job_id NOT IN "
+                "(SELECT job_id FROM jobs WHERE state IN ('queued','running'))",
+                (SCRATCH_JOB,))
+
     # ---- content ----
     def upsert_page(self, page: dict, chunks: list, vecs: np.ndarray | None,
-                    sparse: list[dict[int, float]] | None = None) -> None:
+                    sparse: list[dict[int, float]] | None = None,
+                    job_id: str = SCRATCH_JOB) -> None:
+        """Stage a crawled page under its job. Live tables are NEVER touched
+        here — readers keep the last published snapshot until publish()."""
         with self.lock, self.db:
             self.db.execute(
-                "INSERT OR REPLACE INTO pages VALUES (?,?,?,?,?,?,?,?,?,0)",
-                (page["page_id"], page.get("parent_id"), page["title"],
+                "INSERT OR REPLACE INTO pages_stage VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (job_id, page["page_id"], page.get("parent_id"), page["title"],
                  page["url"], page.get("level", 0), page.get("version"),
                  time.time(), page.get("content_hash", ""),
                  json.dumps(page.get("warnings", []))))
             old = [r[0] for r in self.db.execute(
-                "SELECT chunk_id FROM chunks WHERE page_id=?", (page["page_id"],))]
+                "SELECT chunk_id FROM chunks_stage WHERE job_id=? AND page_id=?",
+                (job_id, page["page_id"]))]
             for cid in old:
-                self.db.execute("DELETE FROM chunks_fts WHERE chunk_id=?", (cid,))
-                self.db.execute("DELETE FROM vectors WHERE chunk_id=?", (cid,))
-                self.db.execute("DELETE FROM sparse_vectors WHERE chunk_id=?", (cid,))
-            self.db.execute("DELETE FROM chunks WHERE page_id=?", (page["page_id"],))
+                self.db.execute(
+                    "DELETE FROM chunks_fts_stage WHERE job_id=? AND chunk_id=?",
+                    (job_id, cid))
+                self.db.execute(
+                    "DELETE FROM vectors_stage WHERE job_id=? AND chunk_id=?",
+                    (job_id, cid))
+                self.db.execute(
+                    "DELETE FROM sparse_vectors_stage WHERE job_id=? AND chunk_id=?",
+                    (job_id, cid))
+            self.db.execute(
+                "DELETE FROM chunks_stage WHERE job_id=? AND page_id=?",
+                (job_id, page["page_id"]))
             for i, c in enumerate(chunks):
                 self.db.execute(
-                    "INSERT INTO chunks VALUES (?,?,?,?,?,?,0)",
-                    (c.chunk_id, page["page_id"], c.heading_path, c.kind,
-                     c.ordinal, c.text))
-                self.db.execute("INSERT INTO chunks_fts VALUES (?,?)", (c.chunk_id, c.text))
+                    "INSERT INTO chunks_stage VALUES (?,?,?,?,?,?,?)",
+                    (job_id, c.chunk_id, page["page_id"], c.heading_path,
+                     c.kind, c.ordinal, c.text))
+                self.db.execute(
+                    "INSERT INTO chunks_fts_stage VALUES (?,?,?)",
+                    (job_id, c.chunk_id, c.text))
                 if vecs is not None and i < len(vecs):
                     self.db.execute(
-                        "INSERT INTO vectors VALUES (?,?)",
-                        (c.chunk_id, vecs[i].astype(np.float32).tobytes()))
+                        "INSERT INTO vectors_stage VALUES (?,?,?)",
+                        (job_id, c.chunk_id,
+                         vecs[i].astype(np.float32).tobytes()))
                 if sparse is not None and i < len(sparse) and sparse[i]:
                     # bm25 ids are int64 — int32 silently wraps high hashes
                     idx_arr = np.fromiter(sparse[i].keys(), dtype=np.int64)
                     val_arr = np.fromiter(sparse[i].values(), dtype=np.float32)
                     self.db.execute(
-                        "INSERT INTO sparse_vectors VALUES (?,?)",
-                        (c.chunk_id,
+                        "INSERT INTO sparse_vectors_stage VALUES (?,?,?)",
+                        (job_id, c.chunk_id,
                          idx_arr.tobytes() + val_arr.tobytes()))
 
     def sparse_for(self, chunk_ids: list[str]) -> dict[str, dict[int, float]]:
@@ -177,16 +229,17 @@ class Index:
         return self.meta_get("embed_model")
 
     def clear_scope(self) -> None:
-        """Drop all indexed content (pages/chunks/vectors) + the model
-        marker. Job rows are kept for history. Used when a model change
-        makes the existing vector space invalid."""
+        """Drop all indexed content (pages/chunks/vectors, live AND staged)
+        + the model marker. Job rows are kept for history. Used when a
+        model change makes the existing vector space invalid."""
         with self.lock:
             for t in ("pages", "chunks", "chunks_fts", "vectors",
-                      "sparse_vectors"):
+                      "sparse_vectors") + _STAGE_TABLES:
                 self.db.execute(f"DELETE FROM {t}")
             self.db.execute(
                 "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
-                " OR key LIKE 'levels:%'")
+                " OR key LIKE 'levels:%' OR key LIKE 'warns:%'"
+                " OR key LIKE 'keep:%'")
             self.db.commit()
 
     def set_model_id(self, model_id: str) -> None:
@@ -194,32 +247,68 @@ class Index:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('embed_model', ?)",
                             (model_id,))
 
-    def publish(self, seen_page_ids: set[str]) -> None:
-        """Atomically make exactly the crawled page set the active snapshot.
-        Content belonging to pages no longer seen is DELETED — inactive rows
-        are unreachable forever anyway and would otherwise bloat every table."""
+    def snapshot_epoch(self) -> int:
+        """Monotonic publish counter — evidence/citation handles compare
+        against it to detect a snapshot that changed since they were taken."""
+        raw = self.meta_get("snapshot_epoch")
+        return int(raw) if raw else 0
+
+    def publish(self, seen_page_ids: set[str], job_id: str = SCRATCH_JOB) -> None:
+        """Atomically replace the live snapshot: this job's staged pages plus
+        the live pages listed in seen_page_ids (transient-failed pages carry
+        their previous content forward). One transaction — readers see the
+        old snapshot or the new one, never a mix. Pages absent from the set
+        are confirmed removals and are DELETED."""
         with self.lock, self.db:
-            self.db.execute("UPDATE pages SET active=0")
-            self.db.execute("UPDATE chunks SET active=0")
-            if seen_page_ids:
-                q = ",".join("?" * len(seen_page_ids))
-                ids = list(seen_page_ids)
-                self.db.execute(f"UPDATE pages SET active=1 WHERE page_id IN ({q})", ids)
-                self.db.execute(f"UPDATE chunks SET active=1 WHERE page_id IN ({q})", ids)
-            # gc: drop chunks (and their retrieval rows) of inactive pages,
-            # then the inactive page rows themselves
-            dead_chunks = [r[0] for r in self.db.execute(
-                "SELECT chunk_id FROM chunks WHERE page_id IN "
-                "(SELECT page_id FROM pages WHERE active=0)")]
-            if dead_chunks:
-                q = ",".join("?" * len(dead_chunks))
-                for t in ("chunks_fts", "vectors", "sparse_vectors"):
-                    self.db.execute(
-                        f"DELETE FROM {t} WHERE chunk_id IN ({q})",
-                        dead_chunks)
-                self.db.execute(f"DELETE FROM chunks WHERE chunk_id IN ({q})",
-                                dead_chunks)
-            self.db.execute("DELETE FROM pages WHERE active=0")
+            self.db.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS pub_seen(pid TEXT PRIMARY KEY)")
+            self.db.execute("DELETE FROM pub_seen")
+            for batch in _batches(sorted(seen_page_ids)):
+                self.db.executemany("INSERT INTO pub_seen VALUES (?)",
+                                    [(p,) for p in batch])
+            self.db.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS pub_staged(pid TEXT PRIMARY KEY)")
+            self.db.execute("DELETE FROM pub_staged")
+            self.db.execute(
+                "INSERT INTO pub_staged SELECT DISTINCT page_id "
+                "FROM pages_stage WHERE job_id=?", (job_id,))
+            # doomed live rows: restaged (replaced below) or no longer seen
+            doom = ("page_id IN (SELECT pid FROM pub_staged) "
+                    "OR page_id NOT IN (SELECT pid FROM pub_seen)")
+            doomed_chunks = ("SELECT chunk_id FROM chunks WHERE " + doom)
+            self.db.execute(
+                f"DELETE FROM chunks_fts WHERE chunk_id IN ({doomed_chunks})")
+            self.db.execute(
+                f"DELETE FROM vectors WHERE chunk_id IN ({doomed_chunks})")
+            self.db.execute(
+                f"DELETE FROM sparse_vectors WHERE chunk_id IN ({doomed_chunks})")
+            self.db.execute(f"DELETE FROM chunks WHERE {doom}")
+            self.db.execute(f"DELETE FROM pages WHERE {doom}")
+            # staged content becomes the live snapshot
+            self.db.execute(
+                "INSERT INTO pages(page_id,parent_id,title,url,level,version,"
+                "fetched_at,content_hash,warnings,active) SELECT page_id,"
+                "parent_id,title,url,level,version,fetched_at,content_hash,"
+                "warnings,1 FROM pages_stage WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO chunks(chunk_id,page_id,heading,kind,ordinal,"
+                "text,active) SELECT chunk_id,page_id,heading,kind,ordinal,"
+                "text,1 FROM chunks_stage WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO chunks_fts(chunk_id,text) SELECT chunk_id,text "
+                "FROM chunks_fts_stage WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO vectors SELECT chunk_id,vec FROM vectors_stage "
+                "WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO sparse_vectors SELECT chunk_id,payload "
+                "FROM sparse_vectors_stage WHERE job_id=?", (job_id,))
+            for t in _STAGE_TABLES:
+                self.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job_id,))
+            self._purge_dead_stage()
+            self.db.execute(
+                "INSERT OR REPLACE INTO meta VALUES ('snapshot_epoch', ?)",
+                (str(self.snapshot_epoch() + 1),))
 
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:
