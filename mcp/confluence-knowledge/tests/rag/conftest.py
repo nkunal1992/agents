@@ -21,6 +21,13 @@ def _tokens(t: str) -> list[str]:
     return [w[:5] for w in re.findall(r"[a-z0-9]+", t.lower())]
 
 
+def _stable_hash(w: str) -> int:
+    """hash() is salted per process — collision patterns would differ run
+    to run, making tests flaky. md5 is stable across interpreters."""
+    import hashlib
+    return int.from_bytes(hashlib.md5(w.encode()).digest()[:4], "little")
+
+
 class HashEmbedder:
     """Deterministic bag-of-hash dense vectors — semantically meaningless
     but stable enough to exercise the pipeline shape."""
@@ -31,7 +38,7 @@ class HashEmbedder:
         out = np.zeros((len(texts), self.DIM), dtype=np.float32)
         for r, t in enumerate(texts):
             for w in _tokens(t):
-                out[r, hash(w) % self.DIM] += 1.0
+                out[r, _stable_hash(w) % self.DIM] += 1.0
         n = np.linalg.norm(out, axis=1, keepdims=True)
         return out / np.where(n == 0, 1, n)
 
@@ -58,7 +65,7 @@ class ToySparse:
         for t in texts:
             d: dict[int, float] = {}
             for w in _tokens(t):
-                d[hash(w) % 30000] = 1.0
+                d[_stable_hash(w) % 30000] = 1.0
             out.append(d)
         return out
 
