@@ -25,7 +25,7 @@ DOCS = [d for d in DOCS if d.exists()]
 
 
 def _const(name, path=None):
-    src = (path or SRC / "retrieval.py").read_text()
+    src = (path or SRC / "retrieval.py").read_text(encoding="utf-8")
     m = re.search(rf"^{name}\s*=\s*([\w_.'\"]+)", src, re.MULTILINE)
     assert m, f"{name} not found in {path}"
     return m.group(1).strip('"\'')
@@ -34,9 +34,9 @@ def _const(name, path=None):
 def test_doc_tool_lists_match_servers():
     """Any doc that enumerates the MCP tools must list the real set."""
     tools = set(re.findall(r"@mcp\.tool\(\)\s*\ndef\s+(\w+)",
-                           (SRC / "server.py").read_text()))
+                           (SRC / "server.py").read_text(encoding="utf-8")))
     for d in DOCS:
-        txt = d.read_text()
+        txt = d.read_text(encoding="utf-8")
         for m in re.finditer(r"`(status|connect|start_crawl|crawl_step|search|"
                              r"get_evidence|verify_citations|submit_feedback|"
                              r"feedback_report)`", txt):
@@ -49,7 +49,7 @@ def test_doc_tool_lists_match_servers():
 
 def test_doc_threshold_constants_match_code():
     """Numbers quoted in docs must equal code constants."""
-    fb = (SRC / "feedback.py").read_text()
+    fb = (SRC / "feedback.py").read_text(encoding="utf-8")
     checks = {
         "MIN_RERANK_SCORE": _const("MIN_RERANK_SCORE"),
         "TOP_K_EVIDENCE": _const("TOP_K_EVIDENCE"),
@@ -59,13 +59,13 @@ def test_doc_threshold_constants_match_code():
     }
     min_sim = re.search(r"DEFAULT_MIN_SIM\s*=\s*([\d.]+)", fb).group(1)
 
-    all_docs = "\n".join(d.read_text() for d in DOCS)
+    all_docs = "\n".join(d.read_text(encoding="utf-8") for d in DOCS)
     # docs that cite a similarity threshold must cite the real one
     for m in re.finditer(r"cosine\s*[≥>=]+\s*([\d.]+)", all_docs):
         assert m.group(1) == min_sim, \
             f"docs say cosine ≥{m.group(1)} but DEFAULT_MIN_SIM={min_sim}"
     # evidence cap — docs cite the EVIDENCE_CHAR_CAP value
-    srv = (SRC / "server.py").read_text()
+    srv = (SRC / "server.py").read_text(encoding="utf-8")
     ev_cap = re.search(r"EVIDENCE_CHAR_CAP\s*=\s*(\d+)", srv).group(1)
     for m in re.finditer(r"capped at (\d+) chars", all_docs):
         assert m.group(1) == ev_cap, \
@@ -77,7 +77,7 @@ def test_doc_claims_no_two_leg_retrieval():
     """Retrieval is three legs (dense + sparse + FTS) — the pre-bm25 docs
     described two. Any remaining 'two' phrasing is drift."""
     for d in DOCS:
-        txt = d.read_text()
+        txt = d.read_text(encoding="utf-8")
         for bad in ("two ranked lists", "both indexes", "both the keyword",
                     "the two ways"):
             assert bad not in txt, f"{d.name}: stale two-leg claim: {bad!r}"
@@ -86,14 +86,14 @@ def test_doc_claims_no_two_leg_retrieval():
 def test_doc_download_size_not_stale():
     """Model download size claims must be the current ~1.4 GB figure."""
     for d in DOCS:
-        assert "1.3 GB" not in d.read_text(), \
+        assert "1.3 GB" not in d.read_text(encoding="utf-8"), \
             f"{d.name}: stale '1.3 GB' model-size claim"
 
 
 def test_no_shared_feedback_claims():
     """Feedback is per-user per-machine — docs must not imply sharing."""
     for d in DOCS + list((REPO / "agents").glob("*.agent.md")):
-        txt = d.read_text()
+        txt = d.read_text(encoding="utf-8")
         for bad in ("colleague correction", "colleagues' fixes",
                     "anyone asks"):
             assert bad not in txt.lower() or bad == "colleague", \
