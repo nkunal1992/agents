@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import uuid
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -347,11 +348,14 @@ def search(scope_handle: str, question: str) -> dict:
     # saved corrections matching this question ride along — the agent
     # must disclose them, so they're part of the response, not a separate call
     corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
-    set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
+    # unique immutable handle — never derived from cache size; bound to the
+    # snapshot epoch so a refresh can't silently re-point a citation
+    set_id = f"ev:{s['key'][:8]}:{uuid.uuid4().hex[:16]}"
     # bound the session cache — sets are never reused after the turn ends
     while len(_evidence_sets) >= 32:
         _evidence_sets.pop(next(iter(_evidence_sets)))
-    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev}
+    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
+                              "epoch": idx.snapshot_epoch()}
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -412,10 +416,15 @@ def verify_citations(scope_handle: str, evidence_set: str,
                      mappings: list[dict]) -> dict:
     s = _scope(scope_handle)  # binds or SetupError — never KeyError below
     rec = _evidence_sets.get(evidence_set)
-    # full 24-char scope key — the key[:8] suffix in the id is cosmetic
+    # full 24-char scope key — the key[:8] prefix in the id is cosmetic
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
+    idx = _index_for(s["key"])
+    if rec.get("epoch") != idx.snapshot_epoch():
+        raise SecurityException(
+            "evidence set predates the latest published snapshot — "
+            "run search again and cite the fresh evidence_set")
     return check_citations(rec["ev"], mappings)
 
 
