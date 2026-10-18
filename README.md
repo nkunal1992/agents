@@ -178,7 +178,8 @@ citations, while staying inside the org's existing permission model.
 *Deeper dives on the knowledge-agent stack:*
 [KT guide](docs/knowledge-agent-kt-guide.md) (explain it to anyone) ·
 [TDD](docs/knowledge-agent-tdd.md) (architecture spec) ·
-[deck](docs/knowledge-agent-slides.md) (leadership + engineering presentation)
+[deck](docs/knowledge-agent-slides.md) (leadership + engineering presentation) ·
+[RAG readiness audit](docs/knowledge-agent-rag-review.md) (reproduced defects, measured results and limits)
 
 ## Usage
 
