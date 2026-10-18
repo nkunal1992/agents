@@ -50,7 +50,7 @@ underneath, keeps a local index, and answers:
 - **Every claim cited** — click through to the exact source page
 - **Says "I don't know"** — instead of guessing
 - **Flags its own confidence** — weak matches are labelled, not hidden
-- **Learns from corrections** — colleagues' fixes surface next time
+- **Learns from corrections** — your fixes surface next time
 
 ---
 
@@ -181,7 +181,7 @@ flowchart TD
 | Cross-page synthesis | answers that only found one of two needed pages → `Recall Gap` |
 | Contradiction | same term, conflicting pages — cite the disagreement |
 | Table-Probe | cells pulled from the wrong row of a big table |
-| Feedback check | a colleague correction exists → must disclose it |
+| Feedback check | a saved correction exists → must disclose it |
 
 ---
 
@@ -226,7 +226,7 @@ groundedness on top of the deterministic metrics.
 > "Production deploys happen only on Thursdays after 18:00.
 > [Source: Deploy Windows]
 > *Coverage: 32 pages · indexed 14:02 · Failure Hunt: clean*
-> *Note: a colleague correction (2 days ago) notes the freeze now
+> *Note: a saved correction (2 days ago) notes the freeze now
 > starts Dec 15, not Dec 20.*"
 
 Same question. One is a plausible guess. One is provable.
@@ -254,8 +254,9 @@ questions about it."*
 
 - Found a wrong/slow answer? Add a `{question, ideal_answer,
   required_pages}` pair to `golden_set.json`
-- Every correction makes the next colleague's search better — and
-  flags the source page for a fix
+- Your corrections stick — same question on your machine gets the
+  disclosure next time, and `feedback_report` flags the source page
+  for the docs owner
 - `submit_feedback` — say "that's wrong, it's X" in chat; it sticks
 
 ---

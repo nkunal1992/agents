@@ -1,9 +1,9 @@
-"""Per-scope human-feedback store — colleague corrections keyed by query
+"""Per-scope human-feedback store — saved corrections keyed by query
 embedding. Local-first: one JSON file per scope under the index dir;
 `clean` removes them along with the index (documented semantics).
 
 Design rules (from issue #107): corrections are disclosed ALONGSIDE
-documentation — "the docs say X, but a colleague correction says Y" —
+documentation — "the docs say X, but a saved correction says Y" —
 never silently override, never silently dropped.
 """
 

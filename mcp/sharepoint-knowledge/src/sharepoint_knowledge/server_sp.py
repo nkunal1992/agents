@@ -365,7 +365,7 @@ def get_evidence(scope_handle: str, chunk_ids: list[str]) -> dict:
 @mcp.tool()
 def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
-    """Store a colleague correction — disclosed alongside the docs on
+    """Store a saved correction — disclosed alongside the docs on
     similar future questions (never overrides them)."""
     s = _scope(scope_handle)
     if not _models_loaded(0):

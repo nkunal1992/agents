@@ -152,7 +152,7 @@ accounts — the entire install is local files + models.
 - **Never fabricate scope.** Only files the service reports as indexed count.
 - **Corrections are disclosed, never swallowed.** When `search` returns
   `user_corrections`, the answer must mention each: "the documentation says
-  X, but a colleague correction (dated N days ago) notes Y." Corrections are
+  X, but a saved correction (dated N days ago) notes Y." Corrections are
   human input — they can be wrong too — so they annotate, never replace,
   the documented claim.
 - **When the user corrects the agent** ("that's wrong", "outdated",
@@ -212,7 +212,7 @@ accounts — the entire install is local files + models.
      pulled from an adjacent row is a `Table mismatch`; disclose it in
      the Coverage footer.
    - *Feedback check*: when `search` returns `user_corrections`, the
-     answer MUST disclose each one — "the docs say X, but a colleague
+     answer MUST disclose each one — "the docs say X, but a saved
      correction (dated D) notes Y". Corrections never replace the doc
      claim and are never silently dropped.
    - *Contradiction check*: when the same term or fact appears on

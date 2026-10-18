@@ -150,7 +150,7 @@ python3 -m venv ~/.sharepoint-knowledge/venv
   secret-looking files or unreadable items, say so — never retry them.
 - **Corrections are disclosed, never swallowed.** When `search` returns
   `user_corrections`, the answer must mention each: "the documentation says
-  X, but a colleague correction (dated N days ago) notes Y." Corrections
+  X, but a saved correction (dated N days ago) notes Y." Corrections
   annotate, never replace, the documented claim.
 - **When the user corrects the agent** ("that's wrong", "outdated",
   "actually it's…"), call `submit_feedback` with their exact correction —
@@ -202,7 +202,7 @@ python3 -m venv ~/.sharepoint-knowledge/venv
      pulled from an adjacent row is a `Table mismatch`; disclose it in
      the Coverage footer.
    - *Feedback check*: when `search` returns `user_corrections`, the
-     answer MUST disclose each one — "the docs say X, but a colleague
+     answer MUST disclose each one — "the docs say X, but a saved
      correction (dated D) notes Y". Corrections never replace the doc
      claim and are never silently dropped.
    - *Contradiction check*: when the same term or fact appears on

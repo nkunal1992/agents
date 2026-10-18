@@ -226,7 +226,7 @@ paraphrase ~0.77 / same-topic different-intent ~0.68 / unrelated ~0.39 →
 Disclosure format (disclose-alongside, never override — a stale
 correction can never outrank fresh docs):
 
-> "The documentation says X, but a colleague correction (dated N days ago) notes Y."
+> "The documentation says X, but a saved correction (dated N days ago) notes Y."
 
 ### 4.3 Documentation health
 

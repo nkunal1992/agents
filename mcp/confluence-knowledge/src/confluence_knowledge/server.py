@@ -343,7 +343,7 @@ def search(scope_handle: str, question: str) -> dict:
                         "— run start_crawl once to rebuild it, then search again"}
     emb = _embedder()
     ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse())
-    # colleague corrections matching this question ride along — the agent
+    # saved corrections matching this question ride along — the agent
     # must disclose them, so they're part of the response, not a separate call
     corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
     set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
@@ -387,7 +387,7 @@ def get_evidence(scope_handle: str, chunk_ids: list[str]) -> dict:
 @mcp.tool()
 def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
-    """Store a colleague correction — disclosed alongside the docs on
+    """Store a saved correction — disclosed alongside the docs on
     similar future questions (never overrides them)."""
     s = _scope(scope_handle)
     if not _models_loaded(0):
