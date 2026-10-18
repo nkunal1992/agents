@@ -287,7 +287,6 @@ def test_independent_corpus_is_balanced():
     assert all(set(q["required"]) <= {p["id"] for p in pages} for q in questions)
 
 
-@defect("R12")
 def test_zero_overlap_sparse_documents_do_not_vote_in_fusion():
     assert _sparse_rank({1: 1.0}, {"a": {2: 1.0}, "b": {3: 1.0}}) == []
 
