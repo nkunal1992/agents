@@ -146,13 +146,17 @@ class Crawler:
         self.index.save_job(job_id, "running", [f"page:{root_page}"], [])
         return job_id
 
-    def _checkpoint(self, job_id, queue, errors, seen, levels) -> None:
-        """Persist progress so an interrupted step loses no completed page."""
+    def _checkpoint(self, job_id, queue, errors, seen, levels,
+                    keep=()) -> None:
+        """Persist progress so an interrupted step loses no completed page —
+        including the durable keep-set of transient-failed pages."""
         with self.index.lock, self.index.db:
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"seen:{job_id}", json.dumps(sorted(seen))))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"levels:{job_id}", json.dumps(levels)))
+            self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                                  (f"keep:{job_id}", json.dumps(sorted(keep))))
             self.index.db.execute(
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
@@ -173,8 +177,11 @@ class Crawler:
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
         # pages that fail with deny/gone errors are meant to drop out of the
-        # snapshot; transient failures keep their previously-indexed content
-        keep_failed: set[str] = set()
+        # snapshot; transient failures keep their previously-indexed content.
+        # The set is durable in the job checkpoint so it survives bounded
+        # steps and process restarts.
+        keep_raw = self.index.meta_get(f"keep:{job_id}")
+        keep_failed: set[str] = set(json.loads(keep_raw)) if keep_raw else set()
 
         # Mid-crawl model change: already-embedded pages live in the OLD
         # vector space — finishing this job would publish a mixed-dimension
@@ -201,7 +208,8 @@ class Crawler:
         while queue and (batch is None or processed < batch) and (
                 deadline is None or processed == 0 or time.monotonic() < deadline):
             if processed:
-                self._checkpoint(job_id, queue, errors, seen, levels)
+                self._checkpoint(job_id, queue, errors, seen, levels,
+                                 keep_failed)
             entry = queue.pop(0)          # "page:123" or "folder:456"
             is_folder = entry.startswith("folder:")
             pid = entry.split(":", 1)[1] if ":" in entry else entry
@@ -243,20 +251,28 @@ class Crawler:
                 "page_id": pid, "parent_id": None, "title": page["title"],
                 "url": page["url"], "level": levels.get(pid, 0),
                 "version": page["version"], "content_hash": content_hash,
-                "warnings": warns}, chunks, vecs, sparse_vecs)
+                "warnings": warns}, chunks, vecs, sparse_vecs, job_id=job_id)
             seen.add(pid)
             for cid, ctype in self._children(pid, is_folder=False):
                 if cid not in seen:
                     levels.setdefault(cid, levels.get(pid, 0) + 1)
                     queue.append(f"{ctype}:{cid}")
 
-        self._checkpoint(job_id, queue, errors, seen, levels)
+        self._checkpoint(job_id, queue, errors, seen, levels, keep_failed)
 
+        # fence: a newer crawl may have superseded this job while a fetch was
+        # in flight — never let an abandoned job publish or resurrect itself
+        current = self.index.job(job_id)
+        if current is None or current["state"] != "running":
+            return {"job_id": job_id,
+                    "state": current["state"] if current else "abandoned",
+                    "remaining": len(queue), "pages_seen": len(seen),
+                    "errors": errors}
         if queue:
             self.index.save_job(job_id, "running", queue, errors)
             state = "running"
         else:
-            self.index.publish(seen | keep_failed)
+            self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
             self.index.save_job(job_id, "done", [], errors)
             state = "done"

@@ -1,11 +1,8 @@
-import pytest
 from confluence_knowledge.index import Index
 
 from local_knowledge.crawl_local import LocalCrawler
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError,
-                   reason="#117 R02: unreadable directory refresh deletes cached descendants")
 def test_unreadable_directory_preserves_previous_content(tmp_path, monkeypatch):
     root = tmp_path / "docs"
     root.mkdir()

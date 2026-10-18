@@ -108,7 +108,8 @@ class LocalCrawler:
                  "warnings": warns},
                 chunks)
 
-    def _checkpoint(self, job_id, queue, errors, seen, levels, warns) -> None:
+    def _checkpoint(self, job_id, queue, errors, seen, levels, warns,
+                    keep=()) -> None:
         with self.index.lock, self.index.db:
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"seen:{job_id}", json.dumps(sorted(seen))))
@@ -116,6 +117,8 @@ class LocalCrawler:
                                   (f"levels:{job_id}", json.dumps(levels)))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"warns:{job_id}", json.dumps(warns)))
+            self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                                  (f"keep:{job_id}", json.dumps(sorted(keep))))
             self.index.db.execute(
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
@@ -133,7 +136,9 @@ class LocalCrawler:
 
         queue: list[str] = job["queue"]
         errors: list[str] = job["errors"]
-        keep_failed: set[str] = set()  # transient read fails keep old content
+        # transient read fails keep old content — durable across steps/restarts
+        keep_raw = self.index.meta_get(f"keep:{job_id}")
+        keep_failed: set[str] = set(json.loads(keep_raw)) if keep_raw else set()
         # Mid-crawl model change: already-embedded pages live in the OLD
         # vector space — finishing would publish mixed dims. Wipe + fail;
         # start_crawl rebuilds under the new model.
@@ -163,7 +168,8 @@ class LocalCrawler:
                 queue.clear()
                 break
             if processed:
-                self._checkpoint(job_id, queue, errors, seen, levels, warns)
+                self._checkpoint(job_id, queue, errors, seen, levels, warns,
+                                 keep_failed)
             entry = queue.pop(0)
             # entries are "dir:<path>" / "file:<path>" — split on the PREFIX,
             # not ':' (Windows paths contain their own drive colon)
@@ -180,6 +186,15 @@ class LocalCrawler:
                 visited_dirs.add(real)
                 kids, warns2 = self._children(path)
                 warns.extend(warns2)
+                if not kids and warns2:
+                    # enumeration produced nothing but warnings — the listing
+                    # may be incomplete (unreadable dir). Partial enumeration
+                    # is not proof of absence: keep previously indexed files
+                    # under this directory rather than deleting them.
+                    rel = self._rel(path)
+                    keep_failed.update(
+                        p for p in self.index.active_pages()
+                        if p == rel or p.startswith(rel + "/"))
                 queue.extend(k for k in kids
                              if (k[4:] if k.startswith("dir:") else k[5:]) not in seen)
                 continue
@@ -204,14 +219,24 @@ class LocalCrawler:
                 "page_id": rel, "parent_id": None, "title": page["title"],
                 "url": page["url"], "level": levels.get(rel, path_s.count("/")),
                 "version": page["version"], "content_hash": page["content_hash"],
-                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs)
+                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs,
+                job_id=job_id)
             seen.add(rel)
 
         # persist final seen/levels/warns too — the in-loop checkpoint runs
         # before each item is processed, so the last item would undercount
-        self._checkpoint(job_id, queue, errors, seen, levels, warns)
-        self.index.publish(seen | keep_failed)
-        self.index.set_model_id(_MODEL_ID)
+        self._checkpoint(job_id, queue, errors, seen, levels, warns,
+                         keep_failed)
+        # fence: an abandoned/superseded job must never publish or resurrect
+        current = self.index.job(job_id)
+        if current is None or current["state"] != "running":
+            return {"job_id": job_id,
+                    "state": current["state"] if current else "abandoned",
+                    "remaining": len(queue), "pages_seen": len(seen),
+                    "errors": errors, "warnings": warns}
+        if not queue:
+            self.index.publish(seen | keep_failed, job_id=job_id)
+            self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             queue, errors)
         return {"job_id": job_id,

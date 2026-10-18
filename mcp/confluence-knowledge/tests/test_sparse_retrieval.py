@@ -39,6 +39,7 @@ def test_sparse_replaced_on_reindex(tmp_path):
     idx = Index(tmp_path / "i.db")
     _page(idx, "p1", ["a"], [{1: 1.0}])
     _page(idx, "p1", ["b"], [{9: 3.0}])   # re-upsert same page
+    idx.publish({"p1"})
     got = idx.sparse_for(["p1:c0"])
     assert got["p1:c0"] == pytest.approx({9: 3.0})
 
