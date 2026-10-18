@@ -32,6 +32,7 @@ def resolve_root(path: str) -> Path:
     return p.resolve()
 
 
+from confluence_knowledge.retrieval import CHUNK_TOKENS
 from confluence_knowledge.retrieval import MODEL_MARKER as _MODEL_ID
 
 
@@ -41,6 +42,10 @@ class LocalCrawler:
         self.root = root      # realpath — everything indexed must live under it
         self.embedder = embedder
         self.sparse = sparse
+
+    def _chunk_kwargs(self) -> dict:
+        measure = getattr(self.embedder, "count_tokens", None)
+        return {"measure": measure, "budget": CHUNK_TOKENS} if measure else {}
 
     def start(self) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -99,7 +104,8 @@ class LocalCrawler:
             data = f.read_bytes()
         except OSError as e:
             raise SetupError(f"{self._rel(f)}: unreadable — {e}") from e
-        chunks, warns = extract_file_chunks(f.name, data)
+        chunks, warns = extract_file_chunks(f.name, data,
+                                            **self._chunk_kwargs())
         content_hash = hashlib.sha256(data).hexdigest()
         return ({"page_id": self._rel(f), "title": f.name,
                  "url": f"file://{f}",
@@ -211,7 +217,8 @@ class LocalCrawler:
                 c.chunk_id = f"{rel}:{page['content_hash'][:8]}:{c.ordinal}"
             vecs, sparse_vecs = None, None
             if self.embedder is not None and chunks:
-                texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+                texts = [f"{page['title']}\n{c.heading_path}\n{c.text}"
+                         for c in chunks]
                 vecs = self.embedder.embed(texts)
                 if self.sparse is not None:
                     sparse_vecs = self.sparse.embed(texts)

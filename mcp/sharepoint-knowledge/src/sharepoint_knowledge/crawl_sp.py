@@ -23,6 +23,7 @@ from confluence_knowledge.settings import SetupError
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 20_000
 
+from confluence_knowledge.retrieval import CHUNK_TOKENS
 from confluence_knowledge.retrieval import MODEL_MARKER as _MODEL_ID
 
 
@@ -86,6 +87,10 @@ class SPCrawler:
         self.sparse = sparse
         self.downloader = downloader  # injected for tests; real one in server
 
+    def _chunk_kwargs(self) -> dict:
+        measure = getattr(self.embedder, "count_tokens", None)
+        return {"measure": measure, "budget": CHUNK_TOKENS} if measure else {}
+
     # ---- expansions ----
 
     def _expand_site(self, site_id: str) -> tuple[list[str], list[str]]:
@@ -130,7 +135,7 @@ class SPCrawler:
                                      for p in parts if isinstance(p, dict))
             except (json.JSONDecodeError, TypeError):
                 pass  # raw HTML already
-            chunks, warns = extract_chunks(html)
+            chunks, warns = extract_chunks(html, **self._chunk_kwargs())
         else:
             warns.append("no canvas content — page may be empty or classic")
         page = {"page_id": f"page:{item_id}", "title": title,
@@ -159,7 +164,8 @@ class SPCrawler:
                    else f"too large ({d['size']} bytes)")
             return None, [], [f"{name}: {why} — skipped"]
         data = downloader(dl_url)
-        chunks, warns = extract_file_chunks(name, data)
+        chunks, warns = extract_file_chunks(name, data,
+                                            **self._chunk_kwargs())
         return {"page_id": f"file:{item_id}", "title": name,
                 "url": d.get("webUrl", ""),
                 "version": str(d.get("lastModifiedDateTime", "")),
@@ -288,7 +294,8 @@ class SPCrawler:
                 c.chunk_id = f"{pid}:{page['content_hash'][:8]}:{c.ordinal}"
             vecs, sparse_vecs = None, None
             if self.embedder is not None and chunks:
-                texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+                texts = [f"{page['title']}\n{c.heading_path}\n{c.text}"
+                         for c in chunks]
                 vecs = self.embedder.embed(texts)
                 if self.sparse is not None:
                     sparse_vecs = self.sparse.embed(texts)

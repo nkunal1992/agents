@@ -57,7 +57,7 @@ def quality(home, out):
         chunks, _ = extract_chunks(p["html"])
         for c in chunks:
             c.chunk_id = f"{p['id']}:{c.ordinal}"
-        texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
+        texts = [f"{p['title']}\n{c.heading_path}\n{c.text}" for c in chunks]
         emb._tok.no_truncation()
         token_lengths.extend(len(e.ids) for e in emb._tok.encode_batch(texts))
         emb._tok.enable_truncation(r.EMBED_MAX_TOKENS)
@@ -70,13 +70,16 @@ def quality(home, out):
     chunks = idx.active_chunks()
     by_id = {c["chunk_id"]: c for c in chunks}
     vectors, sparse = idx.vectors_for(list(by_id)), idx.sparse_for(list(by_id))
+    df_map, n_docs = idx.term_stats()
     results = []
     for pair in questions:
         t = time.perf_counter()
         q = pair["question"]
         dense = [cid for cid, _ in r._cosine(emb.embed([q])[0], vectors)][:30]
         ft = [cid for cid, _ in idx.fts_search(q, active=set(by_id))]
-        sr = [cid for cid, _ in r._sparse_rank(sp.embed([q])[0], sparse)][:30]
+        sr = [cid for cid, _ in
+              r._sparse_rank(sp.query_embed([q])[0], sparse,
+                             df_map, n_docs)][:30]
         fused = {}
         for leg in (dense, ft, sr):
             for rank, cid in enumerate(leg):

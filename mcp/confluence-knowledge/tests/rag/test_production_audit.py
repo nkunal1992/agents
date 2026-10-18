@@ -343,7 +343,6 @@ def test_vector_reads_respect_sqlite_parameter_limit(index):
     assert index.vectors_for([f"chunk-{i}" for i in range(32767)]) == {}
 
 
-@defect("R16")
 def test_page_title_is_in_embedded_context(index):
     recorded = []
 
@@ -363,6 +362,25 @@ def test_page_title_is_in_embedded_context(index):
     crawler = OnePage(None, index, "cloud", embedder=Embedder())
     crawler.step(crawler.start("1"))
     assert any("Atlas ownership" in text for text in recorded)
+
+
+def test_token_aware_chunking_respects_model_budget():
+    """R16: with a token measure, no produced chunk may exceed the token
+    budget — words are a bad proxy for tokens on technical content."""
+    def tokens(text):
+        return len(text.split()) * 2   # fake: every word costs 2 tokens
+
+    text = "<p>" + " ".join(f"w{i}" for i in range(400)) + "</p>"
+    chunks, _ = extract_chunks(text, measure=tokens, budget=200)
+    assert len(chunks) > 1
+    assert all(tokens(c.text) <= 200 for c in chunks)
+    # table header preservation survives under the token budget too
+    from confluence_knowledge.extract import split_table_text
+    t = "Table — columns: k | v\n" + "\n".join(f"row {i}: a{i} | b{i}"
+                                              for i in range(60))
+    segs = split_table_text(t, budget=200, measure=tokens)
+    assert all(s.startswith("Table — columns:") and tokens(s) <= 200
+               for s in segs)
 
 
 def test_audit_metrics_distinguish_partial_sources_and_wrong_facts(monkeypatch):

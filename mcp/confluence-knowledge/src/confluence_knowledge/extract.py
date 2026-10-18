@@ -15,6 +15,42 @@ MAX_WORDS = 280
 OVERLAP_WORDS = 40
 
 
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
+def _pack_units(units: list[str], budget: int, measure, overlap: int = 0,
+                joiner: str = " ") -> list[str]:
+    """Greedy pack `units` (words or lines) into segments of ≤budget units of
+    `measure`. A single unit over budget is emitted whole (atomicity beats
+    the limit — a lone table row must not be torn apart)."""
+    segs, cur, size = [], [], 0
+    for u in units:
+        u_size = measure(u)
+        if cur and size + u_size > budget:
+            segs.append(joiner.join(cur))
+            if overlap and joiner == " ":
+                cur, size = cur[-overlap:], sum(
+                    measure(x) for x in cur[-overlap:])
+            else:
+                cur, size = [], 0
+        cur.append(u)
+        size += u_size
+    if cur:
+        segs.append(joiner.join(cur))
+    return segs
+
+
+def split_oversized(text: str, budget: int = MAX_WORDS, measure=_word_count,
+                    overlap_words: int = OVERLAP_WORDS) -> list[str]:
+    """Split long text into ≤budget segments with overlap. With the default
+    word measure this is the historical ≤280-word behaviour; with a token
+    measure the bound is enforced in model units."""
+    if measure(text) <= budget:
+        return [text]
+    return _pack_units(text.split(), budget, measure, overlap_words)
+
+
 @dataclass
 class Chunk:
     text: str
@@ -38,19 +74,20 @@ def _table_to_text(tbl) -> str:
     return "\n".join(out)
 
 
-def split_table_text(t: str) -> list[str]:
-    """An oversized table becomes several ≤MAX_WORDS chunks, each carrying
+def split_table_text(t: str, budget: int = MAX_WORDS,
+                     measure=_word_count) -> list[str]:
+    """An oversized table becomes several ≤budget chunks, each carrying
     the header line — one unbounded chunk would exceed the embedder and the
     reranker's token limits and silently lose its tail rows."""
-    if len(t.split()) <= MAX_WORDS:
+    if measure(t) <= budget:
         return [t]
     lines = t.split("\n")
     header, rows = lines[0], lines[1:]
-    hw = len(header.split())
+    hw = measure(header)
     segs, buf, w = [], [], hw + 2
     for r in rows:
-        rw = len(r.split())
-        if buf and w + rw > MAX_WORDS:
+        rw = measure(r)
+        if buf and w + rw > budget:
             segs.append(header + "\n" + "\n".join(buf))
             buf, w = [], hw + 2
         buf.append(r)
@@ -60,8 +97,11 @@ def split_table_text(t: str) -> list[str]:
     return segs
 
 
-def extract_chunks(storage_html: str) -> tuple[list[Chunk], list[str]]:
-    """Return (chunks, extraction warnings)."""
+def extract_chunks(storage_html: str, measure=_word_count,
+                   budget: int = MAX_WORDS) -> tuple[list[Chunk], list[str]]:
+    """Return (chunks, extraction warnings). `measure`/`budget` bound chunk
+    size — word count by default, model tokens when a tokenizer-backed
+    measure is supplied (token-aware chunking, audit R16)."""
     soup = BeautifulSoup(storage_html, "html.parser")  # stdlib parser; no ext entities
     warnings: list[str] = []
 
@@ -108,16 +148,9 @@ def extract_chunks(storage_html: str) -> tuple[list[Chunk], list[str]]:
         buf.clear()
         if not text:
             return
-        words = text.split()
-        if len(words) <= MAX_WORDS:
-            chunks.append(Chunk(text, " > ".join(heading_path), kind, len(chunks)))
-            return
-        # split on word boundaries with overlap
-        step = MAX_WORDS - OVERLAP_WORDS
-        for i in range(0, len(words), step):
-            seg = " ".join(words[i:i + MAX_WORDS])
-            if seg.strip():
-                chunks.append(Chunk(seg, " > ".join(heading_path), kind, len(chunks)))
+        for seg in split_oversized(text, budget, measure):
+            chunks.append(Chunk(seg, " > ".join(heading_path), kind,
+                                len(chunks)))
 
     for el in soup.find_all(re.compile(r"^h[1-6]$|^p$|^ul$|^ol$|^table$|^pre$|^blockquote$")):
         if el.name and el.name.startswith("h"):
@@ -132,7 +165,7 @@ def extract_chunks(storage_html: str) -> tuple[list[Chunk], list[str]]:
         elif el.name == "table":
             flush()
             t = _table_to_text(el)
-            for seg in split_table_text(t):
+            for seg in split_table_text(t, budget, measure):
                 chunks.append(Chunk(seg, " > ".join(heading_path), "table",
                                     len(chunks)))
         else:

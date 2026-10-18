@@ -12,7 +12,7 @@ import csv
 import io
 import zipfile
 
-from .extract import Chunk, extract_chunks, split_table_text
+from .extract import MAX_WORDS, Chunk, _word_count, extract_chunks, split_oversized, split_table_text
 from .settings import SetupError
 
 MAX_FILE_WORDS = 200_000   # ~1MB of text — beyond that, index metadata only
@@ -51,19 +51,16 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _text_chunks(text: str, heading: str, kind: str = "text") -> list[Chunk]:
-    """Split plain text into word-bounded chunks (same shape as extract.py)."""
-    words = text.split()
-    out: list[Chunk] = []
-    step = 280 - 40
-    for i in range(0, len(words), step):
-        seg = " ".join(words[i:i + 280])
-        if seg.strip():
-            out.append(Chunk(seg, heading, kind, len(out)))
-    return out
+def _text_chunks(text: str, heading: str, kind: str = "text",
+                 measure=_word_count, budget: int = MAX_WORDS) -> list[Chunk]:
+    """Split plain text into bounded chunks (same shape as extract.py)."""
+    return [Chunk(seg, heading, kind, i)
+            for i, seg in enumerate(split_oversized(text, budget, measure))
+            if seg.strip()]
 
 
-def _docx_chunks(data: bytes) -> list[Chunk]:
+def _docx_chunks(data: bytes, measure=_word_count,
+                 budget: int = MAX_WORDS) -> list[Chunk]:
     try:
         import docx  # python-docx
     except ImportError:
@@ -77,7 +74,8 @@ def _docx_chunks(data: bytes) -> list[Chunk]:
         text = "\n".join(buf).strip()
         buf.clear()
         if text:
-            chunks.extend(_text_chunks(text, " > ".join(heading)))
+            chunks.extend(_text_chunks(text, " > ".join(heading),
+                                       measure=measure, budget=budget))
 
     for el in doc.element.body.iter():
         tag = el.tag.split("}")[-1]
@@ -111,14 +109,15 @@ def _docx_chunks(data: bytes) -> list[Chunk]:
                 header, *body = rows
                 t = "\n".join([f"Table — columns: {header}"]
                               + [f"row {i}: {r}" for i, r in enumerate(body, 1)])
-                for seg in split_table_text(t):
+                for seg in split_table_text(t, budget, measure):
                     chunks.append(Chunk(seg, " > ".join(heading), "table",
                                         len(chunks)))
     flush()
     return chunks
 
 
-def _pptx_chunks(data: bytes) -> list[Chunk]:
+def _pptx_chunks(data: bytes, measure=_word_count,
+                 budget: int = MAX_WORDS) -> list[Chunk]:
     try:
         from pptx import Presentation
     except ImportError:
@@ -137,11 +136,13 @@ def _pptx_chunks(data: bytes) -> list[Chunk]:
             texts.append("Notes: " + slide.notes_slide.notes_text_frame.text)
         text = "\n".join(t for t in texts if t and t.strip())
         if text.strip():
-            chunks.extend(_text_chunks(text, f"Slide {i}"))
+            chunks.extend(_text_chunks(text, f"Slide {i}",
+                                       measure=measure, budget=budget))
     return chunks
 
 
-def _xlsx_chunks(data: bytes) -> list[Chunk]:
+def _xlsx_chunks(data: bytes, measure=_word_count,
+                 budget: int = MAX_WORDS) -> list[Chunk]:
     try:
         import openpyxl
     except ImportError:
@@ -159,14 +160,15 @@ def _xlsx_chunks(data: bytes) -> list[Chunk]:
         header, *body = rows
         text = "\n".join([f"Table — columns: {header}"]
                          + [f"row {i}: {r}" for i, r in enumerate(body, 1)])
-        for seg in split_table_text(text):
+        for seg in split_table_text(text, budget, measure):
             chunks.append(Chunk(seg, f"Sheet: {ws.title}", "table",
                                 len(chunks)))
     wb.close()
     return chunks
 
 
-def _pdf_chunks(data: bytes) -> tuple[list[Chunk], list[str]]:
+def _pdf_chunks(data: bytes, measure=_word_count,
+                budget: int = MAX_WORDS) -> tuple[list[Chunk], list[str]]:
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -181,13 +183,15 @@ def _pdf_chunks(data: bytes) -> tuple[list[Chunk], list[str]]:
             warns.append(f"page {i}: no extractable text (scanned/image?)")
             continue
         if text.strip():
-            chunks.extend(_text_chunks(text, f"Page {i}"))
+            chunks.extend(_text_chunks(text, f"Page {i}",
+                                       measure=measure, budget=budget))
     if not chunks and not warns:
         warns.append("no extractable text — likely a scanned document (OCR not supported)")
     return chunks, warns
 
 
-def _csv_chunks(data: bytes) -> list[Chunk]:
+def _csv_chunks(data: bytes, measure=_word_count,
+                budget: int = MAX_WORDS) -> list[Chunk]:
     text = _decode_text(data)
     rows = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
     if not rows:
@@ -196,11 +200,14 @@ def _csv_chunks(data: bytes) -> list[Chunk]:
     out = "\n".join([f"Table — columns: {' | '.join(header)}"]
                     + [f"row {i}: {' | '.join(r)}" for i, r in enumerate(body, 1)])
     return [Chunk(seg, "", "table", i)
-            for i, seg in enumerate(split_table_text(out))]
+            for i, seg in enumerate(split_table_text(out, budget, measure))]
 
 
-def extract_file_chunks(filename: str, data: bytes) -> tuple[list[Chunk], list[str]]:
-    """Dispatch on extension → (chunks, warnings). Never guesses at binaries."""
+def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
+                        budget: int = MAX_WORDS) -> tuple[list[Chunk], list[str]]:
+    """Dispatch on extension → (chunks, warnings). Never guesses at binaries.
+    `measure`/`budget` bound chunk size — token-aware when a tokenizer-backed
+    measure is supplied (R16)."""
     from pathlib import Path as P
     ext = P(filename).suffix.lower()
     if ext not in SUPPORTED:
@@ -212,19 +219,20 @@ def extract_file_chunks(filename: str, data: bytes) -> tuple[list[Chunk], list[s
 
     try:
         if ext in (".txt", ".md", ".markdown"):
-            return _text_chunks(_decode_text(data), ""), []
+            return _text_chunks(_decode_text(data), "",
+                                measure=measure, budget=budget), []
         if ext in (".html", ".htm"):
-            return extract_chunks(_decode_text(data))
+            return extract_chunks(_decode_text(data), measure, budget)
         if ext == ".csv":
-            return _csv_chunks(data), []
+            return _csv_chunks(data, measure, budget), []
         if ext == ".docx":
-            return _docx_chunks(data), []
+            return _docx_chunks(data, measure, budget), []
         if ext == ".pptx":
-            return _pptx_chunks(data), []
+            return _pptx_chunks(data, measure, budget), []
         if ext == ".xlsx":
-            return _xlsx_chunks(data), []
+            return _xlsx_chunks(data, measure, budget), []
         if ext == ".pdf":
-            return _pdf_chunks(data)
+            return _pdf_chunks(data, measure, budget)
     except zipfile.BadZipFile:
         return [], ["corrupt office file (not a valid zip) — skipped"]
     except Exception as e:  # noqa: BLE001 — one bad file must not kill a crawl
