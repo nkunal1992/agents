@@ -14,7 +14,7 @@ read).
 Copy `agents/local-knowledge.agent.md` into `.github/agents/` of any repo.
 First use: the agent installs the service itself (bundled `service/` →
 bundled `.whl` → `pip install local-knowledge[models]` → asks for the bundle
-path, in that order), downloads the local models (~1.3 GB once), writes the IDE MCP
+path, in that order), downloads the local models (~1.4 GB once), writes the IDE MCP
 config, and asks for one reload.
 
 Manual install (same commands the agent runs):
@@ -22,7 +22,7 @@ Manual install (same commands the agent runs):
 ```bash
 python3 -m venv ~/.local-knowledge/venv
 ~/.local-knowledge/venv/bin/python -m pip install "local-knowledge[models]"
-~/.local-knowledge/venv/bin/local-knowledge prepare-models   # ~1.3 GB, once
+~/.local-knowledge/venv/bin/local-knowledge prepare-models   # ~1.4 GB, once
 ~/.local-knowledge/venv/bin/local-knowledge register --ide auto --workspace "$PWD"
 ~/.local-knowledge/venv/bin/local-knowledge doctor           # verify
 ```
@@ -142,8 +142,8 @@ benchmark itself.
 
 ## Human feedback loop
 
-- `submit_feedback(scope, question, correction, note)` — stores a
-  colleague correction (embedded + similarity-matched).
+- `submit_feedback(scope, question, correction, note)` — stores a saved
+correction (embedded + similarity-matched).
 - `search` auto-returns `user_corrections` when a stored correction
   matches the question at cosine ≥ 0.75 (`*_FEEDBACK_MIN_SIM` to tune) —
   the agent discloses it alongside the docs, never overrides.

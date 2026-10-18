@@ -139,8 +139,8 @@ benchmark itself.
 
 ## Human feedback loop
 
-- `submit_feedback(scope, question, correction, note)` — stores a
-  colleague correction (embedded + similarity-matched).
+- `submit_feedback(scope, question, correction, note)` — stores a saved
+correction (embedded + similarity-matched).
 - `search` auto-returns `user_corrections` when a stored correction
   matches the question at cosine ≥ 0.75 (`*_FEEDBACK_MIN_SIM` to tune) —
   the agent discloses it alongside the docs, never overrides.

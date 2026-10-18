@@ -26,7 +26,7 @@ page trees.
 | Benefit | How |
 |---|---|
 | Answers you can trust | Every claim is verified against the extracted text — `verify_citations` rejects invented quotes before the answer is shown |
-| Data never leaves the machine | Crawl, index, embeddings and reranking run 100% locally; no cloud embedding or LLM calls |
+| Indexing never leaves the machine | Crawl, index, embeddings and reranking run 100% locally; the only LLM in the loop is the Copilot session you already use |
 | Fits corporate networks | Works through TLS-inspecting proxies (OS cert store), offline-capable after one-time setup, internal pip mirror support |
 | Least privilege | Personal Access Token with read access only, stored in the OS credential store — never in chat, logs or files you might commit |
 | Read-only by construction | The Confluence client can only send GET requests against an endpoint allowlist — writes are refused before any network call |
@@ -83,7 +83,7 @@ Manual install (if preferred):
 ```powershell
 py -m venv %USERPROFILE%\.confluence-knowledge\venv           # python3 -m venv ~/.confluence-knowledge/venv on macOS/Linux
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\python -m pip install "C:\path\to\service[models]"
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~1.3 GB, MIT/Apache-2.0 ONNX models
+%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~1.4 GB, MIT/Apache-2.0 ONNX models
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe setup            # env + site URL + PAT (hidden input)
 %USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
 ```
@@ -136,7 +136,7 @@ cache instantly; ask it to refresh whenever docs change.
 - A Confluence read token: **Data Center** — Personal Access Token
   (profile → Settings → Personal Access Tokens); **Cloud** — API token from
   id.atlassian.com
-- ~300 MB disk for the models + index
+- ~1.5 GB disk for the models + index
 - Network access to your Confluence host, and to huggingface.co **or** an
   internal model mirror **once** (after that, fully offline)
 
@@ -153,7 +153,8 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
   configured Confluence host. Model downloads are pinned to a lock file and
   verified for an Apache-2.0 licence before use.
 - The MCP tools are narrow by design: `status`, `connect`, `start_crawl`,
-  `crawl_step`, `search`, `get_evidence`, `verify_citations` — no arbitrary
+  `crawl_step`, `search`, `get_evidence`, `verify_citations`,
+  `submit_feedback`, `feedback_report` — no arbitrary
   HTTP, shell or filesystem access.
 - Confluence page text is treated as **data, not instructions** — the agent
   will not follow commands embedded in page content.

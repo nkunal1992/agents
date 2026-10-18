@@ -188,8 +188,9 @@ flowchart TD
 ## The Learning Brain — Feedback Loop
 
 **Simple:** Tell the agent "that's wrong, it's actually Y." Next time
-anyone asks that question, it discloses your correction *alongside* the
-official text — and repeats keep flagging which pages are outdated.
+*you* ask that question on this machine, it discloses your correction
+*alongside* the official text — and repeats keep flagging which pages
+are outdated.
 
 **Technical:** `submit_feedback` stores the question's embedding +
 correction per-scope (`<scope>.feedback.json`); `search` auto-injects

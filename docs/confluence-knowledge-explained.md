@@ -11,8 +11,9 @@ it. Instead of guessing, it first reads the documentation (a local copy it
 keeps up to date), finds the paragraphs that actually matter, and writes an
 answer where **every sentence links back to the exact Confluence page it came
 from**. If the documentation doesn't contain the answer, it says so instead
-of inventing one. Everything runs on the user's own laptop — no page content
-leaves the machine, and there are no per-question API costs.
+of inventing one. Indexing, embeddings, and retrieval run on the user's own
+laptop — no per-question retrieval costs. (Answers are composed by Copilot's
+model — evidence chunks become Copilot context, same as any file it reads.)
 
 ## The problem it solves
 
@@ -49,15 +50,15 @@ plain RAG fails in a predictable way:
 
 | Technique | What it does | Why basic RAG isn't enough |
 |---|---|---|
-| **Hybrid search** | Combines keyword matching (FTS5) with semantic/vector search | Semantic search misses exact terms ("PCT-4213", error codes); keyword search misses paraphrases ("how do we ship" vs "release process"). Both together cover the two ways people ask questions. |
-| **Reciprocal-rank fusion** | Merges the two ranked lists fairly | Needed when combining two independent ranking systems that don't share a score scale. |
-| **Cross-encoder reranking** | A second, deeper model re-reads the top ~30 candidates and re-sorts them | The first pass is fast-but-shallow over thousands of chunks; the reranker is slow-but-accurate on a few. This two-stage pattern is the standard quality/cost trade in serious RAG systems. |
+| **Hybrid search** | Three retrieval legs: dense semantic vectors (bge-m3), learned sparse term-weights (bm25), and literal FTS5 keyword matching | Semantic search misses exact terms ("PCT-4213", error codes); keyword search misses paraphrases ("how do we ship" vs "release process"); the sparse leg catches rare identifiers dense vectors blur. Three legs cover all the ways people ask. |
+| **Reciprocal-rank fusion** | Merges the three ranked lists fairly | Needed when combining independent ranking systems that don't share a score scale. |
+| **Cross-encoder reranking** | A second, deeper model re-reads the top-25 candidates and re-sorts them | The first pass is fast-but-shallow over thousands of chunks; the reranker is slow-but-accurate on a few. This two-stage pattern is the standard quality/cost trade in serious RAG systems. |
 | **Heading-aware chunking** | Splits pages at section boundaries, keeps each chunk's section path | Cutting at a fixed character count slices sentences in half and loses context. Knowing "this paragraph is under *Deployment > Windows*" makes both matching and citations better. |
 | **Per-claim citation verification** | Before showing an answer, every claim's quoted text must literally exist in the retrieved chunk | The last line of defence against hallucination — a machine check, not just a polite instruction to the model. |
 | **Coverage + freshness reporting** | Every answer states how many pages were indexed, when, and which were unreachable | Users know *which book* the open-book exam used — and whether some pages were missing. |
 | **Scoped indexes** | Each root page gets its own index partition | Questions about one space never leak into another; refresh of one scope doesn't touch the rest. |
 | **Resumable crawl** | The index queue/checkpoints live in the DB; an interrupted crawl resumes | Real corporate trees have hundreds of pages and flaky networks — losing everything at page 400 of 500 is unacceptable. |
-| **Local-only models** | Embeddings + reranker run on-device | The text never leaves the laptop; no per-call cost; works fully offline after a one-time ~1.3 GB download. |
+| **Local-only models** | Embeddings + reranker run on-device | The text never leaves the laptop; no per-call cost; works fully offline after a one-time ~1.4 GB download. |
 
 ## The steps, in order — what each does and why
 
@@ -140,10 +141,10 @@ ops burden.
 
 ### 6. Search (`search`)
 
-**What:** the question is embedded, candidates are gathered from *both* the
-keyword index and the vector index, merged fairly (RRF), and the top ~30 are
-re-read by the deeper cross-encoder model which re-sorts them; the best ~8
-become the evidence set.
+**What:** the question is embedded, candidates are gathered from *three* legs —
+dense vector, learned sparse term-weights, and the FTS5 keyword index —
+merged fairly (RRF), and the top-25 are re-read by the deeper cross-encoder
+model which re-sorts them; the best ~8 become the evidence set.
 
 **Why two stages:** the vector scan is fast over thousands of chunks but
 coarse; the cross-encoder is accurate but slow — so it runs only on the
@@ -166,7 +167,7 @@ trust at the exact point users care about.
 - **Zero inference cost per question** — the models run on the laptop; there
   are no paid API calls for embeddings, reranking, or generation of the index.
 - **No infrastructure** — no server, no database, no shared platform to run.
-  Costs = one venv, ~1.3 GB of models, ~1 GB of disk.
+  Costs = one venv, ~1.4 GB of models, ~1 GB of disk.
 - **Reuses what's already licensed** — it lives inside the Copilot seat
   people already have; no extra per-user SaaS bill (contrast with per-seat
   RAG/AI doc products).

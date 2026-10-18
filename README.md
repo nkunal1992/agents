@@ -134,8 +134,8 @@ Confluence page subtree you choose: root page + all descendants, crawled and
 indexed locally (`.conf_knowledge_index/`), semantic + keyword retrieval
 reranked by a local model, and every claim carries a clickable source
 citation. The service is hard-coded GET-only — it physically cannot write to
-Confluence — and its embeddings run entirely on the laptop (Apache-2.0
-models, no cloud calls). Missing evidence gets an explicit "not documented"
+Confluence — and its embeddings run entirely on the laptop (MIT/Apache-2.0
+models; answers are composed by the Copilot model you already use). Missing evidence gets an explicit "not documented"
 answer, never a guess.
 *Why:* a safe, auditable way to let teams query internal documentation
 without exposing it to uncontrolled tooling — read-only by construction in

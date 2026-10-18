@@ -45,6 +45,7 @@ _warm_lock = threading.Lock()
 _warm_started = False
 
 LOADING_NOTE = "loading local models — call this tool again"
+EVIDENCE_CHAR_CAP = 12000  # payload cap; `truncated` flags longer chunks
 
 
 def _index_for(scope_key: str) -> Index:
@@ -292,9 +293,9 @@ def search(scope_handle: str, question: str) -> dict:
         "evidence": [
             {"chunk_id": e["chunk_id"], "page_title": e["page_title"],
              "page_url": e["page_url"], "heading": e["heading"],
-             "score": e.get("rerank_score"), "text": e["text"][:12000],
+             "score": e.get("rerank_score"), "text": e["text"][:EVIDENCE_CHAR_CAP],
              "low_confidence": e.get("low_confidence", False),
-             "truncated": len(e["text"]) > 12000}
+             "truncated": len(e["text"]) > EVIDENCE_CHAR_CAP}
             for e in ev
         ],
     }

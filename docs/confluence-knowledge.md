@@ -31,7 +31,7 @@ answer with [Source: Page Title](url) on every claim
   and every path is checked against a read-only endpoint allowlist. The agent
   profile itself has no shell/edit/fetch tools — only the MCP operations.
 - **Local retrieval, always.** Embeddings (`bge-m3`, quantized ONNX) and reranking
-  (`bge-reranker-v2-m3`, quantized ONNX) run on your machine — MIT licensed, pinned
+  (`bge-reranker-v2-m3`, quantized ONNX) run on your machine — MIT/Apache-2.0 licensed, pinned
   revisions. No document text ever goes to a cloud embedding API.
 - **One caveat to know:** the final answer is written by Copilot using the
   retrieved passages, so those passages do reach your company's approved
@@ -150,7 +150,7 @@ before refreshing.
 | Single-file bootstrap | The `.agent.md` carries `execute`/`edit` so it can install the service on first run; bootstrap commands are whitelisted and Q&A mode never uses them |
 | Credentials | OS keyring default · env var supported · chmod-600 file fallback; never in chat, logs, or IDE config |
 | Secrets in Git | `.gitignore` for `.conf_auth.json` + `.conf_knowledge_index/` written *before* any file; tracked-file check aborts setup |
-| Token lifetime | end-of-session reminder to revoke; `confluence-knowledge clean` deletes the index |
+| Token lifetime | stays in the OS credential store between sessions; `confluence-knowledge clean` deletes index + token when uninstalling |
 | Prompt injection via page text | page content is treated as data; agent rules forbid acting on embedded instructions |
 | Licensing | Apache-2.0 models, pinned in `models.lock.json`; notices in `THIRD_PARTY_NOTICES.md` |
 
@@ -226,8 +226,8 @@ benchmark itself.
 
 ## Human feedback loop
 
-- `submit_feedback(scope, question, correction, note)` — stores a
-  colleague correction (embedded + similarity-matched).
+- `submit_feedback(scope, question, correction, note)` — stores a saved
+correction (embedded + similarity-matched).
 - `search` auto-returns `user_corrections` when a stored correction
   matches the question at cosine ≥ 0.75 (`*_FEEDBACK_MIN_SIM` to tune) —
   the agent discloses it alongside the docs, never overrides.

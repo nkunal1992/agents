@@ -73,8 +73,8 @@ Confluence subtree
        │  GET-only crawl (background, resumable)
        ▼
 Local index on the laptop — SQLite
-   keyword index (FTS5) + meaning vectors
-       │  question → both indexes → merge → deep re-rank
+   FTS5 keywords + learned sparse terms + meaning vectors
+       │  question → all three legs → merge → deep re-rank
        ▼
 Top evidence chunks → answer with per-claim citations
        │  mechanical citation check
@@ -82,7 +82,7 @@ Top evidence chunks → answer with per-claim citations
 Verified answer — or an honest "not documented"
 ```
 
-**Everything below the Confluence page runs on your machine.**
+**Everything below the Confluence page runs on your machine** — Copilot (which you already use) composes the final answer.
 
 ---
 
@@ -126,7 +126,9 @@ The last row matters most: instructions ask nicely; the verifier *checks*.
 
 - **Token**: entered once, hidden input → **OS credential store** (Keychain/Credential Manager). Never in chat, files or logs.
 - **Network**: only your Confluence host, **GET requests only** — writes are refused before the call.
-- **Content**: never leaves the laptop. No cloud embeddings, no external API calls.
+- **Indexing/content**: embeddings + retrieval run 100% on the laptop — no
+  cloud embeddings, no external API calls. Retrieved evidence becomes context
+  for the Copilot model you already use (same as any file Copilot reads).
 - **Prompt injection**: Confluence page text is treated as *data*, never commands.
 - **Corporate proxies**: uses the OS cert store (TLS-inspection friendly).
 
@@ -141,7 +143,7 @@ The last row matters most: instructions ask nicely; the verifier *checks*.
 | Infrastructure | **None** — runs on the user's laptop |
 | Per-question API | **None** — embeddings/reranking are local |
 | Licence | Reuses the **Copilot seat** they already have |
-| Models | One-time ~1.3 GB download (MIT/Apache-2.0, ONNX — no GPU needed) |
+| Models | One-time ~1.4 GB download (MIT/Apache-2.0, ONNX — no GPU needed) |
 | Ops | One zip to distribute; `doctor` self-checks |
 
 > Compare: hosted RAG platforms charge per seat **and** run a shared index on someone else's server — including our page content.
@@ -198,7 +200,8 @@ Every bullet is a real failure we hit, reproduced, and fixed.
 > This just makes the AI **read the docs first** — and prove it.
 
 - **Trustworthy**: every claim cited, verified, or refused
-- **Private**: nothing leaves the laptop but GETs to Confluence
+- **Private**: crawling + indexing + embeddings never leave the laptop
+  (the Copilot model you already use sees the cited excerpts)
 - **Cheap**: zero marginal cost per question
 - **Simple**: a zip and a five-minute first run
 
