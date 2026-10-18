@@ -17,6 +17,7 @@ MCP = Path(__file__).resolve().parents[1] / "src"
 SRC = MCP / "confluence_knowledge"
 DOCS = [REPO / "docs" / f for f in (
     "knowledge-agent-tdd.md", "knowledge-agent-slides.md",
+    "knowledge-agent-kt-guide.md",
     "confluence-knowledge.md", "local-knowledge.md",
     "sharepoint-knowledge.md", "confluence-knowledge-explained.md",
     "confluence-knowledge-slides.md") if (REPO / "docs" / f).exists()]

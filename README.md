@@ -175,6 +175,11 @@ citations, while staying inside the org's existing permission model.
 `setup` prints the exact steps. *Try:* `/sharepoint-ask` ·
 [guide](docs/sharepoint-knowledge.md)
 
+*Deeper dives on the knowledge-agent stack:*
+[KT guide](docs/knowledge-agent-kt-guide.md) (explain it to anyone) ·
+[TDD](docs/knowledge-agent-tdd.md) (architecture spec) ·
+[deck](docs/knowledge-agent-slides.md) (leadership + engineering presentation)
+
 ## Usage
 
 ### Option 1: copy a single file (no clone needed)
