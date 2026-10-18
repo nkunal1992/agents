@@ -113,6 +113,27 @@ def test_scope_key_full_match_required(tmp_path):
         server.verify_citations("scope:b:r2", "ev:0:deadbeef", [])
 
 
+def test_stale_snapshot_evidence_set_rejected(tmp_path, monkeypatch):
+    """An evidence set taken before a republish must fail verification —
+    citation handles can never silently re-point at a newer snapshot."""
+    from confluence_knowledge import server
+    idx = Index(tmp_path / "i.db")
+    try:
+        s = {"key": "deadbeefcafe1234567890ab", "profile": None, "root": "r"}
+        server._scopes["scope:a:r"] = s
+        monkeypatch.setattr(server, "_index_for", lambda key: idx)
+        ev = [{"chunk_id": "c1", "text": "x", "page_id": "p"}]
+        server._evidence_sets["ev:deadbeef:stale"] = {
+            "scope": s["key"], "ev": ev, "epoch": idx.snapshot_epoch()}
+        idx.publish(set())   # republish → epoch advances
+        with pytest.raises(SecurityException, match="snapshot"):
+            server.verify_citations("scope:a:r", "ev:deadbeef:stale", [])
+    finally:
+        idx.db.close()
+        server._scopes.pop("scope:a:r", None)
+        server._evidence_sets.pop("ev:deadbeef:stale", None)
+
+
 def test_unknown_scope_handle_clean_error():
     """Garbage handle → SetupError (named remediation), not KeyError."""
     from confluence_knowledge import server

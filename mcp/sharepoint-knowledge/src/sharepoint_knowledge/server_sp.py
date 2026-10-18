@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import uuid
 
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
@@ -322,11 +323,14 @@ def search(scope_handle: str, question: str) -> dict:
     emb = _embedder()
     ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse())
     corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
-    set_id = f"ev:{len(_evidence_sets)}:{s['key'][:8]}"
+    # unique immutable handle — never derived from cache size; bound to the
+    # snapshot epoch so a refresh can't silently re-point a citation
+    set_id = f"ev:{s['key'][:8]}:{uuid.uuid4().hex[:16]}"
     # bound the session cache — sets are never reused after the turn ends
     while len(_evidence_sets) >= 32:
         _evidence_sets.pop(next(iter(_evidence_sets)))
-    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev}
+    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
+                              "epoch": idx.snapshot_epoch()}
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -392,6 +396,11 @@ def verify_citations(scope_handle: str, evidence_set: str,
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
+    idx = _index_for(s["key"])
+    if rec.get("epoch") != idx.snapshot_epoch():
+        raise SecurityException(
+            "evidence set predates the latest published snapshot — "
+            "run search again and cite the fresh evidence_set")
     return check_citations(rec["ev"], mappings)
 
 

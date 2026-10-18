@@ -160,7 +160,6 @@ def test_verifier_is_provenance_not_entailment():
 @pytest.mark.parametrize("module", ["confluence_knowledge.server",
                                    "local_knowledge.server_local",
                                    "sharepoint_knowledge.server_sp"])
-@defect("R03")
 def test_evidence_handles_remain_unique_after_eviction(module, index, monkeypatch):
     server = pytest.importorskip(module)
     put(index)
