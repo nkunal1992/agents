@@ -15,7 +15,9 @@ style: |
 ## A Corporate Truth Machine
 
 Instant, **cited**, verified answers from *your* documentation —
-Confluence, SharePoint, or a local folder. Runs 100% on your laptop.
+Confluence, SharePoint, or a local folder — indexing and retrieval run
+100% on your laptop; answers are composed by the Copilot model you
+already use.
 
 *Leadership: this is about lost time and wrong answers.*
 *Engineering: this is about grounding, not vibes.*
@@ -56,10 +58,10 @@ underneath, keeps a local index, and answers:
 
 | Win | Why leadership cares |
 |---|---|
-| **Zero-risk security** | Nothing leaves the network — no cloud AI, no uploads; read-only by construction |
+| **Zero-risk security** | Index, embeddings, and retrieval run entirely on-device — no new external service; the only LLM involved is the Copilot you already have approved. Read-only by construction |
 | **Instant onboarding** | New engineers get *the* answer in seconds instead of days of asking around |
-| **Documentation health** | Recurring user corrections flag outdated pages — docs get fixed at the source |
-| **Zero marginal cost** | Local models — no per-query API spend, no seat licensing for retrieval |
+| **Documentation health** | Recurring corrections flag which pages are outdated — the agent reports them to owners, so fixes happen at the source |
+| **No added inference cost** | Local models do the retrieval work — no extra per-query API spend beyond your existing Copilot seat |
 
 ---
 
@@ -96,7 +98,7 @@ that, not on parameters trained on the public internet.
 words overlap — because they *mean* similar things.
 
 **Technical:** `bge-m3` — 1024-dimensional dense vectors, multilingual
-(80+ languages), quantized ONNX, runs locally (~570 MB). Every chunk of
+(100+ languages), quantized ONNX, runs locally (~570 MB). Every chunk of
 every page gets a vector; questions get vectors; we fetch by cosine
 distance.
 
