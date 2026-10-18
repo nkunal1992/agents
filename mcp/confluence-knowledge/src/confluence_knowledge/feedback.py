@@ -81,8 +81,8 @@ class FeedbackStore:
         return out
 
     def report(self) -> dict:
-        """Aggregate view for 'which pages keep getting corrected' — the
-        agent summarizes these as outdated/confusing doc candidates."""
+        """Flat correction list. Entries carry no page link — the agent
+        infers the outdated page from the corrected question's context."""
         out = []
         for e in self._entries:
             out.append({"question": e["question"], "correction": e["correction"],

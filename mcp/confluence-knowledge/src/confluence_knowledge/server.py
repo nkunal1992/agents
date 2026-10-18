@@ -401,8 +401,8 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
 
 @mcp.tool()
 def feedback_report(scope_handle: str) -> dict:
-    """Aggregated corrections — which topics keep getting corrected points
-    at outdated/confusing documentation."""
+    """Aggregated corrections — the agent infers which doc keeps
+    getting corrected and suggests it to the user."""
     s = _scope(scope_handle)
     return _feedback_for(s["key"]).report()
 

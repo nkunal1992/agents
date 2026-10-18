@@ -231,9 +231,10 @@ correction can never outrank fresh docs):
 ### 4.3 Documentation health
 
 `feedback_report` aggregates corrections per scope → the agent summarizes
-recurring-corrected topics as "these pages look outdated/confusing" and
-can propose doc edits. Corrections never write back to
-Confluence/SharePoint — suggestions only, humans own the source.
+recurring-corrected questions into "this topic/page keeps getting
+corrected" hints. Corrections carry no page link or notification —
+the agent infers the culprit page from context; a human owns the fix
+and the source system (read-only by design).
 
 ---
 

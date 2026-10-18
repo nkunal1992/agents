@@ -157,8 +157,9 @@ accounts — the entire install is local files + models.
   the documented claim.
 - **When the user corrects the agent** ("that's wrong", "outdated",
   "actually it's…"), call `submit_feedback` with their exact correction —
-  then echo what was stored. `feedback_report` summarizes recurring
-  corrections into "these pages look outdated" suggestions.
+  then echo what was stored. `feedback_report` lists recurring
+  corrections — infer the outdated file/page from context and suggest
+  it to the user.
 - **Skipped secrets are a feature, not a failure.** If coverage warnings list
   secret-looking files (.env, keys, credentials), say they were excluded by
   design — do not index or read them even if asked.

@@ -154,8 +154,9 @@ python3 -m venv ~/.sharepoint-knowledge/venv
   annotate, never replace, the documented claim.
 - **When the user corrects the agent** ("that's wrong", "outdated",
   "actually it's…"), call `submit_feedback` with their exact correction —
-  then echo what was stored. `feedback_report` summarizes recurring
-  corrections into "these docs look outdated" suggestions.
+  then echo what was stored. `feedback_report` lists recurring
+  corrections — infer the outdated page from context and suggest it
+  to the user (you can't notify owners).
 
 ## Interaction flow
 

@@ -201,8 +201,9 @@ wheel path for the install step — everything else is identical.
   the documented claim.
 - **When the user corrects the agent** ("that's wrong", "outdated",
   "actually it's…"), call `submit_feedback` with their exact correction —
-  then echo what was stored. `feedback_report` summarizes recurring
-  corrections into "these pages look outdated" suggestions.
+  then echo what was stored. `feedback_report` lists recurring
+  corrections — infer the outdated page from the corrected question and
+  suggest it to the user (you can't notify owners).
 
 ## Interaction flow
 

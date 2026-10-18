@@ -60,7 +60,7 @@ underneath, keeps a local index, and answers:
 |---|---|
 | **Zero-risk security** | Index, embeddings, and retrieval run entirely on-device — no new external service; the only LLM involved is the Copilot you already have approved. Read-only by construction |
 | **Instant onboarding** | New engineers get *the* answer in seconds instead of days of asking around |
-| **Documentation health** | Recurring corrections flag which pages are outdated — the agent reports them to owners, so fixes happen at the source |
+| **Documentation health** | Corrections aggregate per scope — the agent can identify which page keeps getting corrected and recommend it to the docs owner; the fix itself stays human |
 | **No added inference cost** | Local models do the retrieval work — no extra per-query API spend beyond your existing Copilot seat |
 
 ---
@@ -256,8 +256,8 @@ questions about it."*
 - Found a wrong/slow answer? Add a `{question, ideal_answer,
   required_pages}` pair to `golden_set.json`
 - Your corrections stick — same question on your machine gets the
-  disclosure next time, and `feedback_report` flags the source page
-  for the docs owner
+  disclosure next time; `feedback_report` shows which question keeps
+  getting corrected — point the docs owner at it
 - `submit_feedback` — say "that's wrong, it's X" in chat; it sticks
 
 ---
@@ -265,8 +265,8 @@ questions about it."*
 ## Roadmap
 
 - Golden-set coverage per team space (each org adds its own pairs)
-- Feedback-driven doc-update suggestions at scale (`feedback_report`
-  → quarterly doc health report)
+- `feedback_report` aggregation → quarterly doc-health review
+  (which topics keep getting corrected)
 - Richer table fidelity (cell-level provenance), OCR for embedded images
 - Org-wide shareable golden sets (reviewed, versioned)
 
