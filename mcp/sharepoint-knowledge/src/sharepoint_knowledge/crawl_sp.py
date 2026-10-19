@@ -67,14 +67,18 @@ def resolve_root(client: ConfluenceClient, url: str) -> tuple[str, str]:
 
 def _paged(client: ConfluenceClient, path: str, params: dict | None = None):
     """Follow @odata.nextLink — absolute links are validated inside the
-    client's origin+base by _validate_path, so pagination stays in scope."""
+    client's origin+base by _validate_path, so pagination stays in scope.
+    A repeated next link is a server-side loop — stop rather than crawl
+    the same page forever."""
+    seen_links: set[str] = set()
     while True:
         r = client.get(path, params)
         d = r.json()
         yield from d.get("value", [])
         nxt = d.get("@odata.nextLink")
-        if not nxt:
+        if not nxt or nxt in seen_links:
             return
+        seen_links.add(nxt)
         path, params = nxt, None
 
 

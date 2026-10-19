@@ -246,7 +246,6 @@ def test_single_wide_row_stays_within_claimed_word_budget():
     assert all(len(c.split()) <= 280 for c in split_table_text(text))
 
 
-@defect("R07")
 def test_absolute_pagination_retains_query_token():
     import re
     seen = []
