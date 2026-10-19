@@ -275,14 +275,12 @@ def test_malformed_feedback_entries_do_not_break_search(tmp_path, data):
     FeedbackStore(tmp_path, "scope", "test").match(np.ones(4))
 
 
-@defect("R10")
 def test_headerless_table_does_not_drop_first_service_row():
     chunks, _ = extract_chunks("<table><tr><td>svc-first</td><td>8000</td></tr>"
                                "<tr><td>svc-next</td><td>8001</td></tr></table>")
     assert any("row 1: svc-first | 8000" in c.text for c in chunks)
 
 
-@defect("R10")
 def test_rowspan_preserves_column_mapping():
     chunks, _ = extract_chunks("<table><tr><th>Region</th><th>Service</th><th>Port</th></tr>"
                                "<tr><td rowspan='2'>EU</td><td>alpha</td><td>8000</td></tr>"
@@ -290,13 +288,11 @@ def test_rowspan_preserves_column_mapping():
     assert any("row 2: EU | beta | 8001" in c.text for c in chunks)
 
 
-@defect("R10")
 def test_markdown_table_has_structural_kind():
     chunks, _ = extract_file_chunks("table.md", b"| Service | Port |\n|---|---|\n|alpha|8000|")
     assert any(c.kind == "table" for c in chunks)
 
 
-@defect("R10")
 def test_single_wide_row_stays_within_claimed_word_budget():
     text = "Table — columns: key | description\nrow 1: alpha | " + "word " * 400
     assert all(len(c.split()) <= 280 for c in split_table_text(text))
@@ -342,8 +338,7 @@ def test_zero_overlap_sparse_documents_do_not_vote_in_fusion():
     assert _sparse_rank({1: 1.0}, {"a": {2: 1.0}, "b": {3: 1.0}}) == []
 
 
-@pytest.mark.parametrize("fmt", ["csv", "html", pytest.param("docx", marks=defect("R10")), "xlsx",
-                                 pytest.param("pptx", marks=defect("R10"))])
+@pytest.mark.parametrize("fmt", ["csv", "html", "docx", "xlsx", "pptx"])
 def test_file_table_preserves_headers_and_structural_kind(fmt):
     import io
     rows = [["Service", "Port"]] + [[f"svc-{i:03}", str(8000+i)] for i in range(100)]

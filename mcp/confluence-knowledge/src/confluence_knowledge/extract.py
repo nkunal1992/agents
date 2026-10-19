@@ -60,16 +60,52 @@ class Chunk:
     chunk_id: str = ""  # assigned at index time: page_id:hash:ordinal
 
 
+def _span(raw) -> int:
+    try:
+        return max(1, int(raw)) if raw else 1
+    except (TypeError, ValueError):
+        return 1
+
+
 def _table_to_text(tbl) -> str:
-    rows = []
+    """Grid-aware table → text. Rowspan/colspan cells carry their value
+    into the covered columns of following rows; a table without <th> cells
+    keeps all rows as data instead of eating the first as a header (R10)."""
+    has_th = bool(tbl.find("th"))
+    carry: dict[int, tuple[str, int]] = {}  # col → (text, rows remaining)
+    grid: list[list[str]] = []
     for tr in tbl.find_all("tr"):
-        cells = [c.get_text(" ", strip=True) for c in tr.find_all(["th", "td"])]
-        if cells:
-            rows.append(" | ".join(cells))
-    if not rows:
+        row: list[str] = []
+        col = 0
+        for cell in tr.find_all(["th", "td"], recursive=False):
+            while col in carry:
+                row.append(carry[col][0])
+                carry[col] = (carry[col][0], carry[col][1] - 1)
+                if carry[col][1] <= 0:
+                    del carry[col]
+                col += 1
+            txt = cell.get_text(" ", strip=True)
+            for _ in range(_span(cell.get("colspan"))):
+                row.append(txt)
+                if _span(cell.get("rowspan")) > 1:
+                    carry[col] = (txt, _span(cell.get("rowspan")) - 1)
+                col += 1
+        while col in carry or (carry and col <= max(carry)):
+            row.append(carry.get(col, ("", 0))[0])
+            if col in carry:
+                carry[col] = (carry[col][0], carry[col][1] - 1)
+                if carry[col][1] <= 0:
+                    del carry[col]
+            col += 1
+        if any(row):
+            grid.append(row)
+    if not grid:
         return ""
-    header, *body = rows
-    out = [f"Table — columns: {header}"]
+    lines = [" | ".join(r) for r in grid]
+    # <td>-only first rows are ambiguous (header or data) — keep them in
+    # both places: a columns line for context AND row 1 so no data is lost
+    body = lines[1:] if has_th else lines
+    out = [f"Table — columns: {lines[0]}"]
     out += [f"row {i}: {r}" for i, r in enumerate(body, 1)]
     return "\n".join(out)
 
@@ -87,6 +123,15 @@ def split_table_text(t: str, budget: int = MAX_WORDS,
     segs, buf, w = [], [], hw + 2
     for r in rows:
         rw = measure(r)
+        if rw > budget - hw - 2:
+            # a single row exceeds the budget on its own — split the row
+            # itself so no emitted segment breaks the bound (R10)
+            if buf:
+                segs.append(header + "\n" + "\n".join(buf))
+                buf, w = [], hw + 2
+            for piece in split_oversized(r, max(1, budget - hw - 2), measure):
+                segs.append(header + "\n" + piece)
+            continue
         if buf and w + rw > budget:
             segs.append(header + "\n" + "\n".join(buf))
             buf, w = [], hw + 2

@@ -77,7 +77,9 @@ def _docx_chunks(data: bytes, measure=_word_count,
             chunks.extend(_text_chunks(text, " > ".join(heading),
                                        measure=measure, budget=budget))
 
-    for el in doc.element.body.iter():
+    # top-level children only — iterating descendants would also emit the
+    # w:p inside table cells as prose, breaking the table-only kind contract
+    for el in doc.element.body:
         tag = el.tag.split("}")[-1]
         if tag == "p":
             # find the paragraph object text via docx API per element
@@ -130,8 +132,18 @@ def _pptx_chunks(data: bytes, measure=_word_count,
             if shape.has_text_frame:
                 texts.extend(p.text for p in shape.text_frame.paragraphs)
             if shape.has_table:
-                for row in shape.table.rows:
-                    texts.append(" | ".join(c.text for c in row.cells))
+                # table contract — header row preserved, kind=table (R10)
+                rows = [" | ".join(c.text for c in row.cells)
+                        for row in shape.table.rows]
+                rows = [r for r in rows if r.strip(" |")]
+                if rows:
+                    header, *body = rows
+                    t = "\n".join([f"Table — columns: {header}"]
+                                  + [f"row {n}: {r}" for n, r in
+                                     enumerate(body, 1)])
+                    for seg in split_table_text(t, budget, measure):
+                        chunks.append(Chunk(seg, f"Slide {i}", "table",
+                                            len(chunks)))
         if slide.has_notes_slide and slide.notes_slide.notes_text_frame.text.strip():
             texts.append("Notes: " + slide.notes_slide.notes_text_frame.text)
         text = "\n".join(t for t in texts if t and t.strip())
@@ -190,6 +202,48 @@ def _pdf_chunks(data: bytes, measure=_word_count,
     return chunks, warns
 
 
+def _md_chunks(data: bytes, measure=_word_count,
+               budget: int = MAX_WORDS) -> list[Chunk]:
+    """Markdown: contiguous `|` runs are tables — they keep the table
+    contract (header row, kind=table); everything else is prose (R10)."""
+    text = _decode_text(data)
+    chunks: list[Chunk] = []
+    prose: list[str] = []
+
+    def flush():
+        body = "\n".join(prose).strip()
+        prose.clear()
+        if body:
+            chunks.extend(_text_chunks(body, "", measure=measure,
+                                       budget=budget))
+
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        if lines[i].lstrip().startswith("|"):
+            rows = []
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                rows.append(lines[i].strip())
+                i += 1
+            # drop separator rows (|---|---|)
+            rows = [r for r in rows
+                    if r.strip("| -:") or r.count("|") > 2]
+            rows = [r for r in rows if not set(r) <= set("| -:")]
+            if rows:
+                flush()
+                header, *body = rows
+                t = "\n".join([f"Table — columns: {header}"]
+                              + [f"row {n}: {r}" for n, r in
+                                 enumerate(body, 1)])
+                for seg in split_table_text(t, budget, measure):
+                    chunks.append(Chunk(seg, "", "table", len(chunks)))
+            continue
+        prose.append(lines[i])
+        i += 1
+    flush()
+    return chunks
+
+
 def _csv_chunks(data: bytes, measure=_word_count,
                 budget: int = MAX_WORDS) -> list[Chunk]:
     text = _decode_text(data)
@@ -218,9 +272,11 @@ def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
         return [], [f"file too large ({len(data)} bytes) — skipped"]
 
     try:
-        if ext in (".txt", ".md", ".markdown"):
+        if ext == ".txt":
             return _text_chunks(_decode_text(data), "",
                                 measure=measure, budget=budget), []
+        if ext in (".md", ".markdown"):
+            return _md_chunks(data, measure, budget), []
         if ext in (".html", ".htm"):
             return extract_chunks(_decode_text(data), measure, budget)
         if ext == ".csv":
