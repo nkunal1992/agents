@@ -623,3 +623,11 @@ Re-measured on this corpus: embed input cap 2048 keeps 0 chunks truncated
 (max input 450 tokens); p50 latency unchanged at ~3.0s. The 60-question
 quality rerun is in progress on the merged pipeline — every question so
 far at 100% source+fact recall.
+
+Findings **outside** the approved remediation plan now have their own issues:
+**R06** account/tenant-bound SharePoint scopes and list-qualified page IDs
+(#140), **R10** uniform table contract for DOCX/XLSX/PPTX (#141), **R11**
+evaluator all-source recall and candidate-answer judging (#142), **R14**
+build-identity binding for first crawls and resume (#143), **R15** SQLite
+parameter-limit batching (#144). Their strict `xfail` reproductions remain
+marked until fixed.
