@@ -160,7 +160,6 @@ def test_first_crawl_resume_rejects_different_vector_dimension(index):
 
 
 @pytest.mark.parametrize("quote", ["", None])
-@defect("R04")
 def test_empty_or_missing_quote_cannot_verify(quote):
     mapping = {"claim": "policy permits everything", "chunk_id": "c"}
     if quote is not None:

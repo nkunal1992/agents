@@ -442,7 +442,8 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
 
 def check_citations(evidence: list[dict], mappings: list[dict]) -> dict:
     """Verify claim→chunk citations: chunk exists in this evidence set and the
-    claimed quote is literally present in it. Provenance, not entailment."""
+    claimed quote is literally present in it. Provenance, not entailment —
+    the agent-side support check (Copilot LLM) covers entailment (R04)."""
     by_id = {e["chunk_id"]: e for e in evidence}
     bad = []
     for m in mappings:
@@ -450,8 +451,11 @@ def check_citations(evidence: list[dict], mappings: list[dict]) -> dict:
         if ch is None:
             bad.append({"claim": m.get("claim", "")[:80], "reason": "chunk not in evidence set"})
             continue
-        quote = m.get("quote", "")
-        if quote and _norm(quote) not in _norm(ch["text"]):
+        quote = m.get("quote")
+        if not isinstance(quote, str) or not quote.strip():
+            bad.append({"claim": m.get("claim", "")[:80],
+                        "reason": "quote missing — every claim needs a verbatim quote"})
+        elif _norm(quote) not in _norm(ch["text"]):
             bad.append({"claim": m.get("claim", "")[:80],
                         "reason": "quote not present verbatim in cited chunk"})
     return {"ok": not bad, "violations": bad}
