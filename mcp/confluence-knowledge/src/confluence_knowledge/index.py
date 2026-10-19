@@ -100,6 +100,14 @@ class Index:
             # an uncommitted INSERT holds the write lock for the connection's
             # lifetime and deadlocks every other connection (#68)
             self.db.commit()
+            # indexes built before term_stats existed: rebuild once on open
+            # so BM25 idf works immediately, not only after the next crawl
+            if not self.db.execute(
+                    "SELECT 1 FROM term_stats LIMIT 1").fetchone() and \
+                    self.db.execute(
+                    "SELECT 1 FROM sparse_vectors LIMIT 1").fetchone():
+                self._rebuild_term_stats()
+                self.db.commit()
 
     # ---- jobs ----
     def create_job(self, job_id: str, root_page: str) -> None:
