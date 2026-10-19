@@ -108,7 +108,9 @@ class ConfluenceClient:
                 "Error: This agent is strictly read-only. "
                 f"Endpoint not on the allowed GET list: {rel}"
             )
-        return rel
+        # retain the validated query — pagination continuation tokens
+        # ($skiptoken, cursor) arrive inside absolute next-link URLs (R07)
+        return f"{rel}?{u.query}" if u.query else rel
 
     @staticmethod
     def _describe(resp: httpx.Response) -> str:
