@@ -11,7 +11,7 @@ import httpx
 import numpy as np
 import pytest
 
-from confluence_knowledge.client import AccessError, ConfluenceClient, EndpointRule
+from confluence_knowledge.client import AccessError, ConfluenceClient, EndpointRule, SecurityException
 from confluence_knowledge.crawl import Crawler
 from confluence_knowledge.extract import Chunk, extract_chunks, split_table_text
 from confluence_knowledge.extract_files import extract_file_chunks
@@ -196,6 +196,44 @@ def test_evidence_handles_remain_unique_after_eviction(module, index, monkeypatc
     monkeypatch.setattr(server, "retrieve", lambda *a, **kw: [])
     ids = [server.search("s", "q")["evidence_set"] for _ in range(40)]
     assert len(set(ids)) == len(ids)
+
+
+@pytest.mark.parametrize("module", ["confluence_knowledge.server",
+                                   "local_knowledge.server_local",
+                                   "sharepoint_knowledge.server_sp"])
+def test_search_exposes_hunt_metadata_and_page_boundary_fetch(module, index, monkeypatch):
+    """R05 — Failure Hunt probes need per-item metadata (kind/ordinal/
+    page_id/version) and a page-boundary fetch; a bare chunk-id list cannot
+    express 'first and last chunks of page P'."""
+    server = pytest.importorskip(module)
+    c1 = Chunk("alpha body", "", "text", 0, "p1:c0")
+    c2 = Chunk("| h |\n| r |", "", "table", 1, "p1:c1")
+    c3 = Chunk("tail end", "", "text", 2, "p1:c2")
+    index.upsert_page({"page_id": "p1", "title": "Doc", "url": "u",
+                       "version": "v42"}, [c1, c2, c3],
+                      np.ones((3, 4), dtype=np.float32), None)
+    index.publish({"p1"})
+    monkeypatch.setattr(server, "_evidence_sets", {})
+    monkeypatch.setattr(server, "_scope", lambda handle: {"key": "k"})
+    monkeypatch.setattr(server, "_index_for", lambda key: index)
+    monkeypatch.setattr(server, "_models_loaded", lambda wait: True)
+    monkeypatch.setattr(server, "_embedder", lambda: type("E", (), {
+        "embed": lambda self, texts: np.ones((len(texts), 4), dtype=np.float32)})())
+    monkeypatch.setattr(server, "_reranker", lambda: None)
+    monkeypatch.setattr(server, "_sparse", lambda: None)
+    monkeypatch.setattr(server, "_feedback_for", lambda key: type("F", (), {
+        "match": lambda self, vec: []})())
+    res = server.search("s", "q")
+    item = res["evidence"][0]
+    for field in ("page_id", "kind", "ordinal", "page_version"):
+        assert field in item, f"evidence item missing {field}"
+    assert item["page_version"] == "v42"
+    # boundary fetch: every chunk of the page, in ordinal order
+    page_chunks = server.get_evidence("s", page_id="p1")["chunks"]
+    assert [c["ordinal"] for c in page_chunks] == [0, 1, 2]
+    assert page_chunks[-1]["text"] == "tail end"
+    with pytest.raises(SecurityException):
+        server.get_evidence("s", page_id="no-such-page")
 
 
 def test_two_feedback_instances_do_not_lose_updates(tmp_path):

@@ -196,7 +196,8 @@ accounts — the entire install is local files + models.
    problem must be disclosed in the Coverage footer:
    - *Boundary test*: when the answer relies on a very long page or a
      `truncated: true` item, fetch that page's FIRST and LAST chunks via
-     `get_evidence` and confirm the tail survived — a missing tail means
+     `get_evidence(page_id=…)` — the search item's `page_id`,
+     `ordinal`, `kind` and `page_version` fields identify it and confirm the tail survived — a missing tail means
      indexing truncation; re-answer from the full text.
    - *Keyword stress-test*: when the question contains a rare identifier
      (ticket key, error code like `ERR-X99`, hostname, exact string),

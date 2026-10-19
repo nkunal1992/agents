@@ -357,16 +357,19 @@ class Index:
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:
         with self.lock:
-            return {r[0]: {"title": r[1], "url": r[2], "level": r[3]}
+            return {r[0]: {"title": r[1], "url": r[2], "level": r[3],
+                           "version": r[4], "fetched_at": r[5]}
                     for r in self.db.execute(
-                        "SELECT page_id,title,url,level FROM pages WHERE active=1")}
+                        "SELECT page_id,title,url,level,version,fetched_at "
+                        "FROM pages WHERE active=1")}
 
     def active_chunks(self) -> list[dict]:
         with self.lock:
             return [{"chunk_id": r[0], "page_id": r[1], "heading": r[2],
-                     "kind": r[3], "text": r[4]}
+                     "kind": r[3], "ordinal": r[4], "text": r[5]}
                     for r in self.db.execute(
-                        "SELECT chunk_id,page_id,heading,kind,text FROM chunks WHERE active=1")]
+                        "SELECT chunk_id,page_id,heading,kind,ordinal,text "
+                        "FROM chunks WHERE active=1")]
 
     def fts_search(self, query: str, limit: int = 30,
                    active: set[str] | None = None) -> list[tuple[str, float]]:
