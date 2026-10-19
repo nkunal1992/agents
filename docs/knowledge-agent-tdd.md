@@ -69,7 +69,7 @@ row 2: …
 | Component | Problem it solves |
 |---|---|
 | `Xenova/bge-m3` quantized ONNX (`sentence_transformers_quantized.onnx`, ~570 MB) | 1024-dim normalized dense vectors, multilingual, 8k-token context — token-aware chunk budget (448 tokens) plus the page title prepended to the embedded text; runtime input cap 2048 covers row-atomic oversize. |
-| `Qdrant/bm25` via fastembed `SparseTextEmbedding` | Learned sparse term-weights leg. (Honest substitution: no ONNX export of BGE-M3 exposes the lexical head — bm25 learned-sparse fills the same RRF slot.) |
+| `Qdrant/bm25` via fastembed `SparseTextEmbedding` | BM25 sparse leg — token weights + corpus IDF computed in SQLite `term_stats` at publish; queries encode via `query_embed`. (Honest substitution: no ONNX export of BGE-M3 exposes the lexical head — real BM25 fills the same RRF slot.) |
 | `onnx-community/bge-reranker-v2-m3-ONNX` quantized (~600 MB) | Cross-encoder reranker; `<APP>_RERANKER` env swaps to the ~4× lighter `bge-reranker-base` for weak hardware. |
 | ONNX Runtime + `tokenizers` | No torch/sentence-transformers (~2.4 GB → ~250 MB footprint); wheels exist for linux/win-arm64/macos arm64. |
 
