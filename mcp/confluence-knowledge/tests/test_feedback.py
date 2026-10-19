@@ -25,7 +25,7 @@ def test_threshold_rejects_unrelated(tmp_path):
     # orthogonal vector — sim 0.0 (16-dim random vectors can collide at >0.75)
     q = np.zeros(16, dtype=np.float32)
     q[7] = 1.0
-    stored = np.array([np.array(e["qvec"]) for e in st._entries])
+    stored = np.array([np.array(e["qvec"]) for e in st._rows()])
     assert float(q @ stored[0]) < 0.75
     assert st.match(q) == []
 

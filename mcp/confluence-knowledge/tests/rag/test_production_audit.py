@@ -179,7 +179,6 @@ def test_evidence_handles_remain_unique_after_eviction(module, index, monkeypatc
     assert len(set(ids)) == len(ids)
 
 
-@defect("R08")
 def test_two_feedback_instances_do_not_lose_updates(tmp_path):
     a = FeedbackStore(tmp_path, "scope", "test")
     b = FeedbackStore(tmp_path, "scope", "test")
@@ -188,7 +187,6 @@ def test_two_feedback_instances_do_not_lose_updates(tmp_path):
     assert FeedbackStore(tmp_path, "scope", "test").report()["count"] == 2
 
 
-@defect("R08")
 def test_two_feedback_processes_do_not_lose_updates(tmp_path):
     code = (
         "import sys; from pathlib import Path; import numpy as np; "
@@ -215,7 +213,6 @@ def test_two_feedback_processes_do_not_lose_updates(tmp_path):
                 p.wait()
 
 
-@defect("R09", raises=(KeyError, TypeError, ValueError))
 @pytest.mark.parametrize("data", [[{}], [{"qvec": [1, 0], "ts": 0}], [None]])
 def test_malformed_feedback_entries_do_not_break_search(tmp_path, data):
     (tmp_path / "scope.feedback.json").write_text(json.dumps(data), encoding="utf-8")
