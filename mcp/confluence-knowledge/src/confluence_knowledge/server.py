@@ -362,8 +362,11 @@ def search(scope_handle: str, question: str) -> dict:
         "as_of": st["as_of"],
         "user_corrections": corrections,
         "evidence": [
-            {"chunk_id": e["chunk_id"], "page_title": e["page_title"],
-             "page_url": e["page_url"], "heading": e["heading"],
+            {"chunk_id": e["chunk_id"], "page_id": e["page_id"],
+             "page_title": e["page_title"], "page_url": e["page_url"],
+             "page_version": e.get("page_version"),
+             "heading": e["heading"], "kind": e["kind"],
+             "ordinal": e["ordinal"],
              "score": e.get("rerank_score"), "text": e["text"][:EVIDENCE_CHAR_CAP],
              "low_confidence": e.get("low_confidence", False),
              "truncated": len(e["text"]) > EVIDENCE_CHAR_CAP}
@@ -373,20 +376,36 @@ def search(scope_handle: str, question: str) -> dict:
 
 
 @mcp.tool()
-def get_evidence(scope_handle: str, chunk_ids: list[str]) -> dict:
-    """Return full text of previously returned chunks — same scope only."""
+def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
+                 page_id: str | None = None) -> dict:
+    """Return full text of chunks — same scope only. Pass `chunk_ids` for
+    previously returned chunks, or `page_id` to list that page's chunks in
+    ordinal order (Failure Hunt boundary probe: first/last chunks)."""
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     all_chunks = {c["chunk_id"]: c for c in idx.active_chunks()}
+    pages = idx.active_pages()
     out = []
-    for cid in chunk_ids[:16]:
-        c = all_chunks.get(cid)
-        if c is None:
-            raise SecurityException(f"chunk {cid} not in this scope's index")
-        p = idx.active_pages().get(c["page_id"], {})
-        out.append({"chunk_id": cid, "text": c["text"],
-                    "page_title": p.get("title", ""), "page_url": p.get("url", "")})
-    return {"chunks": out}
+    if page_id is not None:
+        if page_id not in pages:
+            raise SecurityException(f"page {page_id} not in this scope's index")
+        out = [c for c in all_chunks.values() if c["page_id"] == page_id]
+        out.sort(key=lambda c: c["ordinal"])
+    else:
+        for cid in (chunk_ids or [])[:16]:
+            c = all_chunks.get(cid)
+            if c is None:
+                raise SecurityException(
+                    f"chunk {cid} not in this scope's index")
+            out.append(c)
+    return {"chunks": [
+        {"chunk_id": c["chunk_id"], "page_id": c["page_id"],
+         "ordinal": c["ordinal"], "kind": c["kind"], "text": c["text"],
+         "page_title": pages.get(c["page_id"], {}).get("title", ""),
+         "page_url": pages.get(c["page_id"], {}).get("url", ""),
+         "page_version": pages.get(c["page_id"], {}).get("version")
+         or pages.get(c["page_id"], {}).get("fetched_at")}
+        for c in out]}
 
 
 @mcp.tool()

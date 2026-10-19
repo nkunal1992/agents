@@ -434,8 +434,9 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     pages = index.active_pages()
     for e in evidence:
         p = pages.get(e["page_id"], {})
-        e["page_title"], e["page_url"], e["level"] = (
-            p.get("title", ""), p.get("url", ""), p.get("level"))
+        e["page_title"], e["page_url"], e["level"], e["page_version"] = (
+            p.get("title", ""), p.get("url", ""), p.get("level"),
+            p.get("version") or p.get("fetched_at"))
     return evidence
 
 
