@@ -50,7 +50,8 @@ def sp_env(tmp_path, monkeypatch):
 
     # the real client goes through httpx — replace it with the fake
     fake = FakeGraph(site_routes())
-    server_sp._clients["https://t.sharepoint.com/sites/x"] = fake
+    server_sp._clients["https://t.sharepoint.com/sites/x"] = (
+        "fake-e2e-token", fake)
     monkeypatch.setattr(server_sp, "download_file",
                         lambda url: BLOBS[url])
     return server_sp

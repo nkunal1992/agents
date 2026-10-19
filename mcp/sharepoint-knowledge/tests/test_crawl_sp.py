@@ -36,12 +36,14 @@ def test_site_expansion_and_publish(idx):
     r = run_all(c, c.start(f"site:{SITE_ID}"))
     assert r["state"] == "done" and r["pages_seen"] == 3
     pages = idx.active_pages()
-    assert "page:pg1" in pages and "page:pg2" in pages and "file:f2" in pages
+    assert f"page:{SITE_ID}:{LIST_ID}:pg1" in pages \
+        and f"page:{SITE_ID}:{LIST_ID}:pg2" in pages \
+        and f"file:{DRIVE_ID}:f2" in pages
     # secret-looking file skipped + disclosed
-    assert "file:f3" not in pages
+    assert f"file:{DRIVE_ID}:f3" not in pages
     assert any("secret" in w for w in r["warnings"])
     # site pages carry their SharePoint URLs for citations
-    assert pages["page:pg1"]["url"].startswith("https://")
+    assert pages[f"page:{SITE_ID}:{LIST_ID}:pg1"]["url"].startswith("https://")
 
 
 def test_chunks_extracted(idx):

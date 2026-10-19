@@ -112,12 +112,16 @@ def _models_loaded(wait: float) -> bool:
 
 
 def _client_for(account: str) -> object:
-    cli = _clients.get(account)
-    if cli is None:
-        profile = SPProfile.load()
-        token = acquire_token(profile, workdir_from_home(), home())
-        cli = _clients[account] = make_client(graph_base(), token)
-    return cli
+    """Cached per account — but a fresh token replaces the cached client
+    rather than leaving it on a stale credential (R06). Entries are
+    (token, client) pairs."""
+    profile = SPProfile.load()
+    token = acquire_token(profile, workdir_from_home(), home())
+    entry = _clients.get(account)
+    if entry is None or entry[0] != token:
+        entry = (token, make_client(graph_base(), token))
+        _clients[account] = entry
+    return entry[1]
 
 
 def workdir_from_home():
@@ -190,7 +194,14 @@ def connect(root: str) -> dict:
         root_entry, site_web = root, profile.site_url
     else:
         root_entry, site_web = resolve_root(cli, root)
-    principal = "me"
+    # Bind the scope to the real account — /me has no identity under an
+    # app-only token, so fall back to the app's client_id there (R06).
+    try:
+        me = cli.get("me").json()
+        principal = me.get("id") or me.get("userPrincipalName") \
+            or profile.client_id
+    except AccessError:
+        principal = profile.client_id
     scope_key = profile.scope_key(principal, root_entry)
     idx = _index_for(scope_key)
     st = idx.stats()

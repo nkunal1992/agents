@@ -55,7 +55,7 @@ class SPProfile:
     credential_ref: str # opaque key — not the token
 
     def scope_key(self, principal: str, root: str) -> str:
-        raw = f"{self.site_url}|{principal}|{root}"
+        raw = f"{self.tenant_id}|{self.site_url}|{principal}|{root}"
         return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
     def save(self) -> Path:

@@ -142,7 +142,8 @@ class SPCrawler:
             chunks, warns = extract_chunks(html, **self._chunk_kwargs())
         else:
             warns.append("no canvas content — page may be empty or classic")
-        page = {"page_id": f"page:{item_id}", "title": title,
+        page = {"page_id": f"page:{site_id}:{list_id}:{item_id}",
+                "title": title,
                 "url": (d.get("webUrl")
                         or (fields.get("_dlc_DocIdUrl") or {}).get("Url", "")),
                 "version": str(d.get("lastModifiedDateTime") or ""),
@@ -170,7 +171,7 @@ class SPCrawler:
         data = downloader(dl_url)
         chunks, warns = extract_file_chunks(name, data,
                                             **self._chunk_kwargs())
-        return {"page_id": f"file:{item_id}", "title": name,
+        return {"page_id": f"file:{drive_id}:{item_id}", "title": name,
                 "url": d.get("webUrl", ""),
                 "version": str(d.get("lastModifiedDateTime", "")),
                 "content_hash": hashlib.sha256(data).hexdigest(),
@@ -285,11 +286,23 @@ class SPCrawler:
                 errors.append(f"{entry}: {e}")
                 if not any(m in str(e) for m in
                            ("401", "403", "404", "permission", "not found")):
-                    # seen stores the built page_id — page: / file: prefixed
-                    last = entry.split(":")[-1]
-                    keep_failed.add(
-                        f"page:{last}" if entry.startswith("page:")
-                        else f"file:{last}")
+                    # keep_failed holds page_ids — page:/item: entries map
+                    # directly; a failed container expansion preserves the
+                    # previously indexed pages under that container (R02/R06)
+                    if entry.startswith("page:"):
+                        keep_failed.add(entry)
+                    elif entry.startswith("item:"):
+                        keep_failed.add(f"file:{entry[5:]}")
+                    else:
+                        if entry.startswith("list:"):
+                            prefix = f"page:{entry[5:]}:"
+                        elif entry.startswith("drive:"):
+                            prefix = f"file:{entry[6:]}:"
+                        else:
+                            prefix = ""  # site: — keep everything it produced
+                        keep_failed.update(
+                            pid for pid in self.index.active_pages()
+                            if pid.startswith(prefix))
                 continue
             pid = page["page_id"]
             if pid in seen:
