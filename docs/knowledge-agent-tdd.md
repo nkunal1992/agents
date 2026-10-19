@@ -75,21 +75,33 @@ row 2: …
 
 **Index** = SQLite per scope at `<workdir>/.<app>_index/<scope_key>.db`:
 
-- `pages(page_id, parent_id, title, url, level, version, warnings, active)`
-- `chunks(chunk_id, page_id, heading_path, kind, ordinal, text, active)`
-- `vectors(chunk_id, dim, vec BLOB)` — float32×1024
-- `sparse(chunk_id, idx BLOB, wts BLOB)` — int64 indices + float32 weights
+- `pages(page_id, parent_id, title, url, level, version, content_hash, warnings)`
+- `chunks(chunk_id, page_id, heading_path, kind, ordinal, text)`
+- `vectors(chunk_id, vec BLOB)` — float32, dim varies by model (1024 for bge-m3)
+- `sparse_vectors(chunk_id, payload BLOB)` — int64 indices + float32 weights
   (int64 because `Qdrant/bm25` hashed term ids overflow int32 — found in
-  the #101 hunt; this column layout is why `MODEL_MARKER` changed and old
-  indexes re-flag as `stale_model`)
+  the #101 hunt)
+- `term_stats(term_id, df)` — corpus document frequencies for BM25 IDF,
+  rebuilt inside each `publish()` transaction
+- `pages_stage`/`chunks_stage`/`vectors_stage`/`sparse_vectors_stage` —
+  per-`job_id` staging; publish swaps them in atomically
+- `jobs(job_id, root_page, state, created_at, queue, errors)` — checkpointed
+  crawl state, including the durable `keep_failed` set in meta
 - FTS5 virtual table over chunk text (16-term query cap by design)
-- `meta` table: `embed_model` marker + `schema_version`
+- `meta` table: `embed_model` marker + `schema_version` + `snapshot_epoch`
+  (bumped per publish — evidence handles are bound to it) + `build:{job}`
+  identity
 
-**Atomicity:** `publish()` flips `active` inside one transaction and
-deletes the now-inactive rows — readers see either the whole old snapshot
-or the whole new one, never a mix. Crawlers keep previously-good content
-when a page's refresh fetch fails transiently; deny/gone errors still
-remove it.
+**Atomicity:** crawlers stage pages/chunks/vectors under their `job_id`;
+readers only ever query the live tables. `publish()` swaps the staged set
+into the live tables inside one transaction — readers see either the whole
+old snapshot or the whole new one, never a mix. Job state is fenced at
+write *and* publish time: a superseded crawl's staged writes abort with
+`StaleJobError` and it can never publish. The job's first write binds a
+`build:{job}` vector-dimension identity — resuming with a different
+embedder is fenced rather than publishing mixed dimensions. Transient
+fetch failures keep previously-good content (a durable `keep_failed` set);
+deny/gone errors still remove it.
 
 ---
 
