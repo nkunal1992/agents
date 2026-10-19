@@ -246,20 +246,33 @@ class Index:
                         (job_id, c.chunk_id,
                          idx_arr.tobytes() + val_arr.tobytes()))
 
+    def _var_batch(self) -> int:
+        """Actual per-statement variable limit of THIS connection, minus
+        margin — batch `IN` lists under it (R15: some SQLite builds cap at
+        32,766, below the declared chunk cap)."""
+        try:
+            return max(1, self.db.getlimit(
+                sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER) - 8)
+        except AttributeError:
+            return 999  # sqlite3 without getlimit — conservative batch
+
     def sparse_for(self, chunk_ids: list[str]) -> dict[str, dict[int, float]]:
         if not chunk_ids:
             return {}
-        q = ",".join("?" * len(chunk_ids))
         out = {}
         with self.lock:
-            for cid, blob in self.db.execute(
-                    f"SELECT chunk_id,payload FROM sparse_vectors "
-                    f"WHERE chunk_id IN ({q})", chunk_ids):
-                # layout: int64[n] indices + float32[n] values → n = len/12
-                k = len(blob) // 12
-                idx = np.frombuffer(blob[:8 * k], dtype=np.int64)
-                vals = np.frombuffer(blob[8 * k:], dtype=np.float32)
-                out[cid] = dict(zip(idx.tolist(), vals.tolist()))
+            step = self._var_batch()
+            for off in range(0, len(chunk_ids), step):
+                part = chunk_ids[off:off + step]
+                q = ",".join("?" * len(part))
+                for cid, blob in self.db.execute(
+                        f"SELECT chunk_id,payload FROM sparse_vectors "
+                        f"WHERE chunk_id IN ({q})", part):
+                    # layout: int64[n] indices + float32[n] values → n = len/12
+                    k = len(blob) // 12
+                    idx = np.frombuffer(blob[:8 * k], dtype=np.int64)
+                    vals = np.frombuffer(blob[8 * k:], dtype=np.float32)
+                    out[cid] = dict(zip(idx.tolist(), vals.tolist()))
         return out
 
     def model_id(self) -> str | None:
@@ -411,12 +424,17 @@ class Index:
     def vectors_for(self, chunk_ids: list[str]) -> dict[str, np.ndarray]:
         if not chunk_ids:
             return {}
-        q = ",".join("?" * len(chunk_ids))
+        out = {}
         with self.lock:
-            return {cid: np.frombuffer(b, dtype=np.float32)
-                    for cid, b in self.db.execute(
-                        f"SELECT chunk_id,vec FROM vectors WHERE chunk_id IN ({q})",
-                        chunk_ids)}
+            step = self._var_batch()
+            for off in range(0, len(chunk_ids), step):
+                part = chunk_ids[off:off + step]
+                q = ",".join("?" * len(part))
+                for cid, b in self.db.execute(
+                        f"SELECT chunk_id,vec FROM vectors "
+                        f"WHERE chunk_id IN ({q})", part):
+                    out[cid] = np.frombuffer(b, dtype=np.float32)
+        return out
 
     def integrity(self) -> bool:
         """PRAGMA integrity_check — False means the DB file is damaged and

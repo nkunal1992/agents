@@ -382,10 +382,24 @@ def test_file_table_preserves_headers_and_structural_kind(fmt):
     assert any("svc-099 | 8099" in c.text for c in chunks)
 
 
-@defect("R15", raises=sqlite3.OperationalError)
 def test_vector_reads_respect_sqlite_parameter_limit(index):
     index.db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 32766)
     assert index.vectors_for([f"chunk-{i}" for i in range(32767)]) == {}
+
+
+def test_batched_vector_reads_round_trip_over_parameter_limit(index):
+    for i in range(3):
+        index.upsert_page(
+            {"page_id": f"p{i}", "title": f"p{i}",
+             "url": f"https://audit.invalid/{i}"},
+            [Chunk(f"text {i}", "", "text", 0, f"c{i}")],
+            np.full((1, 4), i, dtype=np.float32))
+    index.publish({"p0", "p1", "p2"})
+    index.db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 3)
+    out = index.vectors_for(
+        ["c0", "c1", "c2"] + [f"x{i}" for i in range(10)])
+    assert set(out) == {"c0", "c1", "c2"}
+    assert np.allclose(out["c2"], 2.0)
 
 
 def test_page_title_is_in_embedded_context(index):
