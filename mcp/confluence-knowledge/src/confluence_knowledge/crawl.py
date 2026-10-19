@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from .client import AccessError, ConfluenceClient
 from .extract import extract_chunks
-from .index import Index
+from .index import Index, StaleJobError
 
 
 @dataclass
@@ -256,11 +256,17 @@ class Crawler:
                 vecs = self.embedder.embed(texts)
                 if self.sparse is not None:
                     sparse_vecs = self.sparse.embed(texts)
-            self.index.upsert_page({
-                "page_id": pid, "parent_id": None, "title": page["title"],
-                "url": page["url"], "level": levels.get(pid, 0),
-                "version": page["version"], "content_hash": content_hash,
-                "warnings": warns}, chunks, vecs, sparse_vecs, job_id=job_id)
+            try:
+                self.index.upsert_page({
+                    "page_id": pid, "parent_id": None, "title": page["title"],
+                    "url": page["url"], "level": levels.get(pid, 0),
+                    "version": page["version"], "content_hash": content_hash,
+                    "warnings": warns}, chunks, vecs, sparse_vecs,
+                    job_id=job_id)
+            except StaleJobError:
+                return {"job_id": job_id, "state": "abandoned",
+                        "remaining": len(queue), "pages_seen": len(seen),
+                        "errors": errors}
             seen.add(pid)
             for cid, ctype in self._children(pid, is_folder=False):
                 if cid not in seen:
