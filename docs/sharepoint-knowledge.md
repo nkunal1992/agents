@@ -105,6 +105,9 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
 
 - Evidence text returned by `search` is capped at 12000 chars per chunk;
   `truncated: true` flags it — `get_evidence` returns the full text.
+  `get_evidence(page_id=…)` lists a whole page's chunks in ordinal order —
+  how the Failure Hunt boundary probe fetches first/last chunks. Evidence
+  items carry `page_id`, `kind`, `ordinal` and `page_version`.
 - FTS indexes at most the first 16 whitespace-separated query terms;
   the dense + sparse legs carry longer questions.
 - Evidence scoring below ~0.3 rerank probability is flagged
