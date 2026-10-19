@@ -121,10 +121,12 @@ echo
 echo "Installed $copied file(s) into $TARGET_REPO/.github ($skipped skipped)."
 echo "Commit them so they're available in the repo: git add .github && git commit"
 
-# confluence-knowledge additionally needs its local MCP service — the agent
-# self-installs it on first run, so just point users at the guide.
-if selected "confluence-knowledge"; then
-  echo
-  echo "note  confluence-knowledge self-installs its local MCP service on first run"
-  echo "      (you'll approve each step, then reload once). Guide: docs/confluence-knowledge.md"
-fi
+# the *-knowledge agents additionally need their local MCP service — they
+# self-install it on first run, so just point users at the guide.
+for svc in confluence-knowledge local-knowledge sharepoint-knowledge; do
+  if selected "$svc"; then
+    echo
+    echo "note  $svc self-installs its local MCP service on first run"
+    echo "      (you'll approve each step, then reload once). Guide: docs/$svc.md"
+  fi
+done
