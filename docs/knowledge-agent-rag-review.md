@@ -620,9 +620,18 @@ a passing regression test:
 | R04 | #126 | Strict quote schema (empty/missing fails); Copilot-layer entailment check in agent instructions | PR #136 (merged with this change) |
 
 Re-measured on this corpus: embed input cap 2048 keeps 0 chunks truncated
-(max input 450 tokens); p50 latency unchanged at ~3.0s. The 60-question
-quality rerun is in progress on the merged pipeline — every question so
-far at 100% source+fact recall.
+(max input 619 tokens on the token-aware path); p50 latency unchanged at
+~3.0s. The 60-question quality rerun on the remediated pipeline is
+**complete**: all 55 answerable questions scored **100% source recall,
+all-source recall and fact recall** across all 12 categories; the 5
+deliberately unanswerable questions still return evidence (some of it
+explicitly states the answer is unspecified — abstention remains the
+agent's contract, not a retrieval failure). Strict evidence precision
+~23% — correct material arrives alongside extras, as designed. The run
+executed on a deliberately worst-case word-chunked corpus (chunks up to
+3,625 tokens, truncated at the 2048 cap during embedding) — production
+token-aware chunking bounds every chunk to ~450–619 tokens, so no
+production chunk is truncated.
 
 Follow-up remediation merged — every audit reproduction now passes
 (zero remaining `xfail` markers):

@@ -54,7 +54,8 @@ def quality(home, out):
     token_lengths = []
     build = time.perf_counter()
     for p in pages:
-        chunks, _ = extract_chunks(p["html"])
+        chunks, _ = extract_chunks(p["html"], measure=emb.count_tokens,
+                                   budget=r.CHUNK_TOKENS)
         for c in chunks:
             c.chunk_id = f"{p['id']}:{c.ordinal}"
         texts = [f"{p['title']}\n{c.heading_path}\n{c.text}" for c in chunks]
