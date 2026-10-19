@@ -53,7 +53,7 @@ row 1: <v1> | <v2> | <v3>
 row 2: …
 ```
 
-- `split_table_text` budgets `MAX_WORDS = 280` words per segment; when a
+- `split_table_text` budgets ~448 model tokens per segment (tokenizer measure; 280-word fallback); when a
   table exceeds it, segments are emitted **each re-emitting the
   `Table — columns:` header line** — a row never appears without its
   column names, so `Field → Value` pairing is preserved in every chunk's
@@ -129,7 +129,7 @@ sequenceDiagram
 | Component | Problem it solves |
 |---|---|
 | Dense leg | Semantic/paraphrase recall ("how do I reset…" → "forgotten password steps") |
-| Sparse leg (learned BM25) | Exact-token recall — rare identifiers, codes, service names the dense space blurs |
+| Sparse leg (BM25 + corpus IDF) | Exact-token recall — rare identifiers, codes, service names the dense space blurs |
 | FTS5 leg | Literal substring safety net (regex-ish lookups, rare spellings) |
 | RRF `1/(60+rank)` | Score-free fusion — legs emit incomparable scales; rank fusion needs no score calibration |
 
@@ -195,7 +195,7 @@ before responding or named there, never hidden.
 flowchart LR
     U["User: 'that's wrong, it's Y'"] --> A[Agent]
     A --> SF[submit_feedback]
-    SF --> FS[("scope.feedback.json in index dir")]
+    SF --> FS[("scope.feedback.db in index dir")]
     Q["future question"] --> S[search]
     FS -. "cosine ≥0.75" .-> S
     S --> UC[user_corrections]
@@ -205,11 +205,14 @@ flowchart LR
 
 ### 4.1 Persistence
 
-`<index_root>/<scope_key>.feedback.json` — JSON list of
-`{id, question, qvec(float32[]), correction, note, ts}`. Per-scope file
-inside the per-scope index dir ⇒ corrections cannot bleed across scopes
-or tenants. Atomic writes (tmp + `os.replace`), tolerant load (corrupt →
-empty + continue), wiped by `clean` along with the index.
+`<index_root>/<scope_key>.feedback.db` — SQLite (WAL mode) table of
+`{id, question, qvec(float32 blob), correction, note, ts}`. Per-scope
+file inside the per-scope index dir ⇒ corrections cannot bleed across
+scopes or tenants. WAL serialises concurrent writers across processes
+(the old read-merge-write JSON store lost updates); a legacy
+`.feedback.json` is migrated on first open and malformed entries are
+quarantined; entries whose vector dimension differs from the query are
+skipped. Wiped by `clean` along with the index.
 
 ### 4.2 Injection & disclosure
 
@@ -318,7 +321,7 @@ flowchart TD
         PR --> FOOT[Coverage footer]
     end
     subgraph Learn["4 · Feedback"]
-        FB[submit_feedback] --> ST[("feedback.json per scope")]
+        FB[submit_feedback] --> ST[("feedback.db per scope")]
         ST -->|cosine ≥0.75| Q
         FOOT --> RPT[feedback_report → outdated-page hints]
     end

@@ -149,4 +149,4 @@ correction (embedded + similarity-matched).
   the agent discloses it alongside the docs, never overrides.
 - `feedback_report(scope)` — aggregates corrections → the agent can
   suggest which pages look outdated/confusing.
-- Stored at `<index_root>/<scope>.feedback.json`; `clean` wipes it.
+- Stored at `<index_root>/<scope>.feedback.db` (SQLite, WAL — survives concurrent writers); `clean` wipes it.

@@ -108,8 +108,8 @@ only indexed when they are reachable through the root's own descendant links.
 ### 4. Extract & chunk
 
 **What:** each page's storage format (XHTML-ish Confluence markup) is parsed
-into clean text and split into chunks at heading boundaries, ~280 words each
-with small overlaps; tables become readable rows; code/expand/info macros
+into clean text and split into chunks at heading boundaries, each bounded to
+~448 model tokens (word fallback without the tokenizer) with small overlaps; tables become readable rows; code/expand/info macros
 keep their content; dynamic-only macros (jira gadgets etc.) are skipped and
 disclosed.
 

@@ -193,7 +193,7 @@ flowchart TD
 are outdated.
 
 **Technical:** `submit_feedback` stores the question's embedding +
-correction per-scope (`<scope>.feedback.json`); `search` auto-injects
+correction per-scope (`<scope>.feedback.db`); `search` auto-injects
 matches at cosine ≥0.75; `feedback_report` aggregates → "these pages
 look stale." Corrections **annotate** — never override.
 

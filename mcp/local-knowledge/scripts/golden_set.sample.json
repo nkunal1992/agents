@@ -1,30 +1,22 @@
 {
-  "name": "e2e-fake-corpus",
-  "comment": "Golden set for the fake Confluence e2e corpus — run after e2e_bootstrap against the live index: eval_rag.py --golden <this> --index <scope.db>",
   "pairs": [
-    {"question": "when do production deploys happen",
-     "ideal_answer": "Only on Thursdays after 18:00.",
-     "required_pages": ["Deploy Windows"],
-     "required_facts": ["Thursday", "18:00"]},
-    {"question": "who approves a production release",
-     "ideal_answer": "The Change Advisory Board signs off.",
-     "required_pages": ["Release Handbook"],
-     "required_facts": ["Change Advisory Board"]},
-    {"question": "when is the maintenance freeze",
-     "ideal_answer": "December 20 to January 5.",
-     "required_pages": ["Deploy Windows"],
-     "required_facts": ["December 20"]},
-    {"question": "what does team 115 own",
-     "ideal_answer": "Service number 115.",
-     "required_pages": ["Team 115"],
-     "required_facts": ["115"]},
-    {"question": "which day does the prod table list",
-     "ideal_answer": "prod deploys on Thursday.",
-     "required_pages": ["Deploy Windows"],
-     "required_facts": ["Thursday"]},
-    {"question": "wifi password for guest network",
-     "ideal_answer": "not documented",
-     "required_pages": [], "required_facts": [],
-     "expect_no_answer": true}
+    {
+      "question": "when do production deploys happen",
+      "ideal_answer": "Only on Thursdays after 18:00.",
+      "required_pages": ["deploy.md"],
+      "required_facts": ["Thursday", "18:00"]
+    },
+    {
+      "question": "what must restart before every deploy",
+      "ideal_answer": "The gateway must be restarted.",
+      "required_pages": ["deploy.md"],
+      "required_facts": ["gateway"]
+    },
+    {
+      "question": "who owns the gateway",
+      "ideal_answer": "ops-team owns the gateway.",
+      "required_pages": ["owners.csv"],
+      "required_facts": ["ops-team"]
+    }
   ]
 }

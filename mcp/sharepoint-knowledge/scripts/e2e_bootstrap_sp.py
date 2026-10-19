@@ -23,8 +23,9 @@ import tempfile
 import venv
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+from mcp import ClientSession, StdioServerParameters
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]
@@ -190,6 +191,24 @@ def main() -> None:
               "downloads carried no auth header", noauth[:3])
         check(all(h.startswith("/v1.0/") for h in hits),
               "no API calls outside Graph routes", hits[:5])
+
+        # golden-set regression gate — evaluate the live post-crawl index
+        # (shared evaluator lives in the engine package — R11 parity)
+        idx_dbs = sorted((sandbox / "work" / ".sp_knowledge_index")
+                         .glob("*.db"))
+        golden = Path(__file__).parent / "golden_set.sample.json"
+        eval_script = (REPO_SVC.parents[0] / "confluence-knowledge"
+                       / "scripts" / "eval_rag.py")
+        if idx_dbs and golden.exists() and eval_script.exists():
+            gv = run([str(vpy), str(eval_script),
+                      "--golden", str(golden),
+                      "--index", str(idx_dbs[0]),
+                      "--report", str(sandbox / "eval_report.json")],
+                     {**env, "CK_MODEL_HOME":
+                      str(sandbox / "home" / ".sharepoint-knowledge")},
+                     "golden-set eval")
+            check("EVAL OK" in gv.stdout, "golden-set gate",
+                  gv.stdout[-800:])
     finally:
         srv.shutdown()
     print("\nE2E BOOTSTRAP OK")

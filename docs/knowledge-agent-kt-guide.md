@@ -33,7 +33,7 @@ flowchart TD
     FH -->|finding| FX["fix or disclose"]
     FH -->|clean| ANS
     FX --> ANS["answer with citations<br/>+ Coverage footer"]
-    C["'that's wrong — it's Y'"] -.-> FB[("scope.feedback.json<br/>your laptop only")]
+    C["'that's wrong — it's Y'"] -.-> FB[("scope.feedback.db<br/>your laptop only")]
     FB -.->|similar question| EV
 ```
 
@@ -127,8 +127,9 @@ the column headers**, and a row is never torn in half.
   row 2: svc-0002 | tcp/8002 | billing
   ```
 
-  Row order is preserved; `<th>`-less tables promote their first row to
-  the header; `colspan`/`rowspan` flatten gracefully.
+  Row order is preserved; `<th>`-less tables keep their first row as
+  both the columns line and row 1 (never eaten as a header);
+  `colspan`/`rowspan` values carry into the cells they cover.
 - **Row-atomic splitting.** If the serialized table exceeds the
   chunk budget (448 model tokens when the tokenizer is available, else
   280 words), `split_table_text` emits row-group segments —
@@ -285,7 +286,8 @@ both.
 - **Storage** — `submit_feedback(scope, question, correction, note)`
   embeds the question with the same bge-m3 embedder and appends
   `{id, question, qvec, correction, note, ts}` to
-  `<index_root>/<scope>.feedback.json`. Atomic writes (tmp + rename),
+  `<index_root>/<scope>.feedback.db` (SQLite WAL — concurrent writers
+  can't lose corrections). A legacy `.feedback.json` migrates on first open.
   tolerant load (corrupt file → empty + continue, never a crash), and
   `clean` removes it with the index.
 - **Injection** — `search` embeds your new question and cosine-matches
