@@ -613,11 +613,11 @@ a passing regression test:
 | R03 | #120 | UUID evidence handles bound to `snapshot_epoch`; stale handles rejected | **Merged** (PR #129) |
 | R12 | #122 | Corpus IDF from `term_stats` (rebuilt inside publish), `query_embed`, zero-overlap docs excluded from RRF | **Merged** (PR #130) |
 | R16 | #121 | Token-aware chunking (448-token budget via `count_tokens`), page title in embedded context, runtime caps 512→2048 | **Merged** (PR #131) |
-| R08 (+R09 migration validation) | #123 | Per-scope SQLite feedback store (WAL serialises writers, fresh reads) | PR #137 |
-| R07 | #124 | `_validate_path` retains validated query (`$skiptoken`/`cursor`); nextLink loop detection | PR #138 |
-| R13 | #125 | Write-time ownership — `StaleJobError` on staged upserts from non-running jobs | PR #139 |
-| R05 | #127 | `kind`/`ordinal`/`page_version` on evidence; `get_evidence(page_id=)` boundary fetch | PR #135 |
-| R04 | #126 | Strict quote schema (empty/missing fails); Copilot-layer entailment check in agent instructions | PR #136 |
+| R08 (+R09 migration validation) | #123 | Per-scope SQLite feedback store (WAL serialises writers, fresh reads) | **Merged** (PR #137) |
+| R07 | #124 | `_validate_path` retains validated query (`$skiptoken`/`cursor`); nextLink loop detection | **Merged** (PR #138) |
+| R13 | #125 | Write-time ownership — `StaleJobError` on staged upserts from non-running jobs | **Merged** (PR #139) |
+| R05 | #127 | `kind`/`ordinal`/`page_version` on evidence; `get_evidence(page_id=)` boundary fetch | **Merged** (PR #135) |
+| R04 | #126 | Strict quote schema (empty/missing fails); Copilot-layer entailment check in agent instructions | PR #136 (merged with this change) |
 
 Re-measured on this corpus: embed input cap 2048 keeps 0 chunks truncated
 (max input 450 tokens); p50 latency unchanged at ~3.0s. The 60-question
