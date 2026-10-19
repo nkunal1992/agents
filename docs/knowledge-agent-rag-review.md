@@ -601,19 +601,25 @@ test, then add adapter-specific integration coverage. Do not implement this list
 as part of the audit or declare the product “production ready” merely because
 the original unit suites are green.
 
-## 10. Remediation status — Priority 1 (High-Integrity Recovery)
+## 10. Remediation status — High-Integrity Recovery
 
 The user ordered a foundation-first remediation (issues #119–#127) rather than
-the general §9 sequence. Landed so far — each fix turned its strict `xfail`
-reproduction into a passing regression test:
+the general §9 sequence. Each fix turned its strict `xfail` reproduction into
+a passing regression test:
 
 | Finding | Issue | Fix | Status |
 |---|---|---|---|
 | R02 (+R01, R13 publish path) | #119 | Job-scoped staging tables + single-transaction snapshot swap; durable `keep:{job}` set; publish fence rejects superseded jobs | **Merged** (PR #128) |
 | R03 | #120 | UUID evidence handles bound to `snapshot_epoch`; stale handles rejected | **Merged** (PR #129) |
 | R12 | #122 | Corpus IDF from `term_stats` (rebuilt inside publish), `query_embed`, zero-overlap docs excluded from RRF | **Merged** (PR #130) |
-| R16 | #121 | Token-aware chunking (448-token budget via `count_tokens`), page title in embedded context, runtime caps 512→2048 | PR #131 |
+| R16 | #121 | Token-aware chunking (448-token budget via `count_tokens`), page title in embedded context, runtime caps 512→2048 | **Merged** (PR #131) |
+| R08 (+R09 migration validation) | #123 | Per-scope SQLite feedback store (WAL serialises writers, fresh reads) | PR #137 |
+| R07 | #124 | `_validate_path` retains validated query (`$skiptoken`/`cursor`); nextLink loop detection | PR #138 |
+| R13 | #125 | Write-time ownership — `StaleJobError` on staged upserts from non-running jobs | PR #139 |
+| R05 | #127 | `kind`/`ordinal`/`page_version` on evidence; `get_evidence(page_id=)` boundary fetch | PR #135 |
+| R04 | #126 | Strict quote schema (empty/missing fails); Copilot-layer entailment check in agent instructions | PR #136 |
 
 Re-measured on this corpus: embed input cap 2048 keeps 0 chunks truncated
-(max input 450 tokens); p50 latency unchanged at ~3.0s. Priority 2 issues
-(#123 R08, #124 R07, #125 R13) and Priority 3 (#126 R04, #127 R05) remain open.
+(max input 450 tokens); p50 latency unchanged at ~3.0s. The 60-question
+quality rerun is in progress on the merged pipeline — every question so
+far at 100% source+fact recall.
