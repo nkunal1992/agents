@@ -166,7 +166,9 @@ def main() -> int:
     lat.sort()
     recall = sum(r["recall_hit"] for r in q) / max(len(q), 1)
     facts = sum(r["facts_covered"] for r in q) / max(len(q), 1)
-    honesty = sum(r["honest_empty"] for r in hn) / max(len(hn), 1)
+    # vacuous truth: a set with no unanswerable pairs measures honesty of
+    # nothing — report 100% rather than 0% (would fail every gate)
+    honesty = (sum(r["honest_empty"] for r in hn) / len(hn)) if hn else 1.0
 
     report = {"golden_set": golden.name, "pairs": results,
               "aggregate": {"recall@8": recall, "fact_coverage": facts,
@@ -177,7 +179,7 @@ def main() -> int:
 
     print(f"\nrecall@8:       {recall:.0%}  ({sum(r['recall_hit'] for r in q)}/{len(q)})")
     print(f"fact coverage:  {facts:.0%}")
-    print(f"honesty:        {honesty:.0%}  ({sum(r['honest_empty'] for r in hn)}/{len(hn)})")
+    print(f"honesty:        {honesty:.0%}  ({sum(r['honest_empty'] for r in hn)}/{len(hn)} unanswerable)")
     print(f"latency:        p50={report['aggregate']['p50_ms']}ms "
           f"p95={report['aggregate']['p95_ms']}ms")
     for r in results:
