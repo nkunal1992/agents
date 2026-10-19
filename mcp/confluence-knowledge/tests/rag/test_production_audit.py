@@ -115,6 +115,25 @@ def test_superseded_crawler_cannot_publish(index):
     assert index.job(old)["state"] == "abandoned"
 
 
+def test_superseded_job_cannot_write(index):
+    """Write-time fencing: a job superseded mid-flight must not stage data —
+    its upsert raises, so no staged garbage survives to a later publish."""
+    from confluence_knowledge.index import StaleJobError
+    index.create_job("j1", "root")
+    index.save_job("j1", "running", ["page:1"], [])
+    index.abandon_running_jobs()
+    c = Chunk(text="x", heading_path="", kind="text", ordinal=0, chunk_id="c")
+    with pytest.raises(StaleJobError):
+        index.upsert_page({"page_id": "p", "title": "t", "url": "u"},
+                          [c], None, None, job_id="j1")
+    # scratch writes (job_id="") and running jobs are unaffected
+    index.upsert_page({"page_id": "p", "title": "t", "url": "u"}, [c], None)
+    index.create_job("j2", "root")
+    index.save_job("j2", "running", ["page:1"], [])
+    index.upsert_page({"page_id": "p", "title": "t", "url": "u"}, [c], None,
+                      job_id="j2")
+
+
 @defect("R14")
 def test_first_crawl_resume_rejects_different_vector_dimension(index):
     class Tree(Crawler):
