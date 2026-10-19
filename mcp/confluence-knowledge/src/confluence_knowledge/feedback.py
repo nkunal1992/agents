@@ -54,8 +54,17 @@ class FeedbackStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, timeout=30,
                                    check_same_thread=False)
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute(_DDL)
+        # journal-mode switch + DDL are write ops — two processes racing a
+        # fresh file get SQLITE_BUSY despite the busy timeout; retry briefly
+        for attempt in range(50):
+            try:
+                self._db.execute("PRAGMA journal_mode=WAL")
+                self._db.execute(_DDL)
+                break
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e) or attempt == 49:
+                    raise
+                time.sleep(0.1)
         self._migrate_json()
 
     def _migrate_json(self) -> None:
