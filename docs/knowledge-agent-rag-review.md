@@ -624,10 +624,13 @@ Re-measured on this corpus: embed input cap 2048 keeps 0 chunks truncated
 quality rerun is in progress on the merged pipeline — every question so
 far at 100% source+fact recall.
 
-Findings **outside** the approved remediation plan now have their own issues:
-**R06** account/tenant-bound SharePoint scopes and list-qualified page IDs
-(#140), **R10** uniform table contract for DOCX/XLSX/PPTX (#141), **R11**
-evaluator all-source recall and candidate-answer judging (#142), **R14**
-build-identity binding for first crawls and resume (#143), **R15** SQLite
-parameter-limit batching (#144). Their strict `xfail` reproductions remain
-marked until fixed.
+Follow-up remediation merged — every audit reproduction now passes
+(zero remaining `xfail` markers):
+
+| Finding | Issue | Fix | Status |
+|---|---|---|---|
+| R06 | #140 | Scope binds `tenant\|site\|principal\|root` via `GET /me`; `page:{site}:{list}:{id}`/`file:{drive}:{id}`; token-change client rebuild | **Merged** (PR #145) |
+| R11 | #142 | `recall_hit` requires ALL required pages + `sources_missing`/`any_source`; full evidence texts; `--candidate-answers`; verdict schema validation; fact gate | **Merged** (PR #146) |
+| R10 | #141 | Grid-aware rowspan/colspan; `<td>`-first rows kept as data; DOCX/PPTX/Markdown `kind=table`; bounded single rows | **Merged** (PR #147) |
+| R14 | #143 | `build:{job}` vector-dim identity bound at first write; dim-mismatched resume fenced; ragged feedback quarantined | **Merged** (PR #148) |
+| R15 | #144 | `vectors_for`/`sparse_for` batch `IN` under the connection's actual variable limit | **Merged** (PR #149) |
