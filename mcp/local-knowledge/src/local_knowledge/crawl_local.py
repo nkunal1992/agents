@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 from confluence_knowledge.extract_files import extract_file_chunks, is_secret_name
-from confluence_knowledge.index import Index
+from confluence_knowledge.index import Index, StaleJobError
 from confluence_knowledge.settings import SetupError
 
 # dirs never worth indexing — noise or actively harmful to read
@@ -222,12 +222,19 @@ class LocalCrawler:
                 vecs = self.embedder.embed(texts)
                 if self.sparse is not None:
                     sparse_vecs = self.sparse.embed(texts)
-            self.index.upsert_page({
-                "page_id": rel, "parent_id": None, "title": page["title"],
-                "url": page["url"], "level": levels.get(rel, path_s.count("/")),
-                "version": page["version"], "content_hash": page["content_hash"],
-                "warnings": page["warnings"]}, chunks, vecs, sparse_vecs,
-                job_id=job_id)
+            try:
+                self.index.upsert_page({
+                    "page_id": rel, "parent_id": None, "title": page["title"],
+                    "url": page["url"],
+                    "level": levels.get(rel, path_s.count("/")),
+                    "version": page["version"],
+                    "content_hash": page["content_hash"],
+                    "warnings": page["warnings"]}, chunks, vecs, sparse_vecs,
+                    job_id=job_id)
+            except StaleJobError:
+                return {"job_id": job_id, "state": "abandoned",
+                        "remaining": len(queue), "pages_seen": len(seen),
+                        "errors": errors, "warnings": warns}
             seen.add(rel)
 
         # persist final seen/levels/warns too — the in-loop checkpoint runs

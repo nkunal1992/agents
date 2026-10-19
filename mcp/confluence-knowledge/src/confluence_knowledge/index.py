@@ -59,7 +59,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_stage USING fts5(
 _STAGE_TABLES = ("pages_stage", "chunks_stage", "vectors_stage",
                  "sparse_vectors_stage", "chunks_fts_stage")
 # writes that bypass the job system (tests, tools) use this stage owner
-SCRATCH_JOB = ""
+SCRATCH_JOB = ""  # job_id for writes made outside a crawl job (tests, tools)
+
+
+class StaleJobError(RuntimeError):
+    """A crawl job tried to write after being superseded or abandoned —
+    only a 'running' job may stage pages (R13)."""
 
 
 def _batches(ids: list[str], size: int = 5000):
@@ -168,6 +173,14 @@ class Index:
         """Stage a crawled page under its job. Live tables are NEVER touched
         here — readers keep the last published snapshot until publish()."""
         with self.lock, self.db:
+            if job_id != SCRATCH_JOB:
+                row = self.db.execute(
+                    "SELECT state FROM jobs WHERE job_id=?",
+                    (job_id,)).fetchone()
+                if row is None or row[0] != "running":
+                    raise StaleJobError(
+                        f"job {job_id} is {row[0] if row else 'gone'} — "
+                        "a superseded crawl cannot write")
             self.db.execute(
                 "INSERT OR REPLACE INTO pages_stage VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (job_id, page["page_id"], page.get("parent_id"), page["title"],
