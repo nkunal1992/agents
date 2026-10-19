@@ -318,7 +318,6 @@ def test_absolute_pagination_retains_query_token():
     assert "$skiptoken=next%2Bpage" in seen[0]
 
 
-@defect("R11")
 def test_evaluator_requires_all_required_pages(monkeypatch, tmp_path):
     monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(tmp_path))
     path = Path(__file__).parents[2] / "scripts" / "eval_rag.py"

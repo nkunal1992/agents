@@ -5,7 +5,8 @@
         [--golden PATH] [--report PATH] [--merge-verdicts PATH]
 
 Deterministic scores per pair:
-  recall_hit    — a required_pages entry appears among evidence pages
+  recall_hit    — EVERY required_pages entry appears among evidence pages
+                  (any_source tracks the old any-page signal separately)
   facts_covered — every required_facts substring found in evidence text
   honest_empty  — expect_no_answer pairs return zero evidence
 
@@ -66,17 +67,23 @@ def _build_index(corpus, emb, sp, tmp):
 
 
 def _score(pair, ev):
-    """Deterministic pair score."""
+    """Deterministic pair score — recall requires ALL required sources."""
     if pair.get("expect_no_answer"):
         return {"recall_hit": True, "facts_covered": True,
+                "any_source": None, "sources_missing": [],
                 "honest_empty": not ev}
     pages = {e.get("page_title", "") + " " + e.get("page_url", "")
              for e in ev}
     texts = " || ".join(e["text"] for e in ev)
-    recall = any(any(rp in p for p in pages)
-                 for rp in pair["required_pages"]) if pair["required_pages"] else bool(ev)
+    required = pair.get("required_pages", [])
+    missing = [rp for rp in required
+               if not any(rp in p for p in pages)]
+    recall = (not missing) if required else bool(ev)
     facts = all(f in texts for f in pair.get("required_facts", []))
-    return {"recall_hit": recall, "facts_covered": facts,
+    return {"recall_hit": recall,
+            "any_source": (len(missing) < len(required)) if required else None,
+            "sources_missing": missing,
+            "facts_covered": facts,
             "honest_empty": None}
 
 
@@ -91,7 +98,16 @@ def main() -> int:
     if "--merge-verdicts" in args:
         vpath = Path(args[args.index("--merge-verdicts") + 1])
         rep = json.loads(report_p.read_text())
-        verdicts = {v["question"]: v for v in json.loads(vpath.read_text())}
+        known_q = {p["question"] for p in rep["pairs"]}
+        valid_v = {"correct", "partial", "wrong", "no_answer"}
+        verdicts = {}
+        skipped = []
+        for v in json.loads(vpath.read_text()):
+            if not isinstance(v, dict) or not v.get("question") \
+                    or v.get("verdict") not in valid_v or v["question"] not in known_q:
+                skipped.append(v)
+            else:
+                verdicts[v["question"]] = v
         n = 0
         for pair in rep["pairs"]:
             v = verdicts.get(pair["question"])
@@ -102,6 +118,9 @@ def main() -> int:
         ok = sum(1 for v in verdicts.values() if v.get("verdict") == "correct")
         print(f"merged {n}/{len(rep['pairs'])} verdicts — "
               f"judge: {ok}/{len(verdicts)} correct")
+        if skipped:
+            print(f"  warning: {len(skipped)} verdict(s) ignored — "
+                  "bad schema or unknown question")
         return 0
 
     pairs = json.loads(golden.read_text())["pairs"]
@@ -119,6 +138,14 @@ def main() -> int:
     print(f"index: {len(idx.active_chunks())} chunks — "
           f"{len(pairs)} golden pairs")
 
+    # optional real candidate answers produced by an agent run —
+    # {question: answer_text} — lets the judge grade the answer itself,
+    # not just the retrieved evidence (R11)
+    candidates = {}
+    if "--candidate-answers" in args:
+        candidates = json.loads(
+            Path(args[args.index("--candidate-answers") + 1]).read_text())
+
     results, lat = [], []
     for pair in pairs:
         t = time.monotonic()
@@ -127,8 +154,9 @@ def main() -> int:
         results.append({
             "question": pair["question"],
             "ideal_answer": pair["ideal_answer"],
+            "candidate_answer": candidates.get(pair["question"]),
             "pages": sorted({e.get("page_title", "") for e in ev}),
-            "evidence_texts": [e["text"][:800] for e in ev],
+            "evidence_texts": [e["text"] for e in ev],
             "n_evidence": len(ev),
             **_score(pair, ev),
         })
@@ -158,7 +186,7 @@ def main() -> int:
             print(f"  miss: {r['question']!r}")
 
     print(f"\nreport → {report_p}  (judge it via prompts/rag-judge.prompt.md)")
-    ok = recall >= MIN_RECALL and honesty == 1.0
+    ok = recall >= MIN_RECALL and facts >= MIN_RECALL and honesty == 1.0
     print("EVAL", "OK" if ok else "BELOW THRESHOLD")
     return 0 if ok else 1
 
