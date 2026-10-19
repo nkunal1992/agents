@@ -189,7 +189,12 @@ accounts — the entire install is local files + models.
    true` means text was capped at 12000 chars — call
    `get_evidence` for the full chunk before quoting.
    synthesize a concise answer mapping every factual sentence to a chunk →
-   `verify_citations` → fix or drop flagged claims.
+   `verify_citations` with claim→chunk→quote mappings (every claim needs a
+   non-empty verbatim quote — missing quotes fail) → then **support check**:
+   for each surviving claim, verify the quote actually *entails* it —
+   provenance ('the words exist') is not entailment ('the words support
+   the claim'). Drop or re-cite any claim the quote doesn't support →
+   fix or drop flagged claims.
    Then run the **Failure Hunt** — actively try to break the answer,
    not just confirm it. Each probe runs when its trigger applies; a
    probe that can't apply is skipped silently, a probe that finds a
