@@ -165,6 +165,11 @@ class Index:
                 f"DELETE FROM {t} WHERE job_id != ? AND job_id NOT IN "
                 "(SELECT job_id FROM jobs WHERE state IN ('queued','running'))",
                 (SCRATCH_JOB,))
+        self.db.execute(
+            "DELETE FROM meta WHERE key LIKE 'build:%' AND substr(key,7) != ? "
+            "AND substr(key,7) NOT IN "
+            "(SELECT job_id FROM jobs WHERE state IN ('queued','running'))",
+            (SCRATCH_JOB,))
 
     # ---- content ----
     def upsert_page(self, page: dict, chunks: list, vecs: np.ndarray | None,
@@ -181,6 +186,22 @@ class Index:
                     raise StaleJobError(
                         f"job {job_id} is {row[0] if row else 'gone'} — "
                         "a superseded crawl cannot write")
+                # R14: the first staged write binds the job's build
+                # identity — a resumed crawl producing different-dimension
+                # vectors can never publish a mixed-dimension index
+                if vecs is not None and len(vecs):
+                    dim = int(np.asarray(vecs).shape[1])
+                    bkey = f"build:{job_id}"
+                    brow = self.db.execute(
+                        "SELECT value FROM meta WHERE key=?",
+                        (bkey,)).fetchone()
+                    if brow is None:
+                        self.db.execute("INSERT INTO meta VALUES (?,?)",
+                                        (bkey, str(dim)))
+                    elif int(brow[0]) != dim:
+                        raise StaleJobError(
+                            f"job {job_id} bound to {brow[0]}-dim vectors — "
+                            f"resumed with {dim}-dim; start a fresh crawl")
             self.db.execute(
                 "INSERT OR REPLACE INTO pages_stage VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (job_id, page["page_id"], page.get("parent_id"), page["title"],
@@ -255,7 +276,7 @@ class Index:
             self.db.execute(
                 "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
                 " OR key LIKE 'levels:%' OR key LIKE 'warns:%'"
-                " OR key LIKE 'keep:%'")
+                " OR key LIKE 'keep:%' OR key LIKE 'build:%'")
             self.db.commit()
 
     def set_model_id(self, model_id: str) -> None:

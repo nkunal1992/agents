@@ -118,7 +118,9 @@ class FeedbackStore:
     def match(self, qvec: np.ndarray, k: int = 3) -> list[dict]:
         """Cosine-similar corrections ≥ min_sim (default 0.75 — catches
         paraphrases without leaking across topics), best first."""
-        entries = self._rows()
+        # entries written under a different embedder can never match —
+        # quarantine them rather than crash on a ragged matmul (R14)
+        entries = [e for e in self._rows() if len(e["qvec"]) == len(qvec)]
         if not entries:
             return []
         mat = np.array([e["qvec"] for e in entries], dtype=np.float32)

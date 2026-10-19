@@ -134,7 +134,6 @@ def test_superseded_job_cannot_write(index):
                       job_id="j2")
 
 
-@defect("R14")
 def test_first_crawl_resume_rejects_different_vector_dimension(index):
     class Tree(Crawler):
         def _page(self, pid):
