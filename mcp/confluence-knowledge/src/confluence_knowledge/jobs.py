@@ -46,6 +46,7 @@ class Progress:
     phase: str = "starting"
     rate_ppm: float = 0.0          # EWMA of pages/minute
     worker: str = "self"           # or "another IDE window"
+    fetch_cap: int = 0    # current adaptive submission cap (#179)
     updated_at: float = field(default_factory=time.time)
     _win_n: int = 0
     _win_t: float = field(default_factory=time.time)
@@ -75,6 +76,7 @@ class Progress:
                 "rate_ppm": (None if not rate else round(rate, 1)),
                 "eta_s": eta,
                 "worker": self.worker,
+                "fetch_cap": self.fetch_cap,
                 "started_at": self.started_at,
                 "updated_at": self.updated_at,
                 "elapsed_s": max(0.0, round(
@@ -93,6 +95,7 @@ class Progress:
             p.phase = str(d.get("phase", "running"))
             p.rate_ppm = float(d.get("rate_ppm") or 0.0)
             p.worker = "another IDE window"
+            p.fetch_cap = int(d.get("fetch_cap", 0))
             p.started_at = float(d.get("started_at", time.time()))
             p.updated_at = float(d.get("updated_at", time.time()))
             return p
@@ -113,6 +116,29 @@ _MEM_PAUSE_COOLDOWN_S = float(
 # in place. A ceiling prevents an unattended pause from hanging forever.
 _AUTH_PROBE_S = float(os.environ.get("KNOWLEDGE_AUTH_PROBE_S", "10"))
 _AUTH_PAUSE_MAX_S = float(os.environ.get("KNOWLEDGE_AUTH_PAUSE_MAX_S", "1800"))
+
+# Adaptive fetch window (#179): the submission cap breathes with system
+# load — scaled down hard when the laptop is busy, allowed toward
+# KNOWLEDGE_FETCH_MAX when idle (0 = capped at the base, fully inert).
+# The pool is sized at the ceiling once per step; only the submission
+# gate moves, so there's no worker churn mid-crawl.
+_CPU_SAMPLE_S = 2.0
+
+
+def _cpu_percent() -> float:
+    """System-wide CPU utilisation since the last call — psutil's
+    interval=None form never blocks. Absent psutil → mid-band (base)."""
+    try:
+        import psutil
+        return psutil.cpu_percent(interval=None)
+    except Exception:  # noqa: BLE001 — no sensor → no adaptation
+        return 50.0
+
+
+def _fetch_ceiling(base: int) -> int:
+    """Adaptive ceiling — `KNOWLEDGE_FETCH_MAX` (0 → = base)."""
+    v = int(os.environ.get("KNOWLEDGE_FETCH_MAX", "0") or 0)
+    return min(16, max(base, v)) if v > 0 else base
 
 
 class CrawlControl:
@@ -135,6 +161,9 @@ class CrawlControl:
         self._last_hb = 0.0
         self._battery_checked = 0.0
         self._battery = False
+        self._cpu_checked = 0.0
+        self._cpu = 50.0
+        self._fetch_cap = 0
         self._paused_since: float | None = None
         self._pause_override_until = 0.0
 
@@ -215,14 +244,35 @@ class CrawlControl:
     def page_done(self, n: int = 1) -> None:
         self.progress.page_done(n)
 
+    def fetch_ceiling(self, default: int) -> int:
+        """Pool size for a step — the largest cap fetch_concurrency()
+        could return, so the executor never needs resizing (#179)."""
+        return _fetch_ceiling(default)
+
     def fetch_concurrency(self, default: int) -> int:
+        """Current submission cap — CPU-pressure ladder with a battery
+        floor; scale-up only ever reaches the env ceiling (#179)."""
         now = time.time()
         if now - self._battery_checked >= 60:
             self._battery_checked = now
             self._battery = limits().on_battery()
+        if now - self._cpu_checked >= _CPU_SAMPLE_S:
+            self._cpu_checked = now
+            self._cpu = _cpu_percent()
+        cpu = self._cpu
+        if cpu >= 90:
+            cur = 1
+        elif cpu >= 75:
+            cur = max(1, default // 2)
+        elif cpu < 40:
+            cur = min(self.fetch_ceiling(default),
+                      max(default, int(default * 1.5)))
+        else:
+            cur = default
         if self._battery:
-            return max(1, default // 2)
-        return default
+            cur = min(cur, max(1, default // 2))
+        self._fetch_cap = cur
+        return cur
 
     def battery_saver(self) -> bool:
         self.fetch_concurrency(1)      # refresh the cached flag

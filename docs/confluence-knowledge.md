@@ -224,6 +224,11 @@ The server is designed to stay out of the way on a developer laptop:
   (0 disables unloading).
 - **Parallel fetching**: page bodies and child listings run on
   `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6, max 16) while
+  the submission window breathes with system pressure (`fetch_cap` in
+  progress): CPU ≥90 % caps at 1, ≥75 % halves, <40 % may scale toward
+  `KNOWLEDGE_FETCH_MAX` (default 0 = capped at the base, fully inert).
+  The pool sizes at the ceiling once per step — only the submission
+  gate moves, so there is no worker churn.
   embedding/staging stays on the crawl thread — a wide subtree crawls
   several times faster than sequential. Re-crawls skip re-embedding any
   page whose content is unchanged (`content_hash` match) — unchanged

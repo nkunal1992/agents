@@ -303,8 +303,11 @@ class Crawler:
         # stage. Embedding accumulates an EMBED_FLUSH-chunk buffer so a
         # burst of arrivals merges into few model calls.
         conc = limits().fetch_concurrency
-        if self.control is not None:
-            conc = self.control.fetch_concurrency(conc)
+        # the pool is sized at the adaptive ceiling once; the submission
+        # gate below re-reads fetch_concurrency() each pass so the
+        # in-flight window breathes mid-step under pressure (#179)
+        pool_n = (self.control.fetch_ceiling(conc)
+                  if self.control is not None else conc)
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (pid, page, chunks, warns, hash)
         visited_submit: set[str] = set()  # dedupe at submit time
@@ -362,7 +365,7 @@ class Crawler:
         def _pending_chunks() -> int:
             return sum(len(chunks) for _, _, chunks, _, _ in pending)
 
-        with ThreadPoolExecutor(max_workers=conc,
+        with ThreadPoolExecutor(max_workers=pool_n,
                                 thread_name_prefix="crawl-fetch") as pool:
             while (queue or inflight) and (
                     batch is None or processed < batch) and (
@@ -380,8 +383,11 @@ class Crawler:
                         job_id, list(queue) + sorted(inflight.values()),
                         errors, seen, levels, keep_failed)
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
-                # keep the window full — never submit beyond the batch bound
-                while (queue and len(inflight) < conc and
+                # keep the window full — never submit beyond the batch
+                # bound or the adaptive cap (#179)
+                cur = (self.control.fetch_concurrency(conc)
+                       if self.control is not None else conc)
+                while (queue and len(inflight) < cur and
                         (batch is None
                          or processed + len(inflight) < batch)):
                     entry = queue.popleft()   # "page:123" or "folder:456"

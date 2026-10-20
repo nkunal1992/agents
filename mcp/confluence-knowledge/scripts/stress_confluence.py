@@ -876,6 +876,7 @@ def main() -> int:
               else list(SCALE_SCENARIOS) if args.scenarios == "scale"
               else args.scenarios.split(","))
     out_root = Path(args.out)
+    out_root.mkdir(parents=True, exist_ok=True)
     results = []
     for name in wanted:
         if name not in SCENARIOS:
