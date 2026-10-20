@@ -211,12 +211,11 @@ def set_version(pkg: str, version: str, root: Path | None = None) -> Path:
 
 def _emit_outputs(d: dict) -> None:
     lines = "".join(f"{k}={v}\n" for k, v in d.items())
+    print(lines, end="")
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a") as f:
             f.write(lines)
-    else:
-        print(lines, end="")
 
 
 def main(argv: list[str] | None = None) -> int:
