@@ -64,10 +64,13 @@ class Progress:
         self.updated_at = time.time()
 
     def snapshot(self) -> dict:
+        rate = self.rate_ppm
+        eta = (int(self.remaining / (rate / 60))
+               if rate and self.remaining else None)
         return {"pages_done": self.pages_done, "remaining": self.remaining,
                 "errors_n": self.errors_n, "phase": self.phase,
-                "rate_ppm": (None if self.rate_ppm is None
-                             else round(self.rate_ppm, 1)),
+                "rate_ppm": (None if not rate else round(rate, 1)),
+                "eta_s": eta,
                 "worker": self.worker,
                 "started_at": self.started_at,
                 "updated_at": self.updated_at,
@@ -84,7 +87,7 @@ class Progress:
             p.remaining = int(d.get("remaining", 0))
             p.errors_n = int(d.get("errors_n", 0))
             p.phase = str(d.get("phase", "running"))
-            p.rate_ppm = float(d.get("rate_ppm", 0.0))
+            p.rate_ppm = float(d.get("rate_ppm") or 0.0)
             p.worker = "another IDE window"
             p.started_at = float(d.get("started_at", time.time()))
             p.updated_at = float(d.get("updated_at", time.time()))

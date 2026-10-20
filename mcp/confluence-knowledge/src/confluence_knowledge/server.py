@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .index import Index
 from .jobs import CrawlCancelled, LeaseOwner, Progress, crawl_control
 from .mcp_async import tool
 from .models import ModelPool
+from .notify import notify
 from .resources import lower_priority
 from .retrieval import (
     MODEL_MARKER as EMBED_MODEL_ID,
@@ -225,6 +227,16 @@ def status() -> dict:
         checks.append({"flag": "creds_valid", "ok": ok, "detail": detail,
                        "remediation": None if ok else
                        "confluence-knowledge setup (rotate the token)"})
+    last = None
+    try:
+        # the freshest scope index carries the most recent job — enough
+        # for the agent to answer "did my crawl finish?" without polling
+        cands = sorted(idx_root.glob("*.db"),
+                       key=lambda p: -p.stat().st_mtime)
+        if cands:
+            last = _last_crawl(_index_for(cands[0].stem))
+    except Exception:  # noqa: BLE001 — status must never fail on this
+        last = None
     return {
         "configured": "error" not in cfg,
         "profile": cfg,
@@ -233,6 +245,7 @@ def status() -> dict:
         (_EMBEDDER is not None or _pool.is_loaded()),
         "index_root": str(idx_root),
         "live_scopes": sorted(_scopes),
+        "last_crawl": last,
     }
 
 
@@ -263,6 +276,7 @@ def connect(root: str) -> dict:
         "cached_pages": st["pages"],
         "cached_as_of": st["as_of"],
         "stale_model": stale,
+        "last_crawl": _last_crawl(idx),
         "note": ("index was built with an older model — run start_crawl once "
                  "to rebuild it with the current models" if stale else None),
     }
@@ -280,6 +294,32 @@ def _crawler(s: dict, embedder=None, sparse=None, control=None) -> Crawler:
 _workers: dict[str, threading.Thread] = {}
 _worker_errors: dict[str, str] = {}
 _workers_lock = threading.Lock()
+
+
+_notified: set[str] = set()   # job_ids already notified this process
+
+
+def _notify_terminal(idx: Index, job_id: str) -> None:
+    """One desktop notification per finished job — the crawl runs
+    unattended, so completion/failure/cancel must not need a poll."""
+    if job_id in _notified:
+        return
+    job = idx.job(job_id)
+    if job is None or job["state"] == "running":
+        return
+    _notified.add(job_id)
+    prog = _progress.get(job_id)
+    n = prog.pages_done if prog is not None else 0
+    label = {"done": "Crawl finished",
+             "error": "Crawl failed",
+             "cancelled": "Crawl cancelled",
+             "abandoned": "Crawl stopped"}.get(job["state"], "Crawl ended")
+    errs = job["errors"]
+    body = (f"{n} pages indexed" if job["state"] == "done"
+            else f"{n} pages seen")
+    if errs:
+        body += f" — {len(errs)} errors, last: {errs[-1][:60]}"
+    notify(f"{label} — confluence-knowledge", body)
 
 
 def _worker_loop(s: dict, job_id: str) -> None:
@@ -309,6 +349,7 @@ def _worker_loop(s: dict, job_id: str) -> None:
             idx.save_job(job_id, "error", job["queue"], job["errors"] + [err])
     finally:
         idx.release_lease(job_id, _owner.value)
+        _notify_terminal(idx, job_id)
 
 
 def _ensure_worker(s: dict, job_id: str) -> bool:
@@ -348,6 +389,26 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         if other is not None:
             p.update(other.snapshot())
     return p
+
+
+def _last_crawl(idx: Index) -> dict | None:
+    """Latest job summary for status/connect — lets the agent answer
+    'did the crawl finish?' without a second tool call."""
+    job = idx.latest_job()
+    if job is None:
+        return None
+    out = {"job_id": job["job_id"], "state": job["state"],
+           "errors_n": len(job["errors"])}
+    live = _progress.get(job["job_id"])
+    blob = idx.meta_get(f"progress:{job['job_id']}")
+    other = Progress.from_blob(blob) if blob else None
+    snap = live.snapshot() if live is not None else \
+        (other.snapshot() if other is not None else None)
+    if snap:
+        for k in ("pages_done", "phase", "rate_ppm", "eta_s", "worker"):
+            if snap.get(k) is not None:
+                out[k] = snap[k]
+    return out
 
 
 @tool(mcp)
@@ -392,6 +453,39 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
     if p["state"] == "done":
         p["note"] = "no further calls needed — the index is published"
     return p
+
+
+@tool(mcp)
+def wait_for_crawl(scope_handle: str, job_id: str,
+                   wait_s: int = 50) -> dict:
+    """Long-poll for a crawl change — returns as soon as the state or
+    progress changes, or after `wait_s` (capped at 120; default fits IDE
+    tool-call timeouts). The agent should prefer this over polling
+    crawl_step in a tight loop. `changed` tells whether anything moved."""
+    s = _scope(scope_handle)
+    idx = _index_for(s["key"])
+    job = idx.job(job_id)
+    if job is None:
+        raise AccessError(f"unknown job {job_id}")
+    if job["state"] == "running":
+        if not _models_ready.is_set():
+            _start_warmup()
+        _ensure_worker(s, job_id)   # resume after a server restart too
+    wait_s = max(1, min(int(wait_s), 120))
+    deadline = time.monotonic() + wait_s
+    prev = _progress_for(idx, job_id)
+    while prev["state"] == "running" and time.monotonic() < deadline:
+        time.sleep(2)
+        cur = _progress_for(idx, job_id)
+        moved = (cur["state"] != prev["state"]
+                 or cur.get("phase") != prev.get("phase")
+                 or cur.get("pages_done") != prev.get("pages_done"))
+        if moved:
+            cur["changed"] = True
+            return cur
+        prev = cur
+    prev["changed"] = False
+    return prev
 
 
 @tool(mcp)

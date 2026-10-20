@@ -82,6 +82,7 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
 | `KNOWLEDGE_NO_NICE` | `1` disables the lowered OS scheduling priority |
 | `KNOWLEDGE_MIN_FREE_MB` | pause embedding while free memory < this floor (1500; 0 = off) |
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
+| `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
 
 ## Resource usage
 
@@ -95,7 +96,10 @@ Tools run on worker threads (a slow call can't block the MCP loop), and a
 cross-process lease gives each job exactly one worker — a second IDE
 window polls the same crawl instead of racing it. `cancel_crawl` stops a
 running crawl within seconds (`cancelled` is terminal — it never
-auto-resumes) and keeps the previously published snapshot.
+auto-resumes) and keeps the previously published snapshot. `wait_for_crawl`
+long-polls ≤120s and returns the moment progress moves (`phase`,
+`pages_done`, `rate_ppm`, `eta_s`); `connect`/`status` carry `last_crawl`,
+and a desktop notification fires on done/error/cancelled.
 
 Page listings, item metadata, and downloads run on
 `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6) — a large site
