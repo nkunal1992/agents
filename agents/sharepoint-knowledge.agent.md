@@ -49,7 +49,9 @@ reload once." Then run the steps below end-to-end.
    - `configured: false` or `creds_valid ✗` → `setup` (re-sign-in — device
      code; if the Entra error mentions admin consent, tell the user their
      IT must grant it — nothing they type fixes it)
-   - `deps ✗` → `"$VENV_PY" -m pip install -U "sharepoint-knowledge[models]"`
+   - `deps ✗` → run the pinned reinstall doctor prints
+     (`pip install "sharepoint-knowledge[models]==<installed>"` — a repair must never
+     upgrade into an unverified release)
    - `model_embed / model_rerank / model_rerank_light / model_sparse ✗` →
      `prepare-models`
    - `registration ✗` → `register --ide auto --workspace "<repo>"`
@@ -57,10 +59,18 @@ reload once." Then run the steps below end-to-end.
    - `index:* older model` → `start_crawl` on that scope (one rebuild)
    - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
    - `python ✗` → venv was built on <3.11 — rebuild it from step 1
-   - `update available` → upgrade via `"$VENV_PY" -m pip install -U
-     "sharepoint-knowledge[models]"`, then `prepare-models`, then re-doctor.
+   - `update available` → `sharepoint-knowledge update` — installs the newest
+     **soaked** release (3-day delay by design), self-tests it, and rolls
+     back automatically if it fails. A freshly published release shows as
+     "soaking until <date>" — that's intentional, wait. If the update ends
+     with "rolled back" the old version is already restored and verified;
+     report the failure, don't retry blindly. On Windows the update must run
+     through the venv python — `update` prints the exact command. After a
+     successful update: reload the IDE window, then re-run doctor.
      (Upgrading from ≤0.2.x → scopes rebind to the real account — the first
      `start_crawl` re-indexes; that is expected, not lost cache.)
+   - `release ✗` → the installed version was yanked — `sharepoint-knowledge update` moves
+     to the last-good release.
    - all green but tools still absent → `register` (step 4) + reload.
      Never re-run install/prepare-models on a healthy setup.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in

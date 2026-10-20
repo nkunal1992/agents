@@ -98,6 +98,15 @@ def _doctor() -> int:
 
     from .server_sp import status
     s = status()
+    upd = check("sharepoint-knowledge")
+    if upd.get("installed_yanked"):
+        s.setdefault("checks", []).append({
+            "flag": "release", "ok": False,
+            "detail": f"installed {upd['installed']} was yanked"
+                      + (f" ({upd['yank_reason']})"
+                         if upd.get("yank_reason") else ""),
+            "remediation": "sharepoint-knowledge update "
+                           "(moves to the last-good release)"})
     print(json.dumps(s, indent=2))
     bad = [c for c in s.get("checks", []) if not c["ok"]]
     if bad:
@@ -106,17 +115,19 @@ def _doctor() -> int:
             print(f"  ✗ {c['flag']}: {c['detail']}")
             if c.get("remediation"):
                 print(f"    → {c['remediation']}")
-    upd = check("sharepoint-knowledge")
     if upd["installed"]:
         line = f"version: {upd['installed']}"
         if upd["latest"]:
             line += f" (latest: {upd['latest']})"
         elif upd["latest"] is None:
             line += " (latest: unchecked — offline or internal mirror)"
+        if upd.get("pending"):
+            line += (f" — {upd['pending']['version']} soaking until "
+                     f"{upd['pending']['offered_after']}")
         print(line)
     if upd["update_available"]:
         print("update available: run `sharepoint-knowledge update` "
-              "(or pip install -U sharepoint-knowledge[models])")
+              "(soaked release, self-tested, rolls back on failure)")
     return 4 if bad else 0
 
 
@@ -128,7 +139,17 @@ def main() -> None:
     sub.add_parser("setup", help="configure Entra sign-in + site")
     sub.add_parser("doctor", help="report configuration + model readiness")
     sub.add_parser("prepare-models", help="download the pinned local models")
-    sub.add_parser("update", help="upgrade this package via pip -U")
+    u = sub.add_parser("update", help="safe upgrade — soaked release, "
+                     "self-test, auto-rollback")
+    g = u.add_mutually_exclusive_group()
+    g.add_argument("--latest", action="store_true",
+                   help="skip the release soak")
+    g.add_argument("--to", metavar="VERSION",
+                   help="install an exact version")
+    g.add_argument("--rollback", action="store_true",
+                   help="restore the previous environment")
+    sub.add_parser("selftest", help="verify the install end to end "
+                   "(tools, models, mini-RAG)")
     reg = sub.add_parser("register",
                          help="write the IDE MCP config automatically")
     reg.add_argument("--ide", choices=["auto", "all", "jetbrains", "vscode"],
@@ -150,22 +171,16 @@ def main() -> None:
             print(line)
         return
     if args.cmd == "update":
-        import subprocess
-        cmd = [sys.executable, "-m", "pip", "install", "-U",
-               "sharepoint-knowledge[models]"]
-        # a running MCP server holds open files — quit the IDE first
-        print("note: quit the IDE (or stop the MCP server) before updating —"
-              " a running server can't be replaced cleanly", flush=True)
-        if os.name == "nt":
-            print("on Windows, upgrade via the venv python directly:\n  "
-                  + " ".join(f'"{c}"' if " " in c else c for c in cmd))
-            return
-        r = subprocess.run(cmd, check=False)
-        if r.returncode == 0:
-            print("\nupdated — run `sharepoint-knowledge prepare-models` "
-                  "(new releases may pin new model artifacts) then "
-                  "`sharepoint-knowledge doctor`")
-        sys.exit(r.returncode)
+        from confluence_knowledge.update import run_update
+        sys.exit(run_update(
+            "sharepoint-knowledge", cli_module="sharepoint_knowledge.cli_sp",
+            home=home(), server_module="sharepoint_knowledge.server_sp",
+            to=args.to, latest=args.latest, rollback=args.rollback,
+            engine_dist="confluence-knowledge"))
+    if args.cmd == "selftest":
+        from confluence_knowledge.selftest import run
+        print(__import__("json").dumps(
+            run(home(), "sharepoint_knowledge.server_sp"), indent=2))
     if args.cmd == "register":
         results = _register(
             ide=args.ide,
