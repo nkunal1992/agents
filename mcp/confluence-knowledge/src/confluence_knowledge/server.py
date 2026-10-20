@@ -314,6 +314,7 @@ def connect(root: str) -> dict:
                            "root": root_id}
     _start_warmup()
     stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
+    auto = _maybe_auto_reindex(_scopes[handle], idx) if stale else None
     return {
         "scope_handle": handle,
         "root_page_id": root_id,
@@ -322,16 +323,47 @@ def connect(root: str) -> dict:
         "cached_pages": st["pages"],
         "cached_as_of": st["as_of"],
         "stale_model": stale,
+        "auto_reindex": auto,
         "last_crawl": _last_crawl(idx),
-        "note": ("index was built with an older model — run start_crawl once "
-                 "to rebuild it with the current models" if stale else None),
+        "note": ("index was built with an older model — "
+                 + (f"re-index started automatically ({auto})"
+                    if auto else "run start_crawl once to rebuild it "
+                    "with the current models") if stale else None),
     }
 
 
+def _maybe_auto_reindex(s: dict, idx: Index) -> str | None:
+    """#178: a stale-model index self-heals — notify once + start the
+    rebuild crawl automatically unless a job is already in flight."""
+    latest = idx.latest_job()
+    if latest and latest["state"] in ("running", "queued"):
+        return None                               # already rebuilding
+    if f"model:{s['key']}" not in _notified:
+        _notified.add(f"model:{s['key']}")
+        notify("confluence-knowledge",
+               "index was built with an older embedding model — "
+               "re-indexing so search stays compatible")
+    if os.environ.get("CONF_KNOWLEDGE_AUTO_REINDEX", "1") == "0":
+        return None
+    job_id = _crawler(s).start(s["root"])
+    return "started" if _ensure_worker(s, job_id) else "queued"
+
+
 def _crawler(s: dict, embedder=None, sparse=None, control=None) -> Crawler:
-    return Crawler(_client_for(s["profile"]), _index_for(s["key"]), s["profile"].env,
+    profile = s["profile"]
+
+    def _fresh_client():
+        # re-read the credential — a setup-rotated token must reach the
+        # running crawl without a restart (#177)
+        with _state_lock:
+            _clients.pop(profile.credential_ref, None)
+            _CREDS_CACHE.pop(profile.credential_ref, None)
+        return _client_for(profile)
+
+    return Crawler(_client_for(profile), _index_for(s["key"]), profile.env,
                    embedder=embedder, sparse=sparse,
-                   site_url=s["profile"].base_url, control=control)
+                   site_url=profile.base_url, control=control,
+                   client_factory=_fresh_client)
 
 
 # background crawl workers — a crawl runs to completion server-side so a big
@@ -380,7 +412,7 @@ def _worker_loop(s: dict, job_id: str) -> None:
                      control=crawl_control(
                          idx, job_id, prog,
                          _cancel_flags.setdefault(job_id, threading.Event()),
-                         _owner))
+                         _owner, notify=notify))
         while True:
             r = c.step(job_id, batch=None, budget_s=None)
             if r["state"] != "running":
@@ -448,6 +480,9 @@ def _last_crawl(idx: Index) -> dict | None:
         return None
     out = {"job_id": job["job_id"], "state": job["state"],
            "errors_n": len(job["errors"])}
+    pub = idx.meta_get(f"publish:{job['job_id']}")
+    if pub:
+        out["publish"] = json.loads(pub)   # staged/deleted/kept (#176)
     live = _progress.get(job["job_id"])
     blob = idx.meta_get(f"progress:{job['job_id']}")
     other = Progress.from_blob(blob) if blob else None

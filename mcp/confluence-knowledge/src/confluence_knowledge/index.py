@@ -189,10 +189,14 @@ class Index:
         if job is None:
             raise KeyError(job_id)
         seen = self.meta_get(f"seen:{job_id}")
-        return {"job_id": job_id, "state": job["state"],
-                "remaining": len(job["queue"]),
-                "pages_seen": len(json.loads(seen)) if seen else 0,
-                "errors": job["errors"]}
+        out = {"job_id": job_id, "state": job["state"],
+               "remaining": len(job["queue"]),
+               "pages_seen": len(json.loads(seen)) if seen else 0,
+               "errors": job["errors"]}
+        pub = self.meta_get(f"publish:{job_id}")
+        if pub:
+            out["publish"] = json.loads(pub)   # staged/deleted/kept (#176)
+        return out
 
     def meta_set(self, key: str, value: str) -> None:
         with self.lock:
@@ -431,13 +435,18 @@ class Index:
         raw = self.meta_get("snapshot_epoch")
         return int(raw) if raw else 0
 
-    def publish(self, seen_page_ids: set[str], job_id: str = SCRATCH_JOB) -> None:
+    def publish(self, seen_page_ids: set[str],
+                job_id: str = SCRATCH_JOB) -> dict:
         """Atomically replace the live snapshot: this job's staged pages plus
         the live pages listed in seen_page_ids (transient-failed pages carry
         their previous content forward). One transaction — readers see the
         old snapshot or the new one, never a mix. Pages absent from the set
-        are confirmed removals and are DELETED."""
+        are confirmed removals and are DELETED.
+
+        Returns {staged, deleted, kept} — surfaced in job state so a
+        refresh's effect is auditable (#176)."""
         with self.lock, self.db:
+            staged_n = deleted_n = 0
             self.db.execute(
                 "CREATE TEMP TABLE IF NOT EXISTS pub_seen(pid TEXT PRIMARY KEY)")
             self.db.execute("DELETE FROM pub_seen")
@@ -454,6 +463,11 @@ class Index:
             doom = ("page_id IN (SELECT pid FROM pub_staged) "
                     "OR page_id NOT IN (SELECT pid FROM pub_seen)")
             doomed_chunks = ("SELECT chunk_id FROM chunks WHERE " + doom)
+            deleted_n = self.db.execute(
+                "SELECT COUNT(*) FROM pages WHERE page_id NOT IN "
+                "(SELECT pid FROM pub_seen)").fetchone()[0]
+            staged_n = self.db.execute(
+                "SELECT COUNT(*) FROM pub_staged").fetchone()[0]
             self.db.execute(
                 f"DELETE FROM chunks_fts WHERE chunk_id IN ({doomed_chunks})")
             self.db.execute(
@@ -488,6 +502,8 @@ class Index:
             self.db.execute(
                 "INSERT OR REPLACE INTO meta VALUES ('snapshot_epoch', ?)",
                 (str(self.snapshot_epoch() + 1),))
+        kept = max(0, len(seen_page_ids) - staged_n)
+        return {"staged": staged_n, "deleted": deleted_n, "kept": kept}
 
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:

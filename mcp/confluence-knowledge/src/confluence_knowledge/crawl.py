@@ -130,7 +130,7 @@ from .retrieval import MODEL_MARKER as _MODEL_ID
 class Crawler:
     def __init__(self, client: ConfluenceClient, index: Index, env: str,
                  embedder=None, sparse=None, site_url: str | None = None,
-                 control=None):
+                 control=None, client_factory=None):
         self.client = client
         self.index = index
         self.env = env
@@ -138,6 +138,10 @@ class Crawler:
         self.sparse = sparse      # retrieval.LocalSparseEmbedder or None
         # cancellation/heartbeat/phase/rate hook — None for tests/CLI
         self.control = control
+        # token-rotation path (#177): builds a fresh client when the
+        # stored credential changed — None in tests/CLI
+        self._client_factory = client_factory
+        self._auth_fails = 0
         # fallback base for page links when a response carries no _links.base
         if site_url and env == "cloud" and not site_url.rstrip("/").endswith("/wiki"):
             site_url = site_url.rstrip("/") + "/wiki"
@@ -161,6 +165,37 @@ class Crawler:
         page["url"] = _abs_url(page["url"], self.site_url)
         return page
 
+    def _auth_probe(self) -> bool:
+        """Has the credential rotated? A fresh client re-reads the token
+        store; success swaps it in so the crawl resumes in place."""
+        if self._client_factory is None:
+            return False
+        try:
+            client = self._client_factory()
+            ep = ("wiki/rest/api/user/current" if self.env == "cloud"
+                  else "rest/api/user/current")
+            client.get(ep)
+            self.client = client
+            return True
+        except Exception:  # noqa: BLE001 — still dead, keep waiting
+            return False
+
+    def _maybe_auth_pause(self, errors: list, entry: str, queue,
+                          visited_submit: set) -> bool:
+        """Consecutive 401s mean the token died mid-crawl — pause for a
+        rotation rather than burn per-page errors (#177). On rotation the
+        victim item re-queues and the doomed error lines are dropped."""
+        if self._auth_fails < 1 or self.control is None:
+            return False
+        self.control.pause_until_auth(self._auth_probe)
+        self._auth_fails = 0
+        pid = entry.split(":", 1)[1] if ":" in entry else entry
+        visited_submit.discard(pid)
+        queue.appendleft(entry)
+        errors[:] = [e for e in errors
+                     if "401" not in e and "authentication failed" not in e]
+        return True
+
     def _fetch_page(self, pid: str):
         """Worker task: page body and child listing fetched independently —
         a denied/failed body must not preclude listing children (#170: DC
@@ -181,6 +216,12 @@ class Crawler:
     def start(self, root_page: str) -> str:
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
+        # a fresh job on a stale-model index clears upfront — one
+        # start_crawl rebuilds; the mid-flight stamped check below stays
+        # for genuinely-mid-crawl model changes (#178)
+        stamped = self.index.model_id()
+        if stamped is not None and stamped != _MODEL_ID:
+            self.index.clear_scope()
         self.index.create_job(job_id, root_page)
         self.index.save_job(job_id, "running", [f"page:{root_page}"], [])
         return job_id
@@ -365,6 +406,14 @@ class Crawler:
                     try:
                         result = fut.result()
                     except AccessError as e:
+                        if ("401" in str(e)
+                                or "authentication failed" in str(e)):
+                            # token died mid-crawl — pause for rotation;
+                            # on rotate the item re-queues (#177)
+                            self._auth_fails += 1
+                            if self._maybe_auth_pause(
+                                    errors, entry, queue, visited_submit):
+                                continue
                         errors.append(f"page {pid}: {e}")
                         if entry.startswith("folder:"):
                             # the listing died — its whole subtree is now
@@ -395,6 +444,11 @@ class Crawler:
                                 queue.append(f"{ctype}:{cid}")
                         continue
                     page, kids = result
+                    if not isinstance(page, AccessError):
+                        self._auth_fails = 0
+                        # a fetched body proves the token is alive; a dual
+                        # AccessError raise (token-dead signature) lands
+                        # in the except branch and counts instead
                     if isinstance(kids, AccessError):
                         # page body fetched but its child listing failed —
                         # descendants are now undiscovered; keep all live
@@ -486,7 +540,10 @@ class Crawler:
                 self.control.progress.remaining = 0
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
-            self.index.publish(seen | keep_failed, job_id=job_id)
+            pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            # auditable outcome: what the refresh added vs tombstoned vs
+            # carried forward — stored so status/last_crawl can report it
+            self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
             self.index.save_job(job_id, "done", [], errors)
             state = "done"

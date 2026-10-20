@@ -16,6 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from .client import AccessError
 from .resources import limits
 
 
@@ -107,6 +108,12 @@ _MEM_PAUSE_MAX_S = float(os.environ.get("KNOWLEDGE_MEM_PAUSE_MAX_S", "600"))
 _MEM_PAUSE_COOLDOWN_S = float(
     os.environ.get("KNOWLEDGE_MEM_PAUSE_COOLDOWN_S", "60"))
 
+# Auth lifecycle (#177): an expired token pauses the job rather than
+# burning errors; the crawler probes for a rotated credential and resumes
+# in place. A ceiling prevents an unattended pause from hanging forever.
+_AUTH_PROBE_S = float(os.environ.get("KNOWLEDGE_AUTH_PROBE_S", "10"))
+_AUTH_PAUSE_MAX_S = float(os.environ.get("KNOWLEDGE_AUTH_PAUSE_MAX_S", "1800"))
+
 
 class CrawlControl:
     """Per-job hook the crawler consults between queue items and embed
@@ -115,7 +122,8 @@ class CrawlControl:
     def __init__(self, idx, job_id: str, progress: Progress,
                  cancel_flag: threading.Event | None = None,
                  owner: LeaseOwner | None = None,
-                 sleep=time.sleep, hb_s: float = 5.0) -> None:
+                 sleep=time.sleep, hb_s: float = 5.0,
+                 notify=None) -> None:
         self.idx = idx
         self.job_id = job_id
         self.progress = progress
@@ -123,6 +131,7 @@ class CrawlControl:
         self.owner = owner
         self.sleep = sleep
         self.hb_s = hb_s             # heartbeat/cross-process-cancel cadence
+        self.notify = notify         # (title, body) desktop hook or None
         self._last_hb = 0.0
         self._battery_checked = 0.0
         self._battery = False
@@ -157,6 +166,40 @@ class CrawlControl:
             self._heartbeat()
         self._paused_since = None
 
+    def pause_until_auth(self, probe) -> None:
+        """Auth expiry is a job-class pause, not page errors (#177): the
+        job waits for a token rotation, then resumes from exactly where
+        it stopped. `probe()` → True when credentials re-validate. A
+        ceiling keeps an unattended expiry from hanging forever."""
+        self.progress.set_phase(
+            "paused: auth — session expired, provide a new API token "
+            "to continue")
+        if self.notify is not None:
+            try:
+                self.notify(
+                    "confluence-knowledge",
+                    "session expired — provide a new API token to "
+                    "continue the crawl")
+            except Exception:  # noqa: BLE001 — notify is best-effort
+                pass
+        since = time.time()
+        while True:
+            if self.cancel_flag is not None and self.cancel_flag.is_set():
+                raise CrawlCancelled()
+            if time.time() - since >= _AUTH_PAUSE_MAX_S:
+                raise AccessError(
+                    "auth pause timed out — no new credential arrived "
+                    f"within {_AUTH_PAUSE_MAX_S:.0f}s; re-run start_crawl "
+                    "after setup")
+            try:
+                if probe():
+                    self.progress.set_phase("resuming: token rotated")
+                    return
+            except Exception:  # noqa: BLE001 — probe errors mean still dead
+                pass
+            self.sleep(_AUTH_PROBE_S)
+            self._heartbeat()
+
     def _heartbeat(self) -> None:
         now = time.time()
         if now - self._last_hb < self.hb_s or self.owner is None:
@@ -189,8 +232,8 @@ class CrawlControl:
 def crawl_control(idx, job_id: str, progress: Progress,
                   cancel_flag: threading.Event | None = None,
                   owner: LeaseOwner | None = None,
-                  hb_s: float = 5.0) -> CrawlControl:
+                  hb_s: float = 5.0, notify=None) -> CrawlControl:
     """Server-side factory — crawlers accept control=None (tests/CLI get a
     no-op), workers get a real one."""
     return CrawlControl(idx, job_id, progress, cancel_flag, owner,
-                        hb_s=hb_s)
+                        hb_s=hb_s, notify=notify)

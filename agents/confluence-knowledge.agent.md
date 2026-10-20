@@ -244,6 +244,11 @@ wheel path for the install step — everything else is identical.
      queued while models warm — keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — the crawl
      waits safely and resumes itself; tell the user once, keep waiting.
+   - `phase` containing `paused: auth` → the token expired mid-crawl —
+     tell the user once: "Your session has expired — run
+     `confluence-knowledge setup` to provide a new API token; the crawl
+     will resume itself." Keep waiting — it resumes in place on rotation
+     and errors clearly if none arrives within ~30 min.
    - `phase` containing "battery saver" → on battery, throttled
      deliberately — normal.
    - `worker: another IDE window` → a different window owns the crawl —

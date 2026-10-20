@@ -245,6 +245,20 @@ The server is designed to stay out of the way on a developer laptop:
   `KNOWLEDGE_BATTERY_SAVER` (default 1) halves fetch concurrency and
   ~halves embed duty cycles — powered-off laptops don't run the fan at
   full speed.
+- **Auth lifecycle**: consecutive 401s pause the crawl as
+  `paused: auth — session expired` (desktop notification fired once) —
+  provide a new token via `confluence-knowledge setup` and the job
+  resumes in place when the credential rotates; it errors cleanly after
+  `KNOWLEDGE_AUTH_PAUSE_MAX_S` (default 1800 s) if none arrives. Probe
+  cadence `KNOWLEDGE_AUTH_PROBE_S` (10 s).
+- **Model-version lifecycle**: the index stores a fingerprint of every
+  model whose output is persisted (dense + sparse embeddings); on a
+  mismatch `connect`/`search` report `stale_model`, a notification
+  fires, and `start_crawl` rebuilds in one call (the scope clears
+  upfront). `connect` also starts the rebuild automatically —
+  `CONF_KNOWLEDGE_AUTO_REINDEX=0` opts out. The reranker is deliberately
+  not fingerprinted: it only scores at query time, so reranker upgrades
+  never force a rebuild.
 - **Cancelling**: `cancel_crawl` stops a running crawl within seconds and
   marks it `cancelled` — a terminal state that never auto-resumes. The
   previously published snapshot is untouched; `start_crawl` re-runs and

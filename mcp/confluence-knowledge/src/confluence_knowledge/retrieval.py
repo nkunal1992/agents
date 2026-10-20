@@ -36,6 +36,9 @@ RERANK_BASE_REPO = "onnx-community/bge-reranker-base-ONNX"  # light override
 
 EMBED_MODEL_ID = "bge-m3-onnx-quantized"
 SPARSE_MODEL_ID = "qdrant-bm25-fastembed"
+# Composite fingerprint of every model whose output is PERSISTED (dense +
+# sparse vectors). The reranker is deliberately absent: it only scores at
+# query time, so a reranker swap must not trigger a full rebuild (#178).
 MODEL_MARKER = f"{EMBED_MODEL_ID}+{SPARSE_MODEL_ID}"
 
 TOP_K_RETRIEVE = 30

@@ -187,3 +187,34 @@ def test_status_never_blocks_on_wire(wired_status, monkeypatch):
     assert t.monotonic() - t0 < 2.0
     # the async refreshes dedupe — at most a couple of wire calls, not 5
     assert client.identity_calls <= 3
+
+
+# ---------------- model-version lifecycle (#178) ----------------
+
+
+def test_stale_model_notifies_and_autoreindexes(wired_status, monkeypatch):
+    notes = []
+    monkeypatch.setattr(server, "notify",
+                        lambda t, b: notes.append((t, b)) or True)
+    server.connect("1")
+    key = next(iter(server._scopes.values()))["key"]
+    idx = server._index_for(key)
+    idx.set_model_id("ancient-model-v0")
+    server._scopes.clear()
+    r = server.connect("1")
+    assert r["stale_model"] is True
+    assert r["auto_reindex"] in ("started", "queued")
+    assert notes and "model" in notes[0][1]
+    # a second connect while the job runs must not stack a second worker
+    r2 = server.connect("1")
+    assert r2["auto_reindex"] in (None, "queued")
+
+
+def test_fingerprint_covers_persisted_models():
+    from confluence_knowledge.retrieval import (
+        EMBED_MODEL_ID, MODEL_MARKER, RERANK_REPO, SPARSE_MODEL_ID)
+    assert EMBED_MODEL_ID in MODEL_MARKER
+    assert SPARSE_MODEL_ID in MODEL_MARKER
+    # reranker deliberately absent — query-time only, must not force a
+    # rebuild on upgrade
+    assert RERANK_REPO not in MODEL_MARKER
