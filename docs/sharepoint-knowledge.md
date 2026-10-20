@@ -32,6 +32,12 @@ Bootstrap = install → models → `register` → `setup` (the only manual step)
 
 ## Scope
 
+Scopes are bound to the **tenant + signed-in account + root** —
+per-account indexes are a security boundary: a different sign-in sees
+an empty cache (`cached: false`) and re-crawls, so one account's
+content can never leak into another's answers. (Upgrading from
+≤0.2.x rebinds scopes — the first crawl re-indexes; expected.)
+
 `connect` accepts:
 
 - `https://tenant.sharepoint.com/sites/<name>` → Site Pages + **all** document
@@ -52,6 +58,9 @@ One root per `connect` — connect again for another scope.
 - Downloads go through `@microsoft.graph.downloadUrl` **without** the
   Bearer header — the token never leaves `graph.microsoft.com`
 - GET-only client with an endpoint allowlist — no write path exists
+- `crawl_step` returning `state: abandoned` means the job was
+  superseded or fenced — it can never finish; call `start_crawl`
+  for a fresh job
 
 ## CLI
 
@@ -108,6 +117,9 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
   `get_evidence(page_id=…)` lists a whole page's chunks in ordinal order —
   how the Failure Hunt boundary probe fetches first/last chunks. Evidence
   items carry `page_id`, `kind`, `ordinal` and `page_version`.
+- `search` returns an `evidence_set` handle — `verify_citations` requires
+  it. Sets expire when a new crawl publishes ("predates the latest
+  published snapshot") — re-run `search` for a fresh one.
 - FTS indexes at most the first 16 whitespace-separated query terms;
   the dense + sparse legs carry longer questions.
 - Evidence scoring below ~0.3 rerank probability is flagged

@@ -50,3 +50,24 @@ def test_agent_frontmatter_tools_exist():
     real = set(re.findall(r"@mcp\.tool\(\)\s*\ndef\s+(\w+)", srv))
     missing = declared - real
     assert not missing, f"agent frontmatter names tools not in server: {missing}"
+
+
+def test_agent_covers_crawl_terminal_states():
+    """`crawl_step` can return `abandoned` (superseded or fenced resume) —
+    the agent must instruct a fresh `start_crawl`, not endless polling."""
+    doc = AGENT.read_text()
+    assert "abandoned" in doc
+
+
+def test_agent_passes_evidence_set_to_verify():
+    """`search` returns `evidence_set` and `verify_citations` requires it —
+    the agent file must document the plumbing and expiry recovery."""
+    doc = AGENT.read_text()
+    assert "evidence_set" in doc
+
+
+def test_agent_verify_contract_is_strict():
+    """The strict-quote + entailment contract must be present (R04)."""
+    doc = AGENT.read_text()
+    assert "non-empty verbatim quote" in doc
+    assert "entails" in doc

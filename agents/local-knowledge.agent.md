@@ -181,6 +181,12 @@ accounts — the entire install is local files + models.
    until `state: done`. Each call returns instantly. Report progress
    (`pages_seen` = files indexed) and surface `warnings` (skipped secrets,
    unreadable files, unsupported types) — disclose, never hide.
+   - `state: abandoned` → this job can never finish — it was superseded by
+     a newer crawl, or its resume was fenced (e.g. a model upgrade changed
+     vector dimensions). Call `start_crawl` again for a fresh job and poll
+     that `job_id` — never keep polling an abandoned one.
+   - Starting `start_crawl` while a crawl is running abandons the older
+     job — if a second crawl was started, poll only the newest `job_id`.
    **Never call `search` while the crawl is running.**
 5. **Answer.** `search` → `get_evidence` for fuller text if needed →
    Evidence items carry two honesty flags: `low_confidence: true`
@@ -189,8 +195,12 @@ accounts — the entire install is local files + models.
    true` means text was capped at 12000 chars — call
    `get_evidence` for the full chunk before quoting.
    synthesize a concise answer mapping every factual sentence to a chunk →
-   `verify_citations` with claim→chunk→quote mappings (every claim needs a
-   non-empty verbatim quote — missing quotes fail) → then **support check**:
+   `verify_citations` with the search response's `evidence_set` + your
+   claim→chunk→quote mappings (every claim needs a
+   non-empty verbatim quote — missing quotes fail; an "unknown or
+   cross-scope evidence set" or "predates the latest published snapshot"
+   error means the set expired — re-run `search` and use the fresh
+   `evidence_set`, never fabricate one) → then **support check**:
    for each surviving claim, verify the quote actually *entails* it —
    provenance ('the words exist') is not entailment ('the words support
    the claim'). Drop or re-cite any claim the quote doesn't support →

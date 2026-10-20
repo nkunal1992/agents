@@ -36,6 +36,8 @@ In Copilot Chat select **local-knowledge**, then:
 
 `connect` takes either a file or a folder path — it detects which. Refresh
 is the same command again; changed files update, deleted files drop out.
+`crawl_step` returning `state: abandoned` means the job was superseded or
+fenced — it can never finish; call `start_crawl` for a fresh job.
 
 Citations are `file://` absolute paths — clickable in most IDEs.
 
@@ -111,6 +113,9 @@ finishing with `E2E BOOTSTRAP OK`. No network or fake server needed.
   `get_evidence(page_id=…)` lists a whole page's chunks in ordinal order —
   how the Failure Hunt boundary probe fetches first/last chunks. Evidence
   items carry `page_id`, `kind`, `ordinal` and `page_version`.
+- `search` returns an `evidence_set` handle — `verify_citations` requires
+  it. Sets expire when a new crawl publishes ("predates the latest
+  published snapshot") — re-run `search` for a fresh one.
 - FTS indexes at most the first 16 whitespace-separated query terms;
   the dense + sparse legs carry longer questions.
 - Evidence scoring below ~0.3 rerank probability is flagged

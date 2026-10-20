@@ -59,6 +59,8 @@ reload once." Then run the steps below end-to-end.
    - `python ✗` → venv was built on <3.11 — rebuild it from step 1
    - `update available` → upgrade via `"$VENV_PY" -m pip install -U
      "sharepoint-knowledge[models]"`, then `prepare-models`, then re-doctor.
+     (Upgrading from ≤0.2.x → scopes rebind to the real account — the first
+     `start_crawl` re-indexes; that is expected, not lost cache.)
    - all green but tools still absent → `register` (step 4) + reload.
      Never re-run install/prepare-models on a healthy setup.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
@@ -167,20 +169,37 @@ python3 -m venv ~/.sharepoint-knowledge/venv
    Call `connect`; report the cache status. If `stale_model` is true, tell
    the user the index needs one rebuild after a model upgrade and run
    `start_crawl` — search refuses on stale indexes.
+   The scope is bound to the signed-in **Entra account + tenant + site** —
+   a security boundary, not a cache bug: a different sign-in sees
+   `cached: false` and re-crawls, because per-account indexes prevent one
+   account's content from leaking into another's answers. If the user
+   reports "my index disappeared" after switching accounts, this is why.
+   (Also expected after upgrading from ≤0.2.x — scopes now bind to the
+   real account, so pre-upgrade caches are unreachable by design.)
 3. **Freshness nudge.** `cached` true → "I found a previously cached index
    of this scope from `<cached_as_of>`. Use it, or refresh first?" — wait.
 4. **Crawl.** `start_crawl` → **background crawl**; poll `crawl_step` every
    few seconds until `done`. Report `pages_seen` and surface `warnings`
-   (skipped secrets, missing download URLs, oversized files). **Never call
-   `search` while running.**
+   (skipped secrets, missing download URLs, oversized files).
+   - `state: abandoned` → this job can never finish — it was superseded by
+     a newer crawl, or its resume was fenced (e.g. a model upgrade changed
+     vector dimensions). Call `start_crawl` again for a fresh job and poll
+     that `job_id` — never keep polling an abandoned one.
+   - Starting `start_crawl` while a crawl is running abandons the older
+     job — if a second crawl was started, poll only the newest `job_id`.
+   **Never call `search` while running.**
 5. **Answer.** `search` → `get_evidence` → synthesize with per-claim
    Evidence items carry two honesty flags: `low_confidence: true`
    means the reranker is weakly confident — answer but say the
    match was partial and suggest a narrower page; `truncated:
    true` means text was capped at 12000 chars — call
    `get_evidence` for the full chunk before quoting.
-   citations → `verify_citations` with claim→chunk→quote mappings (every
-   claim needs a non-empty verbatim quote — missing quotes fail) → then
+   citations → `verify_citations` with the search response's
+   `evidence_set` + your claim→chunk→quote mappings (every
+   claim needs a non-empty verbatim quote — missing quotes fail; an
+   "unknown or cross-scope evidence set" or "predates the latest published
+   snapshot" error means the set expired — re-run `search` and use the
+   fresh `evidence_set`, never fabricate one) → then
    **support check**: for each surviving claim, verify the quote actually
    *entails* it — provenance ('the words exist') is not entailment ('the
    words support the claim'). Drop or re-cite any claim the quote doesn't

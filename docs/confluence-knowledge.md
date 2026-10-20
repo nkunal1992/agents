@@ -183,6 +183,7 @@ before refreshing.
 | `index database was locked` | fixed in v0.1.6. Earlier versions deadlocked themselves on the first crawl (an uncommitted write per connection). Upgrade: `python -m pip install --upgrade "<bundle>\service[models]"`, restart the IDE |
 | `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.2.1: the crawl runs in a background thread server-side and `crawl_step` is an instant progress poll — a request timeout can no longer stall or lose a crawl; progress checkpoints every page and a server restart auto-resumes |
 | `search` says "crawl … still running" | the background crawl hasn't finished; poll `crawl_step` for progress. The index is published only when the whole subtree is crawled |
+| `crawl_step` returns `state: abandoned` | the job was superseded by a newer crawl or its resume was fenced (e.g. model upgrade changed vector dims) — it can never finish; call `start_crawl` for a fresh job |
 | Two `python.exe … confluence_knowledge.server` processes on Windows | expected, not a duplicate: a venv's `Scripts\python.exe` is a launcher that starts the base interpreter as its child. Only one server is running |
 | 403 on some pages | your account lacks permission — those pages are reported as inaccessible |
 | MCP tools not showing | check `.vscode/mcp.json` Start prompt / JetBrains MCP policy; enterprise "MCP servers in Copilot" policy must allow it |
@@ -195,6 +196,9 @@ before refreshing.
   `get_evidence(page_id=…)` lists a whole page's chunks in ordinal order —
   how the Failure Hunt boundary probe fetches first/last chunks. Evidence
   items carry `page_id`, `kind`, `ordinal` and `page_version`.
+- `search` returns an `evidence_set` handle — `verify_citations` requires
+  it. Sets expire when a new crawl publishes ("predates the latest
+  published snapshot") — re-run `search` for a fresh one.
 - FTS indexes at most the first 16 whitespace-separated query terms;
   the dense + sparse legs carry longer questions.
 - Evidence scoring below ~0.3 rerank probability is flagged

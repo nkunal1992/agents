@@ -226,9 +226,16 @@ wheel path for the install step — everything else is identical.
    `state: done`. Each call returns instantly:
    - `note: loading local models` → the crawl is queued while models warm;
      keep polling.
+   - `state: abandoned` → this job can never finish — it was superseded by
+     a newer crawl, or its resume was fenced (e.g. a model upgrade changed
+     vector dimensions). Call `start_crawl` again for a fresh job and poll
+     that `job_id` — never keep polling an abandoned one.
+   - Starting `start_crawl` while a crawl is running abandons the older
+     job — if a second crawl was started, poll only the newest `job_id`.
    - A request timeout or transient error → call `crawl_step` again with the
      same `job_id`; progress is checkpointed after every page and the crawl
-     even resumes itself after a server restart. Give up only after 5
+     even resumes itself after a server restart (unless the resume is
+     fenced — see `abandoned` above). Give up only after 5
      consecutive failures, and then report the error.
    - Tell the user progress as it moves (`pages_seen`, `remaining`).
    - **Never call `search` while the crawl is running** — the index is only
@@ -244,8 +251,12 @@ wheel path for the install step — everything else is identical.
    true` means text was capped at 12000 chars — call
    `get_evidence` for the full chunk before quoting.
    synthesize a concise answer mapping every factual sentence to a chunk →
-   `verify_citations` with claim→chunk→quote mappings (every claim needs a
-   non-empty verbatim quote — missing quotes fail) → then **support check**:
+   `verify_citations` with the search response's `evidence_set` + your
+   claim→chunk→quote mappings (every claim needs a
+   non-empty verbatim quote — missing quotes fail; an "unknown or
+   cross-scope evidence set" or "predates the latest published snapshot"
+   error means the set expired — re-run `search` and use the fresh
+   `evidence_set`, never fabricate one) → then **support check**:
    for each surviving claim, verify the quote actually *entails* it —
    provenance ('the words exist') is not entailment ('the words support
    the claim'). Drop or re-cite any claim the quote doesn't support →
