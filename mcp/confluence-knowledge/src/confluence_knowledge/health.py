@@ -76,11 +76,22 @@ def health_checks(home: Path, workdir: Path, server_id: str, cli: str,
     checks = []
 
     ok, missing = _dep_ok()
+    # repair = reinstall the INSTALLED version — never -U (a repair must
+    # not silently upgrade into an unverified release)
+    inst = None
+    if not ok:
+        try:
+            from importlib.metadata import version as _v
+            dist = cli.replace("_", "-")
+            inst = _v(dist)
+        except Exception:  # noqa: BLE001 — can't pin what isn't installed
+            inst = None
     checks.append({"flag": "deps", "ok": ok,
                    "detail": "missing: " + ", ".join(missing) if missing
                              else "all importable",
-                   "remediation": None if ok
-                                else f"pip install -U {cli}[models]"})
+                   "remediation": None if ok else (
+                       f'pip install "{cli}[models]=={inst}"' if inst
+                       else f"pip install {cli}[models]")})
 
     checks += _models_checks(home, cli)
 
