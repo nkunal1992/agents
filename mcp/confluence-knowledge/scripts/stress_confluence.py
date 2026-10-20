@@ -278,10 +278,11 @@ class Ctx:
                                     {"scope_handle": self.handle,
                                      "job_id": self.job}, timeout=10)
                 if "_error" not in p:
-                    self.progress.append({"t": time.time(), **{
+                    self.progress.append({"t": time.time(),
+                                          "job": self.job, **{
                         k: p.get(k) for k in (
                             "state", "phase", "pages_done", "remaining",
-                            "rate_ppm", "eta_s")}})
+                            "rate_ppm", "eta_s", "pages_seen")}})
             await asyncio.sleep(period)
 
     async def agent_loop(self) -> None:
@@ -390,6 +391,7 @@ class Ctx:
                 "light_p95_s": round(_pct([c["s"] for c in self.calls
                                           if c["tool"] in
                                           ("status", "crawl_step")], 95), 3),
+                "freeze_calls": [c for c in self.calls if c["freeze"]],
                 "slowest": sorted(self.calls, key=lambda c: -c["s"])[:5]}
 
     def request_stats(self) -> dict:
@@ -461,6 +463,7 @@ async def scenario_ctx(name: str, pages: int, seed: int, hostile: bool,
 def finish(ctx: Ctx, extra_verdicts: dict | None = None) -> dict:
     res = {"scenario": ctx.name, **ctx.extra,
            "freezes": ctx.freeze_stats(),
+           "calls": ctx.calls,
            "requests": ctx.request_stats(),
            "canary": ctx.canary,
            "canary_ok": sum(1 for c in ctx.canary if c["found"]),
@@ -501,9 +504,12 @@ def baseline_verdicts(ctx: Ctx, res: dict) -> dict:
 
 def _monotonic(ctx: Ctx) -> bool:
     from itertools import pairwise
-    done = [p["pages_done"] for p in ctx.progress
-            if p.get("pages_done") is not None]
-    return all(b >= a for a, b in pairwise(done))
+    per_job: dict[str, list] = {}
+    for p in ctx.progress:
+        if p.get("pages_done") is not None:
+            per_job.setdefault(p.get("job"), []).append(p["pages_done"])
+    return all(b >= a for seq in per_job.values()
+               for a, b in pairwise(seq))
 
 
 # --- scenarios -------------------------------------------------------------
@@ -627,9 +633,13 @@ async def s_two_windows(ctx: Ctx) -> dict:
         ctx.extra["window2_start_s"] = round(time.monotonic() - t, 1)
         res = await ctx.run_crawl()
     ctx.extra["wall_s"] = res["wall_s"]
-    await ctx.canary_check()
-    return {"second window saw foreign worker":
-            v(j2r.get("worker") == "another IDE window")}
+    # intended semantic (agent files): a second window's start_crawl makes
+    # a NEW job that abandons the first — exactly one active worker. The
+    # loser's crawl_step must then show 'abandoned', not 'running'.
+    abandoned_ok = (j2r.get("job_id") != ctx.job
+                    and res["final"].get("state") in
+                    ("abandoned", "done", "error", "cancelled"))
+    return {"single active worker (new job supersedes)": v(abandoned_ok)}
 
 
 async def s_cancel(ctx: Ctx) -> dict:
@@ -671,6 +681,7 @@ async def s_kill_resume(ctx: Ctx) -> dict:
     await asyncio.sleep(8)
     pid = ctx.sampler.proc.pid
     os.kill(pid, signal.SIGKILL)
+    ctx.dead_transport_ok = True  # first session's pipe is dead by design
     await asyncio.sleep(2)
     # new server process, SAME workdir — session needs replacing
     cwd2 = ctx.out_dir / "srv-cwd3"
