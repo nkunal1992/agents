@@ -11,6 +11,7 @@ import hashlib
 import json
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -181,7 +182,7 @@ class Crawler:
             return {"job_id": job_id, "state": job["state"],
                     "remaining": len(job["queue"]), "errors": job["errors"]}
 
-        queue: list[str] = job["queue"]
+        queue: deque[str] = deque(job["queue"])
         errors: list[str] = job["errors"]
         # pages that fail with deny/gone errors are meant to drop out of the
         # snapshot; transient failures keep their previously-indexed content.
@@ -212,12 +213,19 @@ class Crawler:
         visited: set[str] = set()
 
         processed = 0
+        # checkpoints are throttled — the full seen/levels/queue JSON used
+        # to be rewritten per page, which is O(n²) writes on a big tree.
+        # A crash between checkpoints replays ≤ a few seconds of pages;
+        # upsert_page is idempotent so re-staging is safe.
+        last_ckpt, last_ckpt_n = time.monotonic(), 0
         while queue and (batch is None or processed < batch) and (
                 deadline is None or processed == 0 or time.monotonic() < deadline):
-            if processed:
-                self._checkpoint(job_id, queue, errors, seen, levels,
+            if processed and (time.monotonic() - last_ckpt >= 5.0
+                              or processed - last_ckpt_n >= 50):
+                self._checkpoint(job_id, list(queue), errors, seen, levels,
                                  keep_failed)
-            entry = queue.pop(0)          # "page:123" or "folder:456"
+                last_ckpt, last_ckpt_n = time.monotonic(), processed
+            entry = queue.popleft()       # "page:123" or "folder:456"
             is_folder = entry.startswith("folder:")
             pid = entry.split(":", 1)[1] if ":" in entry else entry
             if pid in visited or pid in seen:
@@ -273,7 +281,8 @@ class Crawler:
                     levels.setdefault(cid, levels.get(pid, 0) + 1)
                     queue.append(f"{ctype}:{cid}")
 
-        self._checkpoint(job_id, queue, errors, seen, levels, keep_failed)
+        self._checkpoint(job_id, list(queue), errors, seen, levels,
+                         keep_failed)
 
         # fence: a newer crawl may have superseded this job while a fetch was
         # in flight — never let an abandoned job publish or resurrect itself
@@ -284,7 +293,7 @@ class Crawler:
                     "remaining": len(queue), "pages_seen": len(seen),
                     "errors": errors}
         if queue:
-            self.index.save_job(job_id, "running", queue, errors)
+            self.index.save_job(job_id, "running", list(queue), errors)
             state = "running"
         else:
             self.index.publish(seen | keep_failed, job_id=job_id)

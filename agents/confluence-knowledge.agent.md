@@ -240,11 +240,16 @@ wheel path for the install step — everything else is identical.
    - Starting `start_crawl` while a crawl is running abandons the older
      job — if a second crawl was started, poll only the newest `job_id`.
    - A request timeout or transient error → call `crawl_step` again with the
-     same `job_id`; progress is checkpointed after every page and the crawl
+     same `job_id`; progress is checkpointed continuously and the crawl
      even resumes itself after a server restart (unless the resume is
      fenced — see `abandoned` above). Give up only after 5
      consecutive failures, and then report the error.
    - Tell the user progress as it moves (`pages_seen`, `remaining`).
+   - Models load on first `connect` and unload after ~10 idle minutes — a
+     `loading` note after a pause is expected; call again. Never start
+     parallel crawls of the same root (a new `start_crawl` supersedes the
+     old one) and never spawn extra embedding processes — every Copilot
+     agent shares this same local server.
    - **Never call `search` while the crawl is running** — the index is only
      published when the crawl finishes.
    When done, report pages indexed + any `errors` (inaccessible pages are

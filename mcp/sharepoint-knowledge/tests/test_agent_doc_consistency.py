@@ -71,6 +71,13 @@ def test_agent_verify_contract_is_strict():
     assert "entails" in doc
 
 
+def test_agent_covers_idle_model_unload():
+    """Models unload after ~10 idle min — a `loading` note after a pause
+    is normal; the agent must say so (#159)."""
+    doc = AGENT.read_text()
+    assert "idle" in doc and "load" in doc
+
+
 def test_agent_documents_per_account_index():
     """Scopes bind to tenant + signed-in account + root (R06) — the agent
     must explain that a different sign-in re-crawls by design."""

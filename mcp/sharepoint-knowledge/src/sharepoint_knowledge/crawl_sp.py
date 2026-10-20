@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
+from collections import deque
 from urllib.parse import urlparse
 
 from confluence_knowledge.client import AccessError, ConfluenceClient
@@ -209,7 +211,7 @@ class SPCrawler:
             return {"job_id": job_id, "state": job["state"],
                     "remaining": len(job["queue"]), "errors": job["errors"]}
 
-        queue: list[str] = job["queue"]
+        queue: deque[str] = deque(job["queue"])
         errors: list[str] = job["errors"]
         # deny/gone errors drop the item from the snapshot; transient
         # failures keep the previously-indexed content — durable across
@@ -236,15 +238,19 @@ class SPCrawler:
         warns: list[str] = json.loads(warns_raw) if warns_raw else []
 
         processed = 0
+        # throttled checkpoints — full state used to be rewritten per item
+        last_ckpt, last_ckpt_n = time.monotonic(), 0
         while queue:
             if len(seen) >= MAX_FILES:
                 errors.append(f"file cap reached ({MAX_FILES}) — remaining skipped")
                 queue.clear()
                 break
-            if processed:
-                self._checkpoint(job_id, queue, errors, seen, levels, warns,
-                                 keep_failed)
-            entry = queue.pop(0)
+            if processed and (time.monotonic() - last_ckpt >= 5.0
+                              or processed - last_ckpt_n >= 50):
+                self._checkpoint(job_id, list(queue), errors, seen, levels,
+                                 warns, keep_failed)
+                last_ckpt, last_ckpt_n = time.monotonic(), processed
+            entry = queue.popleft()
             processed += 1
             try:
                 if entry.startswith("site:"):
@@ -330,7 +336,7 @@ class SPCrawler:
                         "errors": errors, "warnings": warns}
             seen.add(pid)
 
-        self._checkpoint(job_id, queue, errors, seen, levels, warns,
+        self._checkpoint(job_id, list(queue), errors, seen, levels, warns,
                          keep_failed)
         # fence: an abandoned/superseded job must never publish or resurrect
         current = self.index.job(job_id)
@@ -343,7 +349,7 @@ class SPCrawler:
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
-                            queue, errors)
+                            list(queue), errors)
         return {"job_id": job_id,
                 "state": "done" if not queue else "running",
                 "remaining": len(queue), "pages_seen": len(seen),

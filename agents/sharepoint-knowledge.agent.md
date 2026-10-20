@@ -197,6 +197,9 @@ python3 -m venv ~/.sharepoint-knowledge/venv
      that `job_id` — never keep polling an abandoned one.
    - Starting `start_crawl` while a crawl is running abandons the older
      job — if a second crawl was started, poll only the newest `job_id`.
+   - Models load on first `connect` and unload after ~10 idle minutes — a
+     `loading` note after a pause is expected; call again. Never start
+     parallel crawls of the same root.
    **Never call `search` while running.**
 5. **Answer.** `search` → `get_evidence` → synthesize with per-claim
    Evidence items carry two honesty flags: `low_confidence: true`

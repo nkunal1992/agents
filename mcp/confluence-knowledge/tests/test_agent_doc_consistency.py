@@ -73,6 +73,13 @@ def test_agent_verify_contract_is_strict():
     assert "entails" in doc
 
 
+def test_agent_covers_idle_model_unload():
+    """Models unload after ~10 idle min — the agent must treat a `loading`
+    note after a pause as normal (#159)."""
+    doc = AGENT.read_text()
+    assert "idle" in doc and "load" in doc
+
+
 def test_agent_describes_safe_update():
     """`update` is a safe flow: soaked releases only, self-test after
     install, automatic rollback. The agent must relay that contract plus

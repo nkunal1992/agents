@@ -316,14 +316,22 @@ jobs:
           python-version: "3.13"
       - name: Wait for the release to be installable
         shell: bash
+        # poll what pip actually sees — the simple index lags the JSON API
+        # by minutes after upload, so a 200 from /pypi/<pkg>/<ver>/json is
+        # necessary but not sufficient (0.7.0rc1 verify raced this)
         run: |
           for i in $(seq 1 60); do
+            if pip download --no-deps --no-cache-dir \
+                "${{ needs.validate.outputs.pkg }}==${{ needs.validate.outputs.version }}" \
+                -d /tmp/probe >/dev/null 2>&1; then
+              echo "served after $((i-1)) retries"; exit 0
+            fi
             code=$(curl -s -o /dev/null -w '%{http_code}' \
               "https://pypi.org/pypi/${{ needs.validate.outputs.pkg }}/${{ needs.validate.outputs.version }}/json")
-            [ "$code" = "200" ] && exit 0
+            [ "$code" != "200" ] && [ "$code" != "404" ] && echo "note: JSON API returned $code"
             sleep 10
           done
-          echo "release not on PyPI after 10 min" && exit 1
+          echo "release not installable after 10 min" && exit 1
       - name: Install engine for model warmup
         run: pip install -e './mcp/confluence-knowledge[models]'
       - name: Cache model artifacts

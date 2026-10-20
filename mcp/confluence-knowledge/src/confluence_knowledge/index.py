@@ -67,6 +67,30 @@ class StaleJobError(RuntimeError):
     only a 'running' job may stage pages (R13)."""
 
 
+class _SearchCache:
+    """In-memory retrieval structures for one published snapshot.
+
+    Built once per snapshot epoch: the dense matrix (float16 to halve the
+    footprint), an inverted sparse index (term → posting rows+weights),
+    the active-id set for FTS filtering, BM25 stats, and the page map.
+    Without it every search query re-read the whole scope from SQLite —
+    hundreds of MB of transient allocations per question on big scopes.
+    """
+    __slots__ = ("dense", "df", "epoch", "ids", "ids_set", "n_docs",
+                 "pages", "row", "sparse_idx")
+
+    def __init__(self, epoch):
+        self.epoch = epoch
+        self.ids: list[str] = []
+        self.ids_set: set[str] = set()
+        self.row: dict[str, int] = {}
+        self.dense = np.zeros((0, 0), dtype=np.float16)
+        self.sparse_idx: dict[int, tuple] = {}
+        self.df: dict[int, int] = {}
+        self.n_docs = 0
+        self.pages: dict[str, dict] = {}
+
+
 def _batches(ids: list[str], size: int = 5000):
     for i in range(0, len(ids), size):
         yield ids[i:i + size]
@@ -92,6 +116,7 @@ class Index:
                 f"index unreadable at {path} — delete it and re-crawl "
                 "(or run `clean` to drop every index)") from e
         self.lock = threading.RLock()
+        self._cache: _SearchCache | None = None
         with self.lock:
             self.db.executescript(SCHEMA)
             self.db.execute(
@@ -299,6 +324,7 @@ class Index:
                 " OR key LIKE 'levels:%' OR key LIKE 'warns:%'"
                 " OR key LIKE 'keep:%' OR key LIKE 'build:%'")
             self.db.commit()
+            self._cache = None  # wiped content must not answer queries
 
     def set_model_id(self, model_id: str) -> None:
         with self.lock, self.db:
@@ -412,6 +438,95 @@ class Index:
                     for r in self.db.execute(
                         "SELECT chunk_id,page_id,heading,kind,ordinal,text "
                         "FROM chunks WHERE active=1")]
+
+    def chunks_by_ids(self, chunk_ids: list[str]) -> list[dict]:
+        """Full chunk rows for specific ids, in requested order."""
+        if not chunk_ids:
+            return []
+        out: dict[str, dict] = {}
+        with self.lock:
+            step = self._var_batch()
+            for off in range(0, len(chunk_ids), step):
+                part = chunk_ids[off:off + step]
+                q = ",".join("?" * len(part))
+                for r in self.db.execute(
+                        f"SELECT chunk_id,page_id,heading,kind,ordinal,text "
+                        f"FROM chunks WHERE chunk_id IN ({q})", part):
+                    out[r[0]] = {"chunk_id": r[0], "page_id": r[1],
+                                 "heading": r[2], "kind": r[3],
+                                 "ordinal": r[4], "text": r[5]}
+        return [out[c] for c in chunk_ids if c in out]
+
+    def page_chunks(self, page_id: str) -> list[dict]:
+        """A page's active chunks in ordinal order."""
+        with self.lock:
+            return [{"chunk_id": r[0], "page_id": r[1], "heading": r[2],
+                     "kind": r[3], "ordinal": r[4], "text": r[5]}
+                    for r in self.db.execute(
+                        "SELECT chunk_id,page_id,heading,kind,ordinal,text "
+                        "FROM chunks WHERE page_id=? AND active=1 "
+                        "ORDER BY ordinal", (page_id,))]
+
+    def search_cache(self) -> _SearchCache:
+        """Retrieval structures for the current snapshot, rebuilt only
+        when the epoch advanced. Held under self.lock: build cost is a
+        one-time per-snapshot scan (~seconds at 30k chunks) and blocking
+        writers briefly beats serving a torn half-published cache."""
+        epoch = self.snapshot_epoch()
+        with self.lock:
+            if self._cache is not None and self._cache.epoch == epoch:
+                return self._cache
+            self._cache = self._build_search_cache(epoch)
+            return self._cache
+
+    def drop_search_cache(self) -> None:
+        with self.lock:
+            self._cache = None
+
+    def _build_search_cache(self, epoch: int) -> _SearchCache:
+        c = _SearchCache(epoch)
+        rows = self.db.execute(
+            "SELECT chunk_id,page_id FROM chunks WHERE active=1 "
+            "ORDER BY rowid").fetchall()
+        c.ids = [r[0] for r in rows]
+        c.ids_set = set(c.ids)
+        c.row = {cid: i for i, cid in enumerate(c.ids)}
+        # dense: float16 halves RSS vs float32; search-time matmul runs
+        # blocked in float32. Mismatched-dim blobs (model swap leftovers)
+        # stay zero → score 0, mirroring _cosine's skip.
+        vecs = self.vectors_for(c.ids)
+        if vecs:
+            dim = next(iter(vecs.values())).shape[0]
+            dense = np.zeros((len(c.ids), dim), dtype=np.float32)
+            for cid, v in vecs.items():
+                if v.shape[0] == dim:
+                    dense[c.row[cid]] = v
+            n = np.linalg.norm(dense, axis=1, keepdims=True)
+            dense = dense / (n + 1e-9)
+            c.dense = dense.astype(np.float16)
+        # inverted sparse index: term → (row indices, weights)
+        postings: dict[int, tuple[list[int], list[float]]] = {}
+        for cid, blob in self.db.execute(
+                "SELECT s.chunk_id,s.payload FROM sparse_vectors s "
+                "JOIN chunks ch ON ch.chunk_id=s.chunk_id "
+                "WHERE ch.active=1"):
+            i = c.row[cid]
+            k = len(blob) // 12
+            idx_arr = np.frombuffer(blob[:8 * k], dtype=np.int64)
+            val_arr = np.frombuffer(blob[8 * k:], dtype=np.float32)
+            for t, w in zip(idx_arr.tolist(), val_arr.tolist()):
+                ent = postings.get(t)
+                if ent is None:
+                    postings[t] = ([i], [w])
+                else:
+                    ent[0].append(i)
+                    ent[1].append(w)
+        c.sparse_idx = {t: (np.asarray(rs, dtype=np.int32),
+                            np.asarray(ws, dtype=np.float32))
+                        for t, (rs, ws) in postings.items()}
+        c.df, c.n_docs = self.term_stats()
+        c.pages = self.active_pages()
+        return c
 
     def fts_search(self, query: str, limit: int = 30,
                    active: set[str] | None = None) -> list[tuple[str, float]]:

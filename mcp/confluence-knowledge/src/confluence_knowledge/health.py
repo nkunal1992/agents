@@ -40,6 +40,52 @@ def _models_checks(home: Path, cli: str) -> list[dict]:
     return out
 
 
+_SERVER_MARKERS = ("confluence_knowledge.server",
+                   "local_knowledge.server_local",
+                   "sharepoint_knowledge.server_sp")
+
+
+def _server_process_count() -> int:
+    """How many knowledge MCP servers are running — every IDE window
+    spawns its own copy of each installed service (~2 GB each once the
+    models load), so a count ≫ 3 explains memory pressure. -1 = unknown."""
+    import subprocess
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["wmic", "process", "get", "commandline"],
+                capture_output=True, text=True, timeout=15,
+                check=False).stdout
+        else:
+            out = subprocess.run(
+                ["ps", "-axo", "command"],
+                capture_output=True, text=True, timeout=15,
+                check=False).stdout
+        return sum(1 for line in out.splitlines()
+                   if any(m in line for m in _SERVER_MARKERS))
+    except Exception:  # noqa: BLE001 — detection only, never fatal
+        return -1
+
+
+def _resources_check(cli: str) -> dict:
+    from .resources import limits
+    lim = limits()
+    n = _server_process_count()
+    detail = (f"threads={lim.threads} batch_tokens={lim.batch_tokens} "
+              f"max_batch={lim.max_batch} "
+              f"idle_unload_s={lim.idle_unload_s:.0f} "
+              f"fetch_concurrency={lim.fetch_concurrency}"
+              + (f"; {n} knowledge server process(es) running"
+                 if n >= 0 else "; process count unavailable"))
+    too_many = n > 4
+    return {"flag": "resources", "ok": not too_many,
+            "detail": detail,
+            "remediation": (None if not too_many else
+                            "each IDE window starts its own knowledge "
+                            "servers — close unused windows (idle servers "
+                            "unload their models after ~10 min anyway)")}
+
+
 def _index_checks(index_root: Path) -> list[dict]:
     """Per-scope index: integrity + stale-model marker. Detection only."""
     from .index import Index
@@ -132,4 +178,6 @@ def health_checks(home: Path, workdir: Path, server_id: str, cli: str,
     checks.append({"flag": "proxy", "ok": True,
                    "detail": proxy or "none set",
                    "remediation": None})
+
+    checks.append(_resources_check(cli))
     return checks

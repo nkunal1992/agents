@@ -16,6 +16,7 @@ Backend layout (all under <home>/models/):
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 from pathlib import Path
@@ -23,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from .index import Index
+from .resources import limits, plan_batches
 from .settings import SetupError
 
 EMBED_REPO = "Xenova/bge-m3"                            # Apache-2.0/MIT
@@ -80,10 +82,29 @@ def _ort_session(onnx_path: Path, cli: str):
 
 
 def _ort_opts(ort):
+    """Session options for a respectful background process.
+
+    Threads are capped at ~cores/4 per session (default) — two ORT
+    sessions plus fastembed per server process, times one process per
+    IDE window, used to oversubscribe every core. Spinning is disabled
+    (ORT workers otherwise busy-wait between runs: audible fan), and the
+    CPU memory arena is off so a transient peak isn't held for the
+    process lifetime."""
     so = ort.SessionOptions()
-    so.intra_op_num_threads = max(1, (os.cpu_count() or 4) // 2)
+    so.intra_op_num_threads = limits().threads
     so.inter_op_num_threads = 1
     so.log_severity_level = 3  # errors only
+    for key in ("session.intra_op.allow_spinning",
+                "session.inter_op.allow_spinning"):
+        try:
+            so.add_session_config_entry(key, "0")
+        except Exception:  # noqa: BLE001,S110 — older ORT lacks the key
+            pass
+    try:
+        so.enable_cpu_mem_arena = False
+        so.enable_mem_pattern = False
+    except Exception:  # noqa: BLE001,S110
+        pass
     return so
 
 
@@ -100,7 +121,7 @@ class LocalEmbedder:
                         [EMBED_ONNX, "tokenizer.json"])
         self._sess = _ort_session(dest / EMBED_ONNX, cli)
         self._tok = _tokenizer(dest)
-        self._tok.enable_padding()
+        self._tok.no_padding()  # padding is applied per micro-batch
         self._tok.enable_truncation(EMBED_MAX_TOKENS)
 
     def count_tokens(self, text: str) -> int:
@@ -111,15 +132,34 @@ class LocalEmbedder:
         return len(self._tok.encode(text, add_special_tokens=False).ids)
 
     def embed(self, texts: list[str]) -> np.ndarray:
+        """Length-sorted micro-batches — a batch's attention cost is
+        B × Lmax², so an unbounded call padded to one long outlier could
+        allocate gigabytes per layer. `batch_tokens`/`max_batch` bound
+        every run; results are numerically identical per item."""
+        if not texts:
+            return np.zeros((0, 1024), dtype=np.float32)
         enc = self._tok.encode_batch(texts, add_special_tokens=True)
-        ids = np.asarray([e.ids for e in enc], dtype=np.int64)
-        mask = np.asarray([e.attention_mask for e in enc], dtype=np.int64)
-        out = self._sess.run(
-            ["sentence_embedding"],
-            {"input_ids": ids, "attention_mask": mask})[0]
-        v = np.asarray(out, dtype=np.float32)
-        n = np.linalg.norm(v, axis=1, keepdims=True)
-        return v / (n + 1e-9)  # defensive normalize — quantized graphs drift
+        lim = limits()
+        out = None
+        for batch in plan_batches([len(e.ids) for e in enc],
+                                  lim.batch_tokens, lim.max_batch):
+            maxlen = max(len(enc[i].ids) for i in batch)
+            ids = np.zeros((len(batch), maxlen), dtype=np.int64)
+            mask = np.zeros((len(batch), maxlen), dtype=np.int64)
+            for j, i in enumerate(batch):
+                ids[j, :len(enc[i].ids)] = enc[i].ids
+                mask[j, :len(enc[i].attention_mask)] = \
+                    enc[i].attention_mask
+            v = np.asarray(self._sess.run(
+                ["sentence_embedding"],
+                {"input_ids": ids, "attention_mask": mask})[0],
+                dtype=np.float32)
+            if out is None:
+                out = np.empty((len(enc), v.shape[1]), dtype=np.float32)
+            for j, i in enumerate(batch):
+                out[i] = v[j]
+        n = np.linalg.norm(out, axis=1, keepdims=True)
+        return out / (n + 1e-9)  # defensive normalize — quantized graphs drift
 
 
 class LocalSparseEmbedder:
@@ -140,7 +180,8 @@ class LocalSparseEmbedder:
         dest = _models_dir(home) / "fastembed"
         try:
             self._m = SparseTextEmbedding(SPARSE_MODEL, cache_dir=str(dest),
-                                          local_files_only=True)
+                                          local_files_only=True,
+                                          threads=limits().threads)
         except Exception as e:
             raise SetupError(
                 f"sparse model '{SPARSE_MODEL}' not prepared — run "
@@ -150,7 +191,7 @@ class LocalSparseEmbedder:
         """One {token_idx: weight} dict per input — BM25 tf/saturation part
         (IDF is applied at query time from the index's term_stats)."""
         out = []
-        for emb in self._m.embed(texts):
+        for emb in self._m.embed(texts, batch_size=limits().max_batch):
             out.append(dict(zip(emb.indices.tolist(),
                                 emb.values.tolist())))
         return out
@@ -158,7 +199,8 @@ class LocalSparseEmbedder:
     def query_embed(self, texts: list[str]) -> list[dict[int, float]]:
         """Query-side encoding — distinct semantics from document embed."""
         out = []
-        for emb in self._m.query_embed(texts):
+        for emb in self._m.query_embed(texts,
+                                       batch_size=limits().max_batch):
             out.append(dict(zip(emb.indices.tolist(),
                                 emb.values.tolist())))
         return out
@@ -186,18 +228,29 @@ class LocalReranker:
         self.repo = repo
 
     def score(self, query: str, docs: list[str]) -> np.ndarray:
+        """Micro-batched like the embedder — 25 pairs padded to a
+        2048-token doc would otherwise allocate ~7 GB in one run."""
+        if not docs:
+            return np.zeros(0, dtype=np.float32)
         pairs = [[query, d] for d in docs]
         enc = self._tok.encode_batch(pairs, add_special_tokens=True)
-        maxlen = max(len(e.ids) for e in enc)
-        ids = np.zeros((len(enc), maxlen), dtype=np.int64)
-        mask = np.zeros((len(enc), maxlen), dtype=np.int64)
-        for i, e in enumerate(enc):
-            ids[i, :len(e.ids)] = e.ids
-            mask[i, :len(e.attention_mask)] = e.attention_mask
-        logits = self._sess.run(
-            ["logits"], {"input_ids": ids, "attention_mask": mask})[0]
-        s = logits.reshape(-1).astype(np.float32)
-        return 1.0 / (1.0 + np.exp(-s))  # sigmoid → 0..1 relevance
+        lim = limits()
+        out = np.empty(len(enc), dtype=np.float32)
+        for batch in plan_batches([len(e.ids) for e in enc],
+                                  lim.batch_tokens, lim.max_batch):
+            maxlen = max(len(enc[i].ids) for i in batch)
+            ids = np.zeros((len(batch), maxlen), dtype=np.int64)
+            mask = np.zeros((len(batch), maxlen), dtype=np.int64)
+            for j, i in enumerate(batch):
+                ids[j, :len(enc[i].ids)] = enc[i].ids
+                mask[j, :len(enc[i].attention_mask)] = \
+                    enc[i].attention_mask
+            logits = self._sess.run(
+                ["logits"], {"input_ids": ids, "attention_mask": mask})[0]
+            s = logits.reshape(-1).astype(np.float32)
+            for j, i in enumerate(batch):
+                out[i] = 1.0 / (1.0 + np.exp(-s[j]))
+        return out  # sigmoid → 0..1 relevance
 
 
 def prepare_models(home: Path) -> list[str]:
@@ -348,60 +401,82 @@ def _sparse_rank(q: dict[int, float], docs: dict[str, dict[int, float]],
     e.g. an index last published before stats existed — falls back to plain
     tf weighting. Documents sharing no term with the query never rank.
     """
-    import math
     if not docs or not q:
         return []
 
-    def idf(t: int) -> float:
-        if not df or not n_docs:
-            return 1.0
-        d = df.get(t, 0)
-        return math.log((n_docs - d + 0.5) / (d + 0.5) + 1.0)
-
     scores = []
     for cid, d in docs.items():
-        s = sum(q[i] * w * idf(i) for i, w in d.items() if i in q)
+        s = sum(q[i] * w * _bm25_idf(df, n_docs, i)
+                for i, w in d.items() if i in q)
         if s > 0:
             scores.append((cid, s))
     scores.sort(key=lambda t: -t[1])
     return scores
 
 
+def _bm25_idf(df: dict[int, int] | None, n_docs: int, t: int) -> float:
+    """Robertson idf — shared by _sparse_rank and the cached sparse leg."""
+    if not df or not n_docs:
+        return 1.0
+    d = df.get(t, 0)
+    return math.log((n_docs - d + 0.5) / (d + 0.5) + 1.0)
+
+
 def retrieve(index: Index, query: str, embedder: LocalEmbedder,
              reranker: LocalReranker | None = None,
              sparse: LocalSparseEmbedder | None = None) -> list[dict]:
-    """Dense + sparse + FTS → RRF fuse → rerank → bounded evidence."""
-    chunks = index.active_chunks()
-    if not chunks:
+    """Dense + sparse + FTS → RRF fuse → rerank → bounded evidence.
+
+    Ranks over the index's per-snapshot search cache (dense matrix +
+    inverted sparse index + id set) — a query costs one matmul and one
+    sparse accumulate, not a whole-scope reload from SQLite.
+    """
+    cache = index.search_cache()
+    if not cache.ids:
         return []
-    if len(chunks) > MAX_SEARCHABLE_CHUNKS:
-        from .settings import SetupError
+    if len(cache.ids) > MAX_SEARCHABLE_CHUNKS:
         raise SetupError(
-            f"index holds {len(chunks):,} chunks — searching the whole scope "
-            "at once is unsupported. Connect a narrower scope (or re-index "
-            "with a smaller root).")
+            f"index holds {len(cache.ids):,} chunks — searching the whole "
+            "scope at once is unsupported. Connect a narrower scope (or "
+            "re-index with a smaller root).")
 
-    # dense leg
-    qvec = embedder.embed([query])[0]
-    vecs = index.vectors_for([c["chunk_id"] for c in chunks])
-    dense_rank = [cid for cid, _ in _cosine(qvec, vecs)][:TOP_K_RETRIEVE]
+    # dense leg — blocked float32 matmul over the float16 matrix, so a
+    # query touches ~61 MB instead of re-decoding every vector blob
+    dense_rank: list[str] = []
+    qvec = embedder.embed([query])[0].astype(np.float32)
+    if cache.dense.shape[0] and cache.dense.shape[1] == qvec.shape[0]:
+        q = qvec / (np.linalg.norm(qvec) + 1e-9)
+        scores = np.empty(len(cache.ids), dtype=np.float32)
+        for off in range(0, len(cache.ids), 4096):
+            scores[off:off + 4096] = \
+                cache.dense[off:off + 4096].astype(np.float32) @ q
+        k = min(TOP_K_RETRIEVE, len(cache.ids))
+        top = np.argpartition(-scores, k - 1)[:k]
+        top = top[np.argsort(-scores[top])]
+        dense_rank = [cache.ids[i] for i in top]
 
-    # keyword leg — reuse the fetched set; fts_search would re-load it
-    active_ids = {c["chunk_id"] for c in chunks}
+    # keyword leg — FTS filtered by the cached active-id set
     fts_rank = [cid for cid, _ in
-                index.fts_search(query, active=active_ids)][:TOP_K_RETRIEVE]
+                index.fts_search(query, active=cache.ids_set)
+                ][:TOP_K_RETRIEVE]
 
-    # sparse leg (optional — BM25: tf-saturated doc weights × corpus idf)
+    # sparse leg — accumulate postings only for the query's terms
     sparse_rank: list[str] = []
     if sparse is not None:
         q_sparse = (sparse.query_embed([query])[0]
                     if hasattr(sparse, "query_embed")
                     else sparse.embed([query])[0])
-        doc_sparse = index.sparse_for([c["chunk_id"] for c in chunks])
-        df, n_docs = index.term_stats()
-        sparse_rank = [cid for cid, _ in
-                       _sparse_rank(q_sparse, doc_sparse, df, n_docs)
-                       ][:TOP_K_RETRIEVE]
+        sscores = np.zeros(len(cache.ids), dtype=np.float32)
+        for t, qw in q_sparse.items():
+            ent = cache.sparse_idx.get(t)
+            if ent is not None:
+                rows, wts = ent
+                sscores[rows] += np.float32(
+                    qw * _bm25_idf(cache.df, cache.n_docs, t)) * wts
+        nz = np.flatnonzero(sscores)
+        if nz.size:
+            top = nz[np.argsort(-sscores[nz])][:TOP_K_RETRIEVE]
+            sparse_rank = [cache.ids[i] for i in top]
 
     # reciprocal-rank fusion over 2-3 legs
     rrf: dict[str, float] = {}
@@ -409,7 +484,8 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
         for rank, cid in enumerate(leg):
             rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (60 + rank + 1)
     fused = sorted(rrf, key=lambda c: -rrf[c])[:TOP_K_RETRIEVE]
-    by_id = {c["chunk_id"]: c for c in chunks}
+    # chunk text is fetched only for fused candidates
+    by_id = {c["chunk_id"]: c for c in index.chunks_by_ids(fused)}
     candidates = [by_id[c] for c in fused if c in by_id]
 
     if reranker is not None and candidates:
@@ -431,7 +507,7 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     else:
         evidence = [dict(c, rerank_score=None) for c in candidates[:TOP_K_EVIDENCE]]
 
-    pages = index.active_pages()
+    pages = cache.pages
     for e in evidence:
         p = pages.get(e["page_id"], {})
         e["page_title"], e["page_url"], e["level"], e["page_version"] = (

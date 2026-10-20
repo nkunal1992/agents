@@ -15,13 +15,12 @@ import uuid
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
 from confluence_knowledge.index import Index
+from confluence_knowledge.models import ModelPool
+from confluence_knowledge.resources import lower_priority
 from confluence_knowledge.retrieval import (
     MODEL_MARKER as EMBED_MODEL_ID,
 )
 from confluence_knowledge.retrieval import (
-    LocalEmbedder,
-    LocalReranker,
-    LocalSparseEmbedder,
     check_citations,
     retrieve,
 )
@@ -37,10 +36,10 @@ _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}
 _feedback: dict[str, FeedbackStore] = {}
+# module globals kept for test injection; the pool owns real model objects
 _EMBEDDER = None
 _RERANKER = None
 _SPARSE = None
-_model_lock = threading.Lock()
 _models_ready = threading.Event()
 _warm_lock = threading.Lock()
 _warm_started = False
@@ -63,27 +62,43 @@ def _feedback_for(scope_key: str) -> FeedbackStore:
     return st
 
 
+def _any_worker_alive() -> bool:
+    return any(t.is_alive() for t in list(_workers.values()))
+
+
+def _on_models_unloaded() -> None:
+    global _EMBEDDER, _RERANKER, _SPARSE, _warm_started
+    _EMBEDDER = _RERANKER = _SPARSE = None
+    with _warm_lock:
+        _warm_started = False
+    _models_ready.clear()
+    for idx in _indexes.values():
+        idx.drop_search_cache()
+
+
+_pool = ModelPool(home, APP_NAME, busy_fn=_any_worker_alive,
+                  on_unload=_on_models_unloaded,
+                  ready_event=_models_ready)
+
+
 def _embedder():
     global _EMBEDDER
-    with _model_lock:
-        if _EMBEDDER is None:
-            _EMBEDDER = LocalEmbedder(home(), APP_NAME)
+    if _EMBEDDER is None:
+        _EMBEDDER = _pool.embedder()
     return _EMBEDDER
 
 
 def _reranker():
     global _RERANKER
-    with _model_lock:
-        if _RERANKER is None:
-            _RERANKER = LocalReranker(home(), APP_NAME)
+    if _RERANKER is None:
+        _RERANKER = _pool.reranker()
     return _RERANKER
 
 
 def _sparse():
     global _SPARSE
-    with _model_lock:
-        if _SPARSE is None:
-            _SPARSE = LocalSparseEmbedder(home(), APP_NAME)
+    if _SPARSE is None:
+        _SPARSE = _pool.sparse()
     return _SPARSE
 
 
@@ -104,7 +119,8 @@ def _start_warmup() -> None:
         if _warm_started:
             return
         _warm_started = True
-    threading.Thread(target=_warm_models, name="model-warmup", daemon=True).start()
+    threading.Thread(target=_warm_models, name="model-warmup",
+                     daemon=True).start()
 
 
 def _models_loaded(wait: float) -> bool:
@@ -137,7 +153,8 @@ def status() -> dict:
         "profile": cfg,
         "checks": health_checks(home(), workdir(), APP_NAME, "local-knowledge",
                                 index_root=index_root()),
-        "models_loaded": _models_ready.is_set() and _EMBEDDER is not None,
+        "models_loaded": _models_ready.is_set() and
+        (_EMBEDDER is not None or _pool.is_loaded()),
         "index_root": str(index_root()),
         "live_scopes": sorted(_scopes),
     }
@@ -178,6 +195,7 @@ _workers_lock = threading.Lock()
 def _worker_loop(s: dict, job_id: str) -> None:
     idx = _index_for(s["key"])
     try:
+        _start_warmup()
         _models_ready.wait()
         c = LocalCrawler(idx, s["root"], embedder=_embedder(),
                          sparse=_sparse())
@@ -316,17 +334,17 @@ def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
     ordinal order (Failure Hunt boundary probe: first/last chunks)."""
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
-    all_chunks = {c["chunk_id"]: c for c in idx.active_chunks()}
     pages = idx.active_pages()
     out = []
     if page_id is not None:
         if page_id not in pages:
             raise SecurityException(f"page {page_id} not in this scope's index")
-        out = [c for c in all_chunks.values() if c["page_id"] == page_id]
-        out.sort(key=lambda c: c["ordinal"])
+        out = idx.page_chunks(page_id)
     else:
-        for cid in (chunk_ids or [])[:16]:
-            c = all_chunks.get(cid)
+        wanted = (chunk_ids or [])[:16]
+        by_id = {c["chunk_id"]: c for c in idx.chunks_by_ids(wanted)}
+        for cid in wanted:
+            c = by_id.get(cid)
             if c is None:
                 raise SecurityException(
                     f"chunk {cid} not in this scope's index")
@@ -383,7 +401,10 @@ def verify_citations(scope_handle: str, evidence_set: str,
 
 def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    _start_warmup()
+    # lowered priority, no eager model load, idle unload — see
+    # confluence_knowledge.resources / .models for the policy
+    lower_priority()
+    _pool.start_reaper()
     mcp.run()
 
 

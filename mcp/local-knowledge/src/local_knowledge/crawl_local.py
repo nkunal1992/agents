@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 from confluence_knowledge.extract_files import extract_file_chunks, is_secret_name
@@ -140,7 +142,7 @@ class LocalCrawler:
             return {"job_id": job_id, "state": job["state"],
                     "remaining": len(job["queue"]), "errors": job["errors"]}
 
-        queue: list[str] = job["queue"]
+        queue: deque[str] = deque(job["queue"])
         errors: list[str] = job["errors"]
         # transient read fails keep old content — durable across steps/restarts
         keep_raw = self.index.meta_get(f"keep:{job_id}")
@@ -168,15 +170,19 @@ class LocalCrawler:
         visited_dirs: set[str] = set()   # guards symlink/dir-graph cycles
 
         processed = 0
+        # throttled checkpoints — full state used to be rewritten per item
+        last_ckpt, last_ckpt_n = time.monotonic(), 0
         while queue:
             if len(seen) >= MAX_FILES:
                 errors.append(f"file cap reached ({MAX_FILES}) — remaining skipped")
                 queue.clear()
                 break
-            if processed:
-                self._checkpoint(job_id, queue, errors, seen, levels, warns,
-                                 keep_failed)
-            entry = queue.pop(0)
+            if processed and (time.monotonic() - last_ckpt >= 5.0
+                              or processed - last_ckpt_n >= 50):
+                self._checkpoint(job_id, list(queue), errors, seen, levels,
+                                 warns, keep_failed)
+                last_ckpt, last_ckpt_n = time.monotonic(), processed
+            entry = queue.popleft()
             # entries are "dir:<path>" / "file:<path>" — split on the PREFIX,
             # not ':' (Windows paths contain their own drive colon)
             is_dir_entry = entry.startswith("dir:")
@@ -237,9 +243,9 @@ class LocalCrawler:
                         "errors": errors, "warnings": warns}
             seen.add(rel)
 
-        # persist final seen/levels/warns too — the in-loop checkpoint runs
-        # before each item is processed, so the last item would undercount
-        self._checkpoint(job_id, queue, errors, seen, levels, warns,
+        # persist final seen/levels/warns — the throttled in-loop
+        # checkpoint may be several items behind the last processed one
+        self._checkpoint(job_id, list(queue), errors, seen, levels, warns,
                          keep_failed)
         # fence: an abandoned/superseded job must never publish or resurrect
         current = self.index.job(job_id)
@@ -252,7 +258,7 @@ class LocalCrawler:
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
-                            queue, errors)
+                            list(queue), errors)
         return {"job_id": job_id,
                 "state": "done" if not queue else "running",
                 "remaining": len(queue), "pages_seen": len(seen),

@@ -196,6 +196,9 @@ accounts — the entire install is local files + models.
      that `job_id` — never keep polling an abandoned one.
    - Starting `start_crawl` while a crawl is running abandons the older
      job — if a second crawl was started, poll only the newest `job_id`.
+   - Models load on first `connect` and unload after ~10 idle minutes — a
+     `loading` note after a pause is expected; call again. Never start
+     parallel crawls of the same root.
    **Never call `search` while the crawl is running.**
 5. **Answer.** `search` → `get_evidence` for fuller text if needed →
    Evidence items carry two honesty flags: `low_confidence: true`

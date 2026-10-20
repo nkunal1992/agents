@@ -74,6 +74,18 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `LOCAL_KNOWLEDGE_HOME` | installation root (default `~/.local-knowledge`) |
 | `LOCAL_KNOWLEDGE_RERANKER` | `onnx-community/bge-reranker-base-ONNX` for a faster English reranker |
 | `LOCAL_KNOWLEDGE_WORKDIR` | index location (default `~/.local-knowledge/work`) |
+| `KNOWLEDGE_THREADS` | native inference threads per session (default ≈ cores/4, max 4) |
+| `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 16 items |
+| `KNOWLEDGE_IDLE_UNLOAD_S` | unload models after this idle time (600; 0 = never) |
+| `KNOWLEDGE_NO_NICE` | `1` disables the lowered OS scheduling priority |
+
+## Resource usage
+
+Models load lazily on first `connect` and unload after ~10 idle minutes —
+an idle server uses ~0.2 GB RSS, an active one ~1.9 GB. Every IDE window
+runs its own server; `doctor`'s `resources` flag warns when more than 4
+are running. Inference is micro-batched and threads/priority are capped
+so the laptop stays responsive while indexing.
 
 ## Updating safely
 
@@ -158,6 +170,7 @@ finishing with `E2E BOOTSTRAP OK`. No network or fake server needed.
 | `disk_free` | < 2 GB free — models won't fit | free space |
 | `python` | venv interpreter < 3.11 | rebuild venv on 3.11+ |
 | `proxy` | informational — shows HTTPS_PROXY/HTTP_PROXY visibility | — |
+| `resources` | shows the resource limits + running server count; red when >4 knowledge servers run | close unused IDE windows (idle servers unload models anyway) |
 
 `doctor` exits non-zero while any flag is red.
 

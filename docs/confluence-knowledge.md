@@ -196,8 +196,31 @@ Env knobs: `KNOWLEDGE_UPDATE_INDEX` (mirror URL template),
 | `disk_free` | < 2 GB free — models won't fit | free space |
 | `python` | venv interpreter < 3.11 | rebuild venv on 3.11+ |
 | `proxy` | informational — shows HTTPS_PROXY/HTTP_PROXY visibility | — |
+| `resources` | shows the resource limits + running server count; red when >4 knowledge servers run | close unused IDE windows (idle servers unload models anyway) |
 
 `doctor` exits non-zero while any flag is red.
+
+## Resource usage
+
+The server is designed to stay out of the way on a developer laptop:
+
+- **Models load lazily** on first `connect` (not at process start) and
+  **unload after ~10 idle minutes** — an idle server uses ~0.2 GB RSS,
+  an active one ~1.9 GB. Every IDE window starts its own server process;
+  `doctor`'s `resources` flag warns when more than 4 are running
+  (close unused windows — idle ones unload anyway).
+- **Bounded inference**: embedding/reranking run in micro-batches whose
+  attention cost (items × longest-input²) stays under
+  `KNOWLEDGE_BATCH_TOKENS` (default 2.5 M) and `KNOWLEDGE_MAX_BATCH`
+  (default 16) — a 2048-token page now peaks ≈ +1 GB per run instead of
+  padding a whole batch to it.
+- **Capped threads**: each inference session uses `KNOWLEDGE_THREADS`
+  (default ≈ cores/4, max 4); busy-wait spinning is off.
+- **Lowered OS priority**: the process runs at nice +10 (POSIX) /
+  below-normal (Windows) so interactive work always wins the CPU —
+  `KNOWLEDGE_NO_NICE=1` opts out.
+- `KNOWLEDGE_IDLE_UNLOAD_S` sets the idle timeout in seconds
+  (0 disables unloading).
 
 ## Troubleshooting
 
@@ -208,7 +231,8 @@ Env knobs: `KNOWLEDGE_UPDATE_INDEX` (mirror URL template),
 | `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.confluence-knowledge/models/` from an internal mirror) |
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
 | `index database was locked` | fixed in v0.1.6. Earlier versions deadlocked themselves on the first crawl (an uncommitted write per connection). Upgrade: `python -m pip install --upgrade "<bundle>\service[models]"`, restart the IDE |
-| `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.2.1: the crawl runs in a background thread server-side and `crawl_step` is an instant progress poll — a request timeout can no longer stall or lose a crawl; progress checkpoints every page and a server restart auto-resumes |
+| `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.2.1: the crawl runs in a background thread server-side and `crawl_step` is an instant progress poll — a request timeout can no longer stall or lose a crawl; progress checkpoints continuously and a server restart auto-resumes |
+| fan loud / laptop sluggish during a crawl | `doctor` `resources` flag lists limits; close extra IDE windows (each runs its own server), set `KNOWLEDGE_THREADS=1`, or use the light reranker (`CONFLUENCE_KNOWLEDGE_RERANKER=onnx-community/bge-reranker-base-ONNX`) |
 | `search` says "crawl … still running" | the background crawl hasn't finished; poll `crawl_step` for progress. The index is published only when the whole subtree is crawled |
 | `crawl_step` returns `state: abandoned` | the job was superseded by a newer crawl or its resume was fenced (e.g. model upgrade changed vector dims) — it can never finish; call `start_crawl` for a fresh job |
 | Two `python.exe … confluence_knowledge.server` processes on Windows | expected, not a duplicate: a venv's `Scripts\python.exe` is a launcher that starts the base interpreter as its child. Only one server is running |

@@ -67,13 +67,15 @@ def test_real_model_no_answer_queries(tmp_path, real_models):
 
 def test_oversized_index_refuses_silently_growing(tmp_path):
     """>MAX_SEARCHABLE_CHUNKS must refuse with a named error, not OOM."""
+    from types import SimpleNamespace
+
     from confluence_knowledge.settings import SetupError
-    # fake 100k+ chunks without materializing them all
-    chunks = [{"chunk_id": f"c{i}", "page_id": "p", "heading": "",
-               "kind": "text", "text": "x"}
-              for i in range(retrieval.MAX_SEARCHABLE_CHUNKS + 1)]
+    # fake a 100k+ chunk index without materializing chunk dicts — the
+    # retrieval cache's id list alone proves oversize
+    cache = SimpleNamespace(
+        ids=[f"c{i}" for i in range(retrieval.MAX_SEARCHABLE_CHUNKS + 1)])
     class FakeIdx:
-        def active_chunks(self): return chunks
+        def search_cache(self): return cache
     with pytest.raises(SetupError):
         retrieval.retrieve(FakeIdx(), "q", HashEmbedder())
 
