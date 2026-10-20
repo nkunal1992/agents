@@ -125,8 +125,14 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
         # non-engine requirements from the installed metadata
         run([str(vpy), "-m", "pip", "install", "--no-deps", src_spec], env,
             f"venv + pip install --no-deps {src_spec}")
-        import importlib.metadata as _md
-        reqs = [r for r in (_md.requires("local-knowledge") or [])
+        import json as _json
+        out = run(
+            [str(vpy), "-c",
+             ("import importlib.metadata, json; "
+              "print(json.dumps(importlib.metadata.requires("
+              "'local-knowledge') or []))")],
+            env, "read service requires").stdout
+        reqs = [r for r in _json.loads(out)
                 if "confluence-knowledge" not in r and "extra ==" not in r]
         if reqs:
             run([str(vpy), "-m", "pip", "install"] + reqs, env,

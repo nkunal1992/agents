@@ -164,7 +164,7 @@ jobs:
         env:
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: |
-          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          WHEEL="$(pwd -W 2>/dev/null || pwd)/dist/$(ls dist | grep '\.whl$')"
           case "${{ needs.validate.outputs.pkg }}" in
             confluence-knowledge)
               python mcp/confluence-knowledge/scripts/e2e_bootstrap.py \
@@ -181,7 +181,7 @@ jobs:
         env:
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: |
-          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          WHEEL="$(pwd -W 2>/dev/null || pwd)/dist/$(ls dist | grep '\.whl$')"
           case "${{ needs.validate.outputs.pkg }}" in
             confluence-knowledge)
               python mcp/confluence-knowledge/scripts/e2e_failure.py \
@@ -231,7 +231,7 @@ jobs:
         env:
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: |
-          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          WHEEL="$(pwd -W 2>/dev/null || pwd)/dist/$(ls dist | grep '\.whl$')"
           case "${{ matrix.svc }}" in
             local-knowledge) SCRIPT=e2e_bootstrap_local.py ;;
             sharepoint-knowledge) SCRIPT=e2e_bootstrap_sp.py ;;
@@ -245,7 +245,7 @@ jobs:
           SVC: ${{ matrix.svc }}
           ENGINE_VER: ${{ needs.validate.outputs.version }}
         run: |
-          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          WHEEL="$(pwd -W 2>/dev/null || pwd)/dist/$(ls dist | grep '\.whl$')"
           SPEC=$(python - <<'PY'
           import json, os, urllib.request
           from packaging.specifiers import SpecifierSet
