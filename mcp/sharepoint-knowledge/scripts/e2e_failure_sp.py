@@ -137,9 +137,10 @@ def main() -> None:
     # hatchling as a throwaway backend; the artifact is identical.
     import re as _re
 
-    def _src_copy(name: str, version: str) -> Path:
+    def _src_copy(name: str, version: str,
+                  src_dir: Path = REPO_SVC) -> Path:
         src2 = sandbox / f"pkg-{name}-{version}"
-        shutil.copytree(REPO_SVC, src2,
+        shutil.copytree(src_dir, src2,
                         ignore=shutil.ignore_patterns(
                             "dist", "build", "__pycache__", "*.egg-info",
                             ".venv", "tests", "scripts"))
@@ -154,8 +155,20 @@ def main() -> None:
         pp.write_text(t)
         return src2
 
-    # a healthy wheel of the CURRENT version — the rollback restore needs
-    # somewhere to find <dist>==<installed> (not on any index yet)
+    # engine wheel too — freeze pins it (path install → ==ver) and the
+    # -r restore must resolve it from find-links
+    eng_dir = REPO_SVC.parent / "confluence-knowledge"
+    eng_src = _src_copy("engine", "0.0.0", src_dir=eng_dir)
+    pp = eng_src / "pyproject.toml"
+    t = pp.read_text()
+    inst_eng = run([str(vpy), "-m", "pip", "show", "confluence-knowledge"],
+                   env, "installed engine").stdout.split(
+                       "Version: ")[1].split()[0]
+    t = _re.sub(r'version = "[^"]+"', f'version = "{inst_eng}"',
+                t, count=1)
+    pp.write_text(t)
+    run([outer, "-m", "pip", "wheel", str(eng_src), "-w", str(wheels),
+         "--no-deps", "--quiet"], env, "build engine wheel")
     cur_src = _src_copy("cur", "0.0.0")  # version patched below
     pp = cur_src / "pyproject.toml"
     t = pp.read_text()
