@@ -15,10 +15,13 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-# 429 handling: honor Retry-After (seconds or HTTP-date), clamped — a
-# hostile/buggy server can't park the crawl for an hour. ≤3 retries.
+# Transient handling: honor Retry-After (seconds or HTTP-date), clamped —
+# a hostile/buggy server can't park the crawl for an hour. ≤3 retries.
+# 5xx and transport errors get the same bounded budget as 429s — a single
+# 502 on a children-listing must not silently abandon a subtree (#175).
 _RETRY_MAX = 3
 _RETRY_AFTER_CAP_S = 60.0
+_TRANSIENT_STATUSES = frozenset({500, 502, 503, 504, 507, 509, 529})
 
 
 def _retry_after_seconds(value: str | None) -> float:
@@ -87,8 +90,19 @@ class ConfluenceClient:
         url = urljoin(self._base, api_path.lstrip("/"))
         resp = None
         for attempt in range(_RETRY_MAX + 1):
-            resp = self._http.get(url, params=params)
-            if resp.status_code != 429 or attempt == _RETRY_MAX:
+            try:
+                resp = self._http.get(url, params=params)
+            except httpx.TransportError as e:
+                # timeout / conn reset / DNS — transient; same budget
+                if attempt == _RETRY_MAX:
+                    raise AccessError(
+                        f"request failed: {type(e).__name__} — Confluence "
+                        "unreachable or timed out") from e
+                time.sleep(_retry_after_seconds(None))
+                continue
+            transient = (resp.status_code == 429
+                         or resp.status_code in _TRANSIENT_STATUSES)
+            if not transient or attempt == _RETRY_MAX:
                 break
             time.sleep(_retry_after_seconds(resp.headers.get("retry-after")))
         if resp.status_code >= 400:
