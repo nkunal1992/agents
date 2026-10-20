@@ -2,7 +2,7 @@
 name: local-knowledge
 description: Grounded Q&A over a local file or folder — docx/pdf/pptx/xlsx/csv/md/txt/html indexed locally via a self-installed MCP service, per-claim citations, explicit "not documented" refusals. No credentials needed. Bootstraps its local service on first run.
 argument-hint: Give a file or folder path and your question
-tools: ["local-knowledge/status", "local-knowledge/connect", "local-knowledge/start_crawl", "local-knowledge/crawl_step", "local-knowledge/cancel_crawl", "local-knowledge/search", "local-knowledge/get_evidence", "local-knowledge/verify_citations", "local-knowledge/submit_feedback", "local-knowledge/feedback_report", "read", "edit", "execute"]
+tools: ["local-knowledge/status", "local-knowledge/connect", "local-knowledge/start_crawl", "local-knowledge/crawl_step", "local-knowledge/cancel_crawl", "local-knowledge/wait_for_crawl", "local-knowledge/search", "local-knowledge/get_evidence", "local-knowledge/verify_citations", "local-knowledge/submit_feedback", "local-knowledge/feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload
@@ -186,20 +186,47 @@ accounts — the entire install is local files + models.
    I will use this to answer your question. Would you like me to refresh it
    to check for file changes?" — wait for the answer before searching.
 4. **Crawl.** `start_crawl` begins a **background crawl** — the server
-   indexes the whole tree on its own. Call `crawl_step` every few seconds
-   until `state: done`. Each call returns instantly. Report progress
-   (`pages_seen` = files indexed) and surface `warnings` (skipped secrets,
-   unreadable files, unsupported types) — disclose, never hide.
+   indexes the whole tree on its own and posts a desktop notification
+   when it finishes. Say what started: "Indexing in the background —
+   I'll keep you posted." Then drive progress with `wait_for_crawl`
+   (blocks ≤ `wait_s`, default 50s, cap 120; returns early when phase or
+   page count moves). Loop it and relay one concise line per change:
+   `phase` · `pages_done` · `rate_ppm` · `eta_s`. Use `crawl_step` only
+   for an instant snapshot between waits. Surface `warnings` (skipped
+   secrets, unreadable files, unsupported types) — disclose, never hide.
+   - `note: loading local models` or `phase: starting` → models warming —
+     keep waiting.
+   - `phase: paused: low memory` → free RAM is under the floor — waits
+     safely, resumes itself; tell the user once, keep waiting.
+   - `phase` containing "battery saver" → throttled on battery — normal.
+   - `worker: another IDE window` → another window owns the crawl —
+     keep waiting on the same `job_id`, never start a duplicate.
+   - `state: done` → report files indexed + `errors`/`warnings`.
    - `state: abandoned` → this job can never finish — it was superseded by
      a newer crawl, or its resume was fenced (e.g. a model upgrade changed
-     vector dimensions). Call `start_crawl` again for a fresh job and poll
-     that `job_id` — never keep polling an abandoned one.
-   - Starting `start_crawl` while a crawl is running abandons the older
-     job — if a second crawl was started, poll only the newest `job_id`.
+     vector dimensions). Call `start_crawl` once for a fresh job — never
+     keep waiting on an abandoned one.
+   - `state: cancelled` → the user stopped it — the previous snapshot is
+     intact; `start_crawl` re-runs and reuses unchanged files.
+   - `state: error` → report the `errors` verbatim, suggest one
+     `start_crawl` re-run — never silently loop on an errored job.
+   - **Handoff**: if the user moves to another task mid-crawl, stop
+     waiting, say once "the index keeps building in the background — I'll
+     see the notification and `status.last_crawl` when it's done; ask me
+     anytime", and continue their other work. `connect`/`status` carry
+     `last_crawl` — check it on the next doc question.
+   - **Cancellation**: if the user asks to stop, call `cancel_crawl` —
+     within seconds; the previous snapshot survives; never auto-resumes.
+     Never cancel unless asked.
+   - A request timeout or transient error → `wait_for_crawl` again with
+     the same `job_id`; progress checkpoints continuously and the crawl
+     resumes itself after a server restart. Give up only after 5
+     consecutive failures, and then report the error.
    - Models load on first `connect` and unload after ~10 idle minutes — a
      `loading` note after a pause is expected; call again. Never start
      parallel crawls of the same root.
-   **Never call `search` while the crawl is running.**
+   **Never call `search` while the crawl is running** (the previous
+   snapshot stays searchable during a refresh).
 5. **Answer.** `search` → `get_evidence` for fuller text if needed →
    Evidence items carry two honesty flags: `low_confidence: true`
    means the reranker is weakly confident — answer but say the

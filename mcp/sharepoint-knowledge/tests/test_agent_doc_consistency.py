@@ -57,6 +57,17 @@ def test_agent_covers_crawl_terminal_states():
     assert "abandoned" in doc
 
 
+def test_agent_covers_crawl_awareness():
+    """The live wait loop, handoff, cancel, and the non-running states
+    must all be instructed — otherwise the agent reverts to blind polls
+    and the user never learns anything."""
+    doc = AGENT.read_text()
+    for token in ("wait_for_crawl", "cancel_crawl", "cancelled",
+                  "last_crawl", "notification", "another IDE window",
+                  "paused: low memory", "eta_s", "battery saver"):
+        assert token in doc, f"agent missing crawl-awareness token: {token}"
+
+
 def test_agent_passes_evidence_set_to_verify():
     """`search` returns `evidence_set` and `verify_citations` requires it —
     the agent file must document the plumbing and expiry recovery."""
