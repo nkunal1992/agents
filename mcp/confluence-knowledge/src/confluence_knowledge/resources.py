@@ -52,8 +52,9 @@ class Limits:
         # machines with no battery sensor or a plugged-in laptop.
         if not self.battery_saver or _psutil is None:
             return False
-        if os.environ.get("KNOWLEDGE_FORCE_BATTERY") == "1":
-            return True
+        forced = os.environ.get("KNOWLEDGE_FORCE_BATTERY")
+        if forced is not None:          # "1"=battery, "0"=mains (stress hook)
+            return forced == "1"
         try:
             b = _psutil.sensors_battery()
             return b is not None and b.power_plugged is False

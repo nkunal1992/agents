@@ -50,6 +50,7 @@ LIGHT_P95_MS = 300.0    # status/crawl_step p95 budget
 STALL_MS = 250.0        # laptop-probe overshoot budget
 RSS_BUDGET_MB = 3072    # server RSS ceiling
 CPU_BUDGET = 0.50       # sustained fraction of the core budget
+CRAWL_BUDGET_S = 3600.0   # per-scenario crawl watch limit (scaled by pages)
 CORE_BUDGET = {"native": os.cpu_count() or 8, "worklaptop": 8}
 WORKLAPTOP_ENV = {"KNOWLEDGE_THREADS": "2"}
 CANCEL_BUDGET_S = 5.0
@@ -244,6 +245,7 @@ class Ctx:
         self.handle = None
         self.job = None
         self.crawl_active = False   # set while a job runs — freeze window
+        self.budget_s = CRAWL_BUDGET_S
         self.extra: dict = {}
 
     async def call(self, name: str, args: dict | None = None,
@@ -300,12 +302,15 @@ class Ctx:
                 return
 
     async def run_crawl(self, refresh: bool = False,
-                        probes: bool = True, timeout: float = 3600) -> dict:
+                        probes: bool = True,
+                        timeout: float | None = None) -> dict:
         """Wait for the started job to reach a terminal state, with the
         agent-loop and prober instruments running alongside."""
         if not self.job:
             return {"wall_s": 0.0, "final": {"state": "no_job"}}
         self.crawl_active = True
+        if timeout is None:
+            timeout = self.budget_s
         tasks = [asyncio.create_task(self.agent_loop())]
         if probes:
             tasks.append(asyncio.create_task(self.prober()))
@@ -430,6 +435,7 @@ async def scenario_ctx(name: str, pages: int, seed: int, hostile: bool,
     ctx = Ctx(name, base, logf, out_dir, models, profile)
     ctx.extra.update({"pages": pages, "seed": seed, "hostile": hostile,
                       "profile": profile})
+    ctx.budget_s = max(CRAWL_BUDGET_S, pages * 10)  # scale with tree size
     (models / "profile.json").write_text(json.dumps(
         {"env": "datacenter", "base_url": base, "email": None,
          "credential_ref": "stress"}))
@@ -856,6 +862,9 @@ def main() -> int:
     ap.add_argument("--profile", default="worklaptop")
     ap.add_argument("--models", default="/tmp/ckperf")
     ap.add_argument("--out", default="/tmp/ck-stress")
+    ap.add_argument("--ac", action="store_true",
+                    help="pin KNOWLEDGE_FORCE_BATTERY=0 so battery "
+                         "saver never engages mid-run")
     args = ap.parse_args()
 
     models = Path(args.models)
@@ -884,6 +893,8 @@ def main() -> int:
                              if v_ == "{__free_minus_512__}" else v_)
                          for k, v_ in env_extra.items()}
         profile = spec.pop("profile", args.profile)
+        if args.ac:
+            env_extra = {**env_extra, "KNOWLEDGE_FORCE_BATTERY": "0"}
         out_dir = out_root / f"{name.lower()}-{args.pages}p"
         print(f"== {name} {spec} → {out_dir}", flush=True)
         t0 = time.monotonic()
