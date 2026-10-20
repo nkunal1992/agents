@@ -55,8 +55,8 @@ def test_noise_floor_still_drops_junk(rag_index):
 def test_real_model_no_answer_queries(tmp_path, real_models):
     """On the real stack: no-answer queries must return empty evidence."""
     from rag.conftest import build_index
-    idx = build_index(tmp_path, CORPUS)
     emb, rr, sp = real_models
+    idx = build_index(tmp_path, CORPUS, embedder=emb, sparse=sp)
     misses = []
     for q in NO_ANSWER:
         ev = retrieval.retrieve(idx, q, emb, rr, sp)

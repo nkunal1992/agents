@@ -70,11 +70,16 @@ class ToySparse:
         return out
 
 
-def build_index(tmp_path: Path, corpus) -> Index:
-    """Index the corpus with fakes — mirrors what a crawler produces."""
+def build_index(tmp_path: Path, corpus, embedder=None, sparse=None) -> Index:
+    """Index the corpus with fakes — mirrors what a crawler produces.
+
+    Pass real models to build a genuinely-embedded index — without them
+    the 128-dim fake vectors silently disable the dense leg of retrieve()
+    (dim guard), which made test_real_model_* measure only FTS recall."""
     idx = Index(tmp_path / "eval.db")
     from confluence_knowledge.extract import extract_chunks
-    emb, sp = HashEmbedder(), ToySparse()
+    emb = embedder or HashEmbedder()
+    sp = sparse or ToySparse()
     for i, (title, html, _qa) in enumerate(corpus):
         pid = f"p{i}"
         chunks, _warnings = extract_chunks(html)

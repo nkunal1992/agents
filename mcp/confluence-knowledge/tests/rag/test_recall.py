@@ -34,8 +34,8 @@ def test_real_model_recall(tmp_path, real_models):
     """Paraphrase + keyword recall on the real ONNX stack."""
     from rag.conftest import build_index
     from rag.corpus import CORPUS
-    idx = build_index(tmp_path, CORPUS)
     emb, rr, sp = real_models
+    idx = build_index(tmp_path, CORPUS, embedder=emb, sparse=sp)
     misses = []
     for title, _html, qas in CORPUS:
         for q, gold in qas:

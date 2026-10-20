@@ -1,9 +1,7 @@
 """#179: adaptive fetch window — CPU-pressure ladder with an env ceiling;
 zero-regression by default (cap = base = today's behavior)."""
 
-import threading
 
-import pytest
 
 from confluence_knowledge import jobs, server
 from confluence_knowledge.index import Index
