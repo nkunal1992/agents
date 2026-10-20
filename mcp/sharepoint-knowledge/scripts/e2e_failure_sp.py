@@ -132,29 +132,46 @@ def main() -> None:
     wheels = sandbox / "wheels"
     wheels.mkdir()
     outer = sys.executable
+    # wheel-building helper — setuptools can't build under some hosted
+    # toolchains (distutils shadowing), so each copied package gets
+    # hatchling as a throwaway backend; the artifact is identical.
+    import re as _re
+
+    def _src_copy(name: str, version: str) -> Path:
+        src2 = sandbox / f"pkg-{name}-{version}"
+        shutil.copytree(REPO_SVC, src2,
+                        ignore=shutil.ignore_patterns(
+                            "dist", "build", "__pycache__", "*.egg-info",
+                            ".venv", "tests", "scripts"))
+        pp = src2 / "pyproject.toml"
+        t = pp.read_text()
+        t = _re.sub(r'version = "[^"]+"', f'version = "{version}"',
+                    t, count=1)
+        t = _re.sub(r'requires = \[[^\]]*\]',
+                    'requires = ["hatchling"]', t, count=1)
+        t = _re.sub(r'build-backend = "[^"]+"',
+                    'build-backend = "hatchling.build"', t)
+        pp.write_text(t)
+        return src2
+
     # a healthy wheel of the CURRENT version — the rollback restore needs
     # somewhere to find <dist>==<installed> (not on any index yet)
-    wheel_env = {**env, "SETUPTOOLS_USE_DISTUTILS": "local"}
-    run([outer, "-m", "pip", "install", "--quiet", "setuptools", "wheel"],
-        wheel_env, "wheel build deps")
-    run([outer, "-m", "pip", "wheel", str(REPO_SVC), "-w", str(wheels),
-         "--no-deps", "--no-build-isolation", "--quiet"], wheel_env,
-        "build current-version wheel")
-    bad_src = sandbox / "bad-pkg"
-    import re as _re
-    shutil.copytree(REPO_SVC, bad_src,
-                    ignore=shutil.ignore_patterns(
-                        "dist", "build", "__pycache__", "*.egg-info",
-                        ".venv", "tests", "scripts"))
-    pp = bad_src / "pyproject.toml"
-    pp.write_text(_re.sub(r'version = "[^"]+"', 'version = "99.0.0"',
-                          pp.read_text(), count=1))
+    cur_src = _src_copy("cur", "0.0.0")  # version patched below
+    pp = cur_src / "pyproject.toml"
+    t = pp.read_text()
+    inst_v = run([str(vpy), "-m", "pip", "show", "sharepoint-knowledge"], env,
+                 "installed version").stdout.split("Version: ")[1].split()[0]
+    t = _re.sub(r'version = "[^"]+"', f'version = "{inst_v}"',
+                t, count=1)
+    pp.write_text(t)
+    run([outer, "-m", "pip", "wheel", str(cur_src), "-w", str(wheels),
+         "--no-deps", "--quiet"], env, "build current-version wheel")
+    bad_src = _src_copy("bad", "99.0.0")
     broken = bad_src / "src" / "sharepoint_knowledge" / "server_sp.py"
     broken.write_text('raise RuntimeError("selftest-canary")\n'
                       + broken.read_text())
     run([outer, "-m", "pip", "wheel", str(bad_src), "-w", str(wheels),
-         "--no-deps", "--no-build-isolation", "--quiet"], wheel_env,
-        "build broken 99.0.0 wheel")
+         "--no-deps", "--quiet"], env, "build broken 99.0.0 wheel")
     env_upd = {**env, "PIP_FIND_LINKS": str(wheels),
                "KNOWLEDGE_UPDATE_INDEX": "http://127.0.0.1:9/{dist}"}
     u = run([str(vpy), "-m", "sharepoint_knowledge.cli_sp", "update", "--to", "99.0.0"],
@@ -171,17 +188,9 @@ def main() -> None:
           d.stdout[-800:])
 
     # healthy upgrade: same version bump, no injected failure — must stick
-    good_src = sandbox / "good-pkg"
-    shutil.copytree(REPO_SVC, good_src,
-                    ignore=shutil.ignore_patterns(
-                        "dist", "build", "__pycache__", "*.egg-info",
-                        ".venv", "tests", "scripts"))
-    pp = good_src / "pyproject.toml"
-    pp.write_text(_re.sub(r'version = "[^"]+"', 'version = "99.0.1"',
-                          pp.read_text(), count=1))
+    good_src = _src_copy("good", "99.0.1")
     run([outer, "-m", "pip", "wheel", str(good_src), "-w", str(wheels),
-         "--no-deps", "--no-build-isolation", "--quiet"], wheel_env,
-        "build healthy 99.0.1 wheel")
+         "--no-deps", "--quiet"], env, "build healthy 99.0.1 wheel")
     u = run([str(vpy), "-m", "sharepoint_knowledge.cli_sp", "update", "--to", "99.0.1"],
             env_upd, check_rc=False)
     check(u.returncode == 0, "healthy update succeeds", u.stdout[-1500:])
