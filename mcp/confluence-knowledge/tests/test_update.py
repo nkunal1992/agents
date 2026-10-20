@@ -323,3 +323,25 @@ def test_update_windows_exe_handsoff(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "-m confluence_knowledge.cli update --latest" in out
     assert not run.calls  # nothing installed in-process
+
+
+def test_freeze_pins_normalizes_direct_urls(monkeypatch):
+    """path/URL installs must become index-resolvable == pins or the
+    -r restore rebuilds from a local tree."""
+    import confluence_knowledge.update as upd
+    import importlib.metadata
+    def _v(d):
+        if d == "confluence-knowledge":
+            return "0.7.0"
+        raise importlib.metadata.PackageNotFoundError(d)
+    monkeypatch.setattr(importlib.metadata, "version", _v)
+    monkeypatch.setattr(importlib.metadata, "distributions",
+                        lambda: [])
+    out = upd._freeze_pins(
+        "confluence-knowledge @ file:///repo/mcp/confluence-knowledge\n"
+        "numpy==2.0.0\n"
+        "some-unknown @ file:///elsewhere\n")
+    lines = out.splitlines()
+    assert lines[0] == "confluence-knowledge==0.7.0"
+    assert lines[1] == "numpy==2.0.0"
+    assert lines[2] == "some-unknown @ file:///elsewhere"  # unresolvable stays

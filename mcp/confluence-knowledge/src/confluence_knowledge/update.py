@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -231,11 +232,40 @@ def _editable(dist: str) -> bool:
         return False
 
 
+def _freeze_pins(out: str) -> str:
+    """Normalise `pip freeze` output for `-r` restores: `name @ <url>`
+    (path/URL/direct installs) → `name==<installed version>`. A `file://`
+    line would make the restore rebuild from the local source tree — it
+    must resolve from the index/find-links like any other pin."""
+    vers = {}
+    try:
+        from importlib.metadata import distributions
+        for d in distributions():
+            name = d.metadata.get("Name")  # a stray dist may lack it
+            if name:
+                vers[name.lower()] = d.version
+    except Exception:  # noqa: BLE001
+        return out
+    lines = []
+    for line in out.splitlines():
+        m = re.match(r"^(?:-e\s+)?(\S+?)\s+@\s+\S+$", line.strip())
+        ver = vers.get(m.group(1).lower()) if m else None
+        if m and ver is None:
+            try:
+                from importlib.metadata import version as _v
+                ver = _v(m.group(1))
+            except Exception:  # noqa: BLE001
+                ver = None
+        lines.append(f"{m.group(1)}=={ver}" if m and ver else line)
+    return "\n".join(lines) + "\n"
+
+
 def _snapshot(home: Path, dist: str, installed: str | None,
               run=_run) -> Path | None:
     rc, out = run([sys.executable, "-m", "pip", "freeze"])
     if rc != 0 or not out.strip():
         return None
+    out = _freeze_pins(out)
     rb = home / "rollback"
     rb.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
