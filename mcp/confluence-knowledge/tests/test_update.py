@@ -328,15 +328,16 @@ def test_update_windows_exe_handsoff(tmp_path, monkeypatch, capsys):
 def test_freeze_pins_normalizes_direct_urls(monkeypatch):
     """path/URL installs must become index-resolvable == pins or the
     -r restore rebuilds from a local tree."""
-    import confluence_knowledge.update as upd
     import importlib.metadata
+
+    import confluence_knowledge.update as upd
     def _v(d):
         if d == "confluence-knowledge":
             return "0.7.0"
         raise importlib.metadata.PackageNotFoundError(d)
     monkeypatch.setattr(importlib.metadata, "version", _v)
     monkeypatch.setattr(importlib.metadata, "distributions",
-                        lambda: [])
+                        list)
     out = upd._freeze_pins(
         "confluence-knowledge @ file:///repo/mcp/confluence-knowledge\n"
         "numpy==2.0.0\n"
