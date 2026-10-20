@@ -401,6 +401,9 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
             p.update(other.snapshot())
+    # errors_n derives from the durable error list — a snapshot written
+    # just before the last appends can lag; len(errors) is always true
+    p["errors_n"] = max(p.get("errors_n", 0), len(p.get("errors", [])))
     return p
 
 

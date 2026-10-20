@@ -154,3 +154,14 @@ def test_connect_forces_revalidation(wired_status):
     assert c["scope_handle"]
     server.status()
     assert client.identity_calls >= 2
+
+
+def test_progress_for_derives_errors_n_from_job(tmp_path, monkeypatch):
+    """The durable error list is authoritative — a snapshot persisted
+    before the final appends can't leave errors_n stuck at 0."""
+    monkeypatch.setattr(server, "_progress", {})
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j", "1")
+    idx.save_job("j", "done", [], ["page 4: denied", "page 7: denied"])
+    p = server._progress_for(idx, "j")
+    assert p["errors_n"] == 2
