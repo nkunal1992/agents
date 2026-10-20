@@ -77,7 +77,7 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
 | `SP_KNOWLEDGE_RERANKER` | `onnx-community/bge-reranker-base-ONNX` for a faster English reranker |
 | `SP_KNOWLEDGE_GRAPH_BASE` | Graph base URL override (e2e fake) |
 | `KNOWLEDGE_THREADS` | native inference threads per session (default ≈ cores/4, max 4) |
-| `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 16 items |
+| `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 4 items |
 | `KNOWLEDGE_IDLE_UNLOAD_S` | unload models after this idle time (600; 0 = never) |
 | `KNOWLEDGE_NO_NICE` | `1` disables the lowered OS scheduling priority |
 | `KNOWLEDGE_MIN_FREE_MB` | pause embedding while free memory < this floor (1500; 0 = off) |

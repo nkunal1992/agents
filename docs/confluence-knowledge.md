@@ -212,8 +212,9 @@ The server is designed to stay out of the way on a developer laptop:
 - **Bounded inference**: embedding/reranking run in micro-batches whose
   attention cost (items × longest-input²) stays under
   `KNOWLEDGE_BATCH_TOKENS` (default 2.5 M) and `KNOWLEDGE_MAX_BATCH`
-  (default 16) — a 2048-token page now peaks ≈ +1 GB per run instead of
-  padding a whole batch to it.
+  (default 4 — measured: −0.4 GB worst-case spike at identical
+  throughput vs 16) — a 2048-token page now peaks ≈ +1 GB per run
+  instead of padding a whole batch to it.
 - **Capped threads**: each inference session uses `KNOWLEDGE_THREADS`
   (default ≈ cores/4, max 4); busy-wait spinning is off.
 - **Lowered OS priority**: the process runs at nice +10 (POSIX) /

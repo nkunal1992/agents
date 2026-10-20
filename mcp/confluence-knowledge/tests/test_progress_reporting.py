@@ -106,10 +106,14 @@ def test_refresh_counts_reused_pages(tmp_path, monkeypatch):
 class _CountClient:
     def __init__(self):
         self.identity_calls = 0
+        self.slow = False
 
     def get(self, path, params=None):
         if "user/current" in path:
             self.identity_calls += 1
+            if self.slow:
+                import time as _t
+                _t.sleep(2)        # hostile DC — retry/hang territory
             return _Resp({"username": "t"})
         return _Resp({})
 
@@ -165,3 +169,21 @@ def test_progress_for_derives_errors_n_from_job(tmp_path, monkeypatch):
     idx.save_job("j", "done", [], ["page 4: denied", "page 7: denied"])
     p = server._progress_for(idx, "j")
     assert p["errors_n"] == 2
+
+
+def test_status_never_blocks_on_wire(wired_status, monkeypatch):
+    """#173: a hostile /user/current must not turn status into a >2 s
+    call — stale verdicts are served while a daemon thread refreshes."""
+    import time as t
+    client = wired_status
+    server.status()                      # first call populates the cache
+    monkeypatch.setattr(server, "_CREDS_TTL_S", 0.0)   # always stale
+    client.slow = True                   # wire now takes 2 s per call
+    t0 = t.monotonic()
+    for _ in range(5):
+        r = server.status()
+        flag = next(c for c in r["checks"] if c["flag"] == "creds_valid")
+        assert flag["ok"]                # last-known-good still served
+    assert t.monotonic() - t0 < 2.0
+    # the async refreshes dedupe — at most a couple of wire calls, not 5
+    assert client.identity_calls <= 3

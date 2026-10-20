@@ -74,7 +74,7 @@ def limits() -> Limits:
         threads=_int_env("KNOWLEDGE_THREADS", _default_threads(), 1, 32),
         batch_tokens=_int_env("KNOWLEDGE_BATCH_TOKENS", 2_500_000,
                               100_000, 64_000_000),
-        max_batch=_int_env("KNOWLEDGE_MAX_BATCH", 16, 1, 256),
+        max_batch=_int_env("KNOWLEDGE_MAX_BATCH", 4, 1, 256),
         idle_unload_s=float(
             _int_env("KNOWLEDGE_IDLE_UNLOAD_S", 600, 0, 86_400)),
         fetch_concurrency=_int_env("KNOWLEDGE_FETCH_CONCURRENCY", 6, 1, 16),

@@ -49,6 +49,37 @@ mcp = FastMCP("confluence-knowledge")
 _state_lock = threading.RLock()
 _CREDS_CACHE: dict[str, tuple[float, bool, str]] = {}
 _CREDS_TTL_S = float(os.environ.get("CONF_KNOWLEDGE_CREDS_TTL_S", "120"))
+_CREDS_REFRESHING: set[str] = set()
+
+
+def _creds_check(profile) -> tuple[bool, str]:
+    """One identity round-trip — kept off the `status` hot path (#173)."""
+    try:
+        client = _client_for(profile)
+        ep = ("wiki/rest/api/user/current" if profile.env == "cloud"
+              else "rest/api/user/current")
+        client.get(ep)
+        return True, "token valid"
+    except (AccessError, SetupError) as e:
+        return False, str(e)
+
+
+def _creds_refresh_async(profile) -> None:
+    """Refresh the cached verdict in a daemon thread — status returns the
+    last-known result instantly and the next poll sees the fresh one."""
+    ref = profile.credential_ref
+    with _state_lock:
+        if ref in _CREDS_REFRESHING:
+            return
+        _CREDS_REFRESHING.add(ref)
+
+    def _run() -> None:
+        ok, detail = _creds_check(profile)
+        with _state_lock:
+            _CREDS_CACHE[ref] = (time.time(), ok, detail)
+            _CREDS_REFRESHING.discard(ref)
+
+    threading.Thread(target=_run, daemon=True).start()
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}  # one connection per DB for the server lifetime
@@ -216,23 +247,22 @@ def status() -> dict:
     checks = health_checks(home, _workdir(), SERVER_ID, "confluence-knowledge",
                            index_root=idx_root)
     if "error" not in cfg:
-        # cheap liveness: a 401 here means the saved token died — point at
-        # setup, not at the docs. Cached ~2min: status is polled during
-        # crawls and must not turn into a /user/current DDOS (#171).
+        # identity liveness NEVER blocks on the wire: serve the cached
+        # verdict and refresh it off the call path (#173 — a /user/current
+        # retry burst made status a >2 s call on hostile networks; it is a
+        # light tool). First call computes synchronously so a brand-new
+        # server still answers truthfully.
         ref = profile.credential_ref
         with _state_lock:
             cached = _CREDS_CACHE.get(ref)
-        if cached and time.time() - cached[0] < _CREDS_TTL_S:
+        fresh = cached and time.time() - cached[0] < _CREDS_TTL_S
+        if fresh:
             ok, detail = cached[1], cached[2]
+        elif cached is not None:
+            ok, detail = cached[1], cached[2]
+            _creds_refresh_async(profile)
         else:
-            try:
-                client = _client_for(profile)
-                ep = ("wiki/rest/api/user/current" if profile.env == "cloud"
-                      else "rest/api/user/current")
-                client.get(ep)
-                ok, detail = True, "token valid"
-            except (AccessError, SetupError) as e:
-                ok, detail = False, str(e)
+            ok, detail = _creds_check(profile)
             with _state_lock:
                 _CREDS_CACHE[ref] = (time.time(), ok, detail)
         checks.append({"flag": "creds_valid", "ok": ok, "detail": detail,
@@ -271,6 +301,9 @@ def connect(root: str) -> dict:
     client = _client_for(profile)
     who = client.get("wiki/rest/api/user/current" if profile.env == "cloud"
                      else "rest/api/user/current").json()
+    with _state_lock:
+        _CREDS_CACHE[profile.credential_ref] = \
+            (time.time(), True, "token valid")   # connect just proved it
     principal = who.get("accountId") or who.get("userKey") or who.get("username") or "?"
     scope_key = profile.scope_key(principal, root_id)
     idx = _index_for(scope_key)
