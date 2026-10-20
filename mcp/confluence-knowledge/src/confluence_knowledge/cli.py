@@ -194,8 +194,9 @@ def main() -> None:
             to=args.to, latest=args.latest, rollback=args.rollback))
     if args.cmd == "selftest":
         from .selftest import run
-        print(__import__("json").dumps(
-            run(default_home(), "confluence_knowledge.server"), indent=2))
+        rep = run(default_home(), "confluence_knowledge.server")
+        print(__import__("json").dumps(rep, indent=2))
+        sys.exit(0 if rep["ok"] else 1)
     if args.cmd == "register":
         from .registration import register
         try:

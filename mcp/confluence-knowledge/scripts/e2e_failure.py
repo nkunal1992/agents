@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,7 +66,6 @@ def main() -> None:
 
     cache = os.environ.get("CK_MODEL_CACHE")
     if cache and (Path(cache) / "bge-m3").exists():
-        import shutil
         shutil.copytree(cache, home / "models", dirs_exist_ok=True)
         print("PASS models seeded from cache")
     else:
@@ -158,15 +158,16 @@ def main() -> None:
          "--no-deps", "--quiet"], env, "build broken 99.0.0 wheel")
     env_upd = {**env, "PIP_FIND_LINKS": str(wheels),
                "KNOWLEDGE_UPDATE_INDEX": "http://127.0.0.1:9/{dist}"}
-    u = run([str(cli), "update", "--to", "99.0.0"], env_upd,
-            check_rc=False)
+    u = run([str(vpy), "-m", "confluence_knowledge.cli", "update", "--to", "99.0.0"],
+            env_upd, check_rc=False)
     check(u.returncode == 3, "broken update exits 3", u.returncode)
     check("rolled back" in u.stdout, "rollback reported",
           u.stdout[-1500:])
     v = run([str(vpy), "-m", "pip", "show", "confluence-knowledge"], env, "pip show")
     check("99.0.0" not in v.stdout.split("Version")[1],
           "previous version restored", v.stdout[:200])
-    d = run([str(cli), "selftest"], env_upd, check_rc=False)
+    d = run([str(vpy), "-m", "confluence_knowledge.cli", "selftest"], env_upd,
+            check_rc=False)
     check(d.returncode == 0, "restored install passes selftest",
           d.stdout[-800:])
 
@@ -181,8 +182,8 @@ def main() -> None:
                           pp.read_text(), count=1))
     run([outer, "-m", "pip", "wheel", str(good_src), "-w", str(wheels),
          "--no-deps", "--quiet"], env, "build healthy 99.0.1 wheel")
-    u = run([str(cli), "update", "--to", "99.0.1"], env_upd,
-            check_rc=False)
+    u = run([str(vpy), "-m", "confluence_knowledge.cli", "update", "--to", "99.0.1"],
+            env_upd, check_rc=False)
     check(u.returncode == 0, "healthy update succeeds", u.stdout[-1500:])
     v = run([str(vpy), "-m", "pip", "show", "confluence-knowledge"], env, "pip show")
     check("99.0.1" in v.stdout.split("Version")[1],
