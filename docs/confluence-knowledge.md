@@ -231,6 +231,37 @@ it writes `judge_verdicts.json`, merge with
 judge_verdicts.json`. Standalone mode: the prompt can drive the whole
 benchmark itself.
 
+## Maintainers: publishing (gated)
+
+Every release goes through `.github/workflows/publish-pypi.yml`:
+
+1. Bump `version` in `mcp/<pkg>/pyproject.toml` on a PR and merge to main.
+2. Tag `<pkg>-v<X.Y.Z>rc1` and push. The workflow validates the tag
+   (version match, commit on main, version newer than PyPI), builds the
+   rc wheel, runs unit tests + e2e on it across 3 OSes, publishes the
+   pre-release (pip ignores pre-releases — users can't get it), then
+   verifies it by installing **from PyPI** on all 3 OSes.
+3. Wait for that run to go fully green, then tag `<pkg>-v<X.Y.Z>` on the
+   **same commit** and push. The final build is refused unless a green RC
+   run exists for the same SHA — so what users get is exactly what was
+   verified end to end.
+
+Order matters: publish `confluence-knowledge` first. local/SP pin the
+engine with `~=`, which only accepts released finals — their validate
+step fails until the engine final is on PyPI.
+
+There is no bypass — a hotfix goes through the same rc → final flow.
+
+### If a release turns out bad
+
+**Yank it** (immediate): PyPI → project → Manage → Releases → `<version>`
+→ Options → Yank, with a reason. Effects: `pip install -U` skips it, the
+services' own `update` never targets it, and doctor flags it to everyone
+already on it so they move off. Then fix forward — new patch through the
+rc → final flow.
+
+If a FINAL release's post-publish verification fails, the workflow opens
+a tracking issue with this runbook automatically.
 ## Human feedback loop
 
 - `submit_feedback(scope, question, correction, note)` — stores a saved

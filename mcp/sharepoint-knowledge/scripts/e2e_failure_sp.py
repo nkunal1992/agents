@@ -58,10 +58,29 @@ def main() -> None:
     vpy = bindir / ("python.exe" if os.name == "nt" else "python")
     cli = bindir / ("sharepoint-knowledge.exe" if os.name == "nt"
                     else "sharepoint-knowledge")
-    engine = REPO_SVC.parent / "confluence-knowledge"
-    run([str(vpy), "-m", "pip", "install", str(engine)], env, "engine install")
-    run([str(vpy), "-m", "pip", "install", str(REPO_SVC) + "[models]"], env,
-        "install")
+    engine_spec = (sys.argv[sys.argv.index("--engine-spec") + 1]
+                   if "--engine-spec" in sys.argv else None)
+    spec = sys.argv[sys.argv.index("--spec") + 1] \
+        if "--spec" in sys.argv else str(REPO_SVC) + "[models]"
+    if engine_spec == "index":
+        pass
+    else:
+        eng = engine_spec or str(REPO_SVC.parent / "confluence-knowledge")
+        eng_install = f"{eng}[models,files]" if engine_spec else str(eng)
+        run([str(vpy), "-m", "pip", "install", eng_install], env,
+            "engine install")
+    if engine_spec and engine_spec != "index":
+        run([str(vpy), "-m", "pip", "install", "--no-deps", spec], env,
+            "service install (no-deps)")
+        import importlib.metadata as _md
+        reqs = [r for r in (_md.requires("sharepoint-knowledge") or [])
+                if "confluence-knowledge" not in r and "extra ==" not in r]
+        if reqs:
+            run([str(vpy), "-m", "pip", "install"] + reqs, env,
+                "service deps")
+    else:
+        run([str(vpy), "-m", "pip", "install", spec], env,
+            "install")
 
     cache = os.environ.get("CK_MODEL_CACHE")
     if cache and (Path(cache) / "bge-m3").exists():
