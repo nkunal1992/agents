@@ -78,6 +78,8 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 16 items |
 | `KNOWLEDGE_IDLE_UNLOAD_S` | unload models after this idle time (600; 0 = never) |
 | `KNOWLEDGE_NO_NICE` | `1` disables the lowered OS scheduling priority |
+| `KNOWLEDGE_MIN_FREE_MB` | pause embedding while free memory < this floor (1500; 0 = off) |
+| `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 
 ## Resource usage
 
@@ -86,6 +88,12 @@ an idle server uses ~0.2 GB RSS, an active one ~1.9 GB. Every IDE window
 runs its own server; `doctor`'s `resources` flag warns when more than 4
 are running. Inference is micro-batched and threads/priority are capped
 so the laptop stays responsive while indexing.
+
+Tools run on worker threads (a slow call can't block the MCP loop), and a
+cross-process lease gives each job exactly one worker — a second IDE
+window polls the same crawl instead of racing it. `cancel_crawl` stops a
+running crawl within seconds (`cancelled` is terminal — it never
+auto-resumes) and keeps the previously published snapshot.
 
 Files and directory listings are fetched on `KNOWLEDGE_FETCH_CONCURRENCY`
 worker threads (default 6) while extraction/embedding stays on the crawl

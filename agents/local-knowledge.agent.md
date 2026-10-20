@@ -2,7 +2,7 @@
 name: local-knowledge
 description: Grounded Q&A over a local file or folder — docx/pdf/pptx/xlsx/csv/md/txt/html indexed locally via a self-installed MCP service, per-claim citations, explicit "not documented" refusals. No credentials needed. Bootstraps its local service on first run.
 argument-hint: Give a file or folder path and your question
-tools: ["local-knowledge/status", "local-knowledge/connect", "local-knowledge/start_crawl", "local-knowledge/crawl_step", "local-knowledge/search", "local-knowledge/get_evidence", "local-knowledge/verify_citations", "local-knowledge/submit_feedback", "local-knowledge/feedback_report", "read", "edit", "execute"]
+tools: ["local-knowledge/status", "local-knowledge/connect", "local-knowledge/start_crawl", "local-knowledge/crawl_step", "local-knowledge/cancel_crawl", "local-knowledge/search", "local-knowledge/get_evidence", "local-knowledge/verify_citations", "local-knowledge/submit_feedback", "local-knowledge/feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload

@@ -41,11 +41,13 @@ from confluence_knowledge.retrieval import MODEL_MARKER as _MODEL_ID
 
 
 class LocalCrawler:
-    def __init__(self, index: Index, root: Path, embedder=None, sparse=None):
+    def __init__(self, index: Index, root: Path, embedder=None, sparse=None,
+                 control=None):
         self.index = index
         self.root = root      # realpath — everything indexed must live under it
         self.embedder = embedder
         self.sparse = sparse
+        self.control = control  # cancellation/heartbeat/phase/rate hook
 
     def _chunk_kwargs(self) -> dict:
         measure = getattr(self.embedder, "count_tokens", None)
@@ -140,6 +142,11 @@ class LocalCrawler:
             self.index.db.execute(
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
+            if self.control is not None:
+                self.index.db.execute(
+                    "INSERT OR REPLACE INTO meta VALUES (?,?)",
+                    (f"progress:{job_id}",
+                     json.dumps(self.control.progress.snapshot())))
 
     def step(self, job_id: str) -> dict:
         """Process the durable queue to completion — files are cheap; the
@@ -186,6 +193,8 @@ class LocalCrawler:
         # files/dirs ahead while the main thread extracts+embeds+stages;
         # unchanged files (same content_hash) reuse their live rows
         conc = limits().fetch_concurrency
+        if self.control is not None:
+            conc = self.control.fetch_concurrency(conc)
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (rel, meta, chunks, hash, lvl)
         visited_submit: set[str] = set()
@@ -200,12 +209,23 @@ class LocalCrawler:
             buf, pending = pending, []
             vecs = sp = None
             if self.embedder is not None:
+                if self.control is not None:
+                    self.control.check()
+                    self.control.phase("embedding"
+                                       + (" (battery saver)" if
+                                          self.control.battery_saver()
+                                          else ""))
                 texts = [f"{m['title']}\n{c.heading_path}\n{c.text}"
                          for _, m, chunks, *_ in buf for c in chunks]
                 if texts:
+                    t0 = time.monotonic()
                     vecs = self.embedder.embed(texts)
                     if self.sparse is not None:
                         sp = self.sparse.embed(texts)
+                    if self.control is not None and \
+                            self.control.battery_saver():
+                        # ~50% duty cycle on battery — halves sustained CPU
+                        time.sleep(max(0.0, time.monotonic() - t0))
             off = 0
             for rel, meta, chunks, h, lvl in buf:
                 n = len(chunks)
@@ -223,11 +243,18 @@ class LocalCrawler:
                     return False
                 off += n
             seen.update(rel for rel, *_ in buf)
+            if self.control is not None:
+                self.control.page_done(len(buf))
+                self.control.phase("fetching")
             return True
 
         with ThreadPoolExecutor(max_workers=conc,
                                 thread_name_prefix="crawl-fetch") as pool:
             while queue or inflight:
+                if self.control is not None:
+                    self.control.check()
+                    self.control.progress.remaining = \
+                        len(queue) + len(inflight)
                 if len(seen) >= MAX_FILES:
                     errors.append(
                         f"file cap reached ({MAX_FILES}) — remaining skipped")
@@ -346,6 +373,8 @@ class LocalCrawler:
                     "remaining": len(queue), "pages_seen": len(seen),
                     "errors": errors, "warnings": warns}
         if not queue:
+            if self.control is not None:
+                self.control.phase("publishing")
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",

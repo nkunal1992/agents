@@ -227,6 +227,23 @@ The server is designed to stay out of the way on a developer laptop:
   several times faster than sequential. Re-crawls skip re-embedding any
   page whose content is unchanged (`content_hash` match) — unchanged
   pages cost one GET and no model time.
+- **Tools never block the MCP loop**: every tool runs on a worker thread
+  and a single heavy slot serializes retrieval+rerank inference — a slow
+  call can no longer make the server look hung to the IDE.
+- **Exactly one worker per job**: a cross-process lease (SQLite
+  `job_lease`, heartbeats, dead-pid takeover) stops two IDE windows from
+  racing the same crawl; `start_crawl`/`crawl_step` report
+  `worker: "another IDE window"` instead of a second worker.
+- **Adaptive protection**: `KNOWLEDGE_MIN_FREE_MB` (default 1500, 0
+  disables) pauses embedding when free memory drops below the floor and
+  resumes when it recovers; on battery, `KNOWLEDGE_BATTERY_SAVER`
+  (default 1) halves fetch concurrency and ~halves embed duty cycles —
+  powered-off laptops don't run the fan at full speed.
+- **Cancelling**: `cancel_crawl` stops a running crawl within seconds and
+  marks it `cancelled` — a terminal state that never auto-resumes. The
+  previously published snapshot is untouched; `start_crawl` re-runs and
+  unchanged pages are reused. Cancelling from any IDE window works —
+  the worker notices at its next heartbeat.
 
 ## Troubleshooting
 
@@ -241,6 +258,9 @@ The server is designed to stay out of the way on a developer laptop:
 | fan loud / laptop sluggish during a crawl | `doctor` `resources` flag lists limits; close extra IDE windows (each runs its own server), set `KNOWLEDGE_THREADS=1`, or use the light reranker (`CONFLUENCE_KNOWLEDGE_RERANKER=onnx-community/bge-reranker-base-ONNX`) |
 | `search` says "crawl … still running" | the background crawl hasn't finished; poll `crawl_step` for progress. The index is published only when the whole subtree is crawled |
 | `crawl_step` returns `state: abandoned` | the job was superseded by a newer crawl or its resume was fenced (e.g. model upgrade changed vector dims) — it can never finish; call `start_crawl` for a fresh job |
+| `crawl_step` returns `state: cancelled` | a user ran `cancel_crawl` — it never resumes; `start_crawl` for a fresh job (unchanged pages are reused) |
+| crawl seems stuck in `paused: low memory` | free RAM fell under `KNOWLEDGE_MIN_FREE_MB` — the crawl waits for memory to recover (safe to leave running); close apps or raise the threshold / set 0 to disable |
+| `crawl_step` shows `worker: another IDE window` | another window owns the crawl's lease — progress still polls fine; the local server won't race it |
 | Two `python.exe … confluence_knowledge.server` processes on Windows | expected, not a duplicate: a venv's `Scripts\python.exe` is a launcher that starts the base interpreter as its child. Only one server is running |
 | 403 on some pages | your account lacks permission — those pages are reported as inaccessible |
 | MCP tools not showing | check `.vscode/mcp.json` Start prompt / JetBrains MCP policy; enterprise "MCP servers in Copilot" policy must allow it |

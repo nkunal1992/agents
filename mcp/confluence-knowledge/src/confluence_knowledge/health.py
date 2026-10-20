@@ -68,22 +68,41 @@ def _server_process_count() -> int:
 
 
 def _resources_check(cli: str) -> dict:
-    from .resources import limits
+    from .resources import _psutil, limits
     lim = limits()
     n = _server_process_count()
+    mem = ""
+    free_mb = -1
+    if _psutil is not None:
+        try:
+            free_mb = int(_psutil.virtual_memory().available // 1048576)
+        except Exception as e:  # noqa: BLE001 — reading memory is best-effort
+            mem = f" free_mem_mb=? ({e})"
+    if free_mb >= 0:
+        mem = (f" free_mem_mb={free_mb}"
+               f" min_free_mb={lim.min_free_mb}"
+               + (" LOW" if free_mb < lim.min_free_mb else ""))
     detail = (f"threads={lim.threads} batch_tokens={lim.batch_tokens} "
               f"max_batch={lim.max_batch} "
               f"idle_unload_s={lim.idle_unload_s:.0f} "
               f"fetch_concurrency={lim.fetch_concurrency}"
+              f" guard={'on' if _psutil is not None else 'off (psutil missing)'}"
+              f" on_battery={lim.on_battery()}{mem}"
               + (f"; {n} knowledge server process(es) running"
                  if n >= 0 else "; process count unavailable"))
     too_many = n > 4
-    return {"flag": "resources", "ok": not too_many,
+    low_mem = _psutil is not None and lim.min_free_mb > 0 and \
+        not lim.memory_ok()
+    ok = not too_many and not low_mem
+    return {"flag": "resources", "ok": ok,
             "detail": detail,
-            "remediation": (None if not too_many else
-                            "each IDE window starts its own knowledge "
-                            "servers — close unused windows (idle servers "
-                            "unload their models after ~10 min anyway)")}
+            "remediation": (
+                "free RAM is under KNOWLEDGE_MIN_FREE_MB — crawls pause "
+                "automatically; close apps to free memory" if low_mem else
+                (None if not too_many else
+                 "each IDE window starts its own knowledge servers — close "
+                 "unused windows (idle servers unload their models after "
+                 "~10 min anyway)"))}
 
 
 def _index_checks(index_root: Path) -> list[dict]:

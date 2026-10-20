@@ -23,6 +23,7 @@ dependencies = [
     "keyring>=25.2",
     "mcp>=1.6,<2",
     "pip-system-certs>=5.0",  # OS cert store → works behind TLS-inspecting proxies
+    "psutil>=7,<8",           # memory guard + battery saver for crawls
 ]
 
 [project.urls]

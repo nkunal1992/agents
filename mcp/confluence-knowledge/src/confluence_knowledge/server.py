@@ -6,6 +6,7 @@ are opaque and bound to the site+account+root partition.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -19,6 +20,8 @@ from .client import AccessError, ConfluenceClient, SecurityException, make_clien
 from .crawl import Crawler
 from .feedback import FeedbackStore
 from .index import Index
+from .jobs import CrawlCancelled, LeaseOwner, Progress, crawl_control
+from .mcp_async import tool
 from .models import ModelPool
 from .resources import lower_priority
 from .retrieval import (
@@ -39,12 +42,17 @@ from .settings import (
 
 mcp = FastMCP("confluence-knowledge")
 
-# in-process caches (per server lifetime)
+# in-process caches (per server lifetime) — tools run on worker threads
+# now (mcp_async), so these are guarded by one lock
+_state_lock = threading.RLock()
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}  # one connection per DB for the server lifetime
 _clients: dict[str, ConfluenceClient] = {}  # one HTTP pool per credential
 _feedback: dict[str, FeedbackStore] = {}  # per-scope correction stores
+_owner = LeaseOwner()   # process identity for cross-process crawl leases
+_progress: dict[str, Progress] = {}  # job_id → live progress (lock-free reads)
+_cancel_flags: dict[str, threading.Event] = {}  # job_id → cancel requested
 # module globals kept for test injection; the pool owns real model objects
 _EMBEDDER = None
 _RERANKER = None
@@ -73,26 +81,36 @@ def _step_seconds() -> float:
 def _client_for(profile: SiteProfile):
     c = _clients.get(profile.credential_ref)
     if c is None:
-        token = get_credential(_workdir(), profile.credential_ref)
-        if not token:
-            raise SetupError(
-                "no stored token — run `confluence-knowledge setup` to configure credentials")
-        c = _clients[profile.credential_ref] = make_client(profile, token)
+        with _state_lock:
+            c = _clients.get(profile.credential_ref)
+            if c is None:
+                token = get_credential(_workdir(), profile.credential_ref)
+                if not token:
+                    raise SetupError(
+                        "no stored token — run `confluence-knowledge setup` to configure credentials")
+                c = _clients[profile.credential_ref] = make_client(profile, token)
     return c
 
 
 def _index_for(scope_key: str) -> Index:
     idx = _indexes.get(scope_key)
     if idx is None:
-        idx = _indexes[scope_key] = Index(workspace_index_root(_workdir()) / f"{scope_key}.db")
+        with _state_lock:
+            idx = _indexes.get(scope_key)
+            if idx is None:
+                idx = _indexes[scope_key] = Index(
+                    workspace_index_root(_workdir()) / f"{scope_key}.db")
     return idx
 
 
 def _feedback_for(scope_key: str) -> FeedbackStore:
     st = _feedback.get(scope_key)
     if st is None:
-        st = _feedback[scope_key] = FeedbackStore(
-            workspace_index_root(_workdir()), scope_key, "confluence-knowledge")
+        with _state_lock:
+            st = _feedback.get(scope_key)
+            if st is None:
+                st = _feedback[scope_key] = FeedbackStore(
+                    workspace_index_root(_workdir()), scope_key, "confluence-knowledge")
     return st
 
 
@@ -179,7 +197,7 @@ def _scope(scope_handle: str) -> dict:
     return s
 
 
-@mcp.tool()
+@tool(mcp)
 def status() -> dict:
     """Report setup readiness — never returns secrets."""
     home = _home()
@@ -218,7 +236,7 @@ def status() -> dict:
     }
 
 
-@mcp.tool()
+@tool(mcp)
 def connect(root: str) -> dict:
     """Validate credentials + root readability; bind a scope handle."""
     profile = SiteProfile.load(_home())
@@ -232,7 +250,9 @@ def connect(root: str) -> dict:
     idx = _index_for(scope_key)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root_id}"
-    _scopes[handle] = {"key": scope_key, "profile": profile, "root": root_id}
+    with _state_lock:
+        _scopes[handle] = {"key": scope_key, "profile": profile,
+                           "root": root_id}
     _start_warmup()
     stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
     return {
@@ -248,10 +268,10 @@ def connect(root: str) -> dict:
     }
 
 
-def _crawler(s: dict, embedder=None, sparse=None) -> Crawler:
+def _crawler(s: dict, embedder=None, sparse=None, control=None) -> Crawler:
     return Crawler(_client_for(s["profile"]), _index_for(s["key"]), s["profile"].env,
                    embedder=embedder, sparse=sparse,
-                   site_url=s["profile"].base_url)
+                   site_url=s["profile"].base_url, control=control)
 
 
 # background crawl workers — a crawl runs to completion server-side so a big
@@ -269,46 +289,85 @@ def _worker_loop(s: dict, job_id: str) -> None:
         # waits, not the tool call
         _start_warmup()
         _models_ready.wait()
-        c = _crawler(s, embedder=_embedder(), sparse=_sparse())
+        prog = _progress.setdefault(job_id, Progress())
+        c = _crawler(s, embedder=_embedder(), sparse=_sparse(),
+                     control=crawl_control(
+                         idx, job_id, prog,
+                         _cancel_flags.setdefault(job_id, threading.Event()),
+                         _owner))
         while True:
             r = c.step(job_id, batch=None, budget_s=None)
             if r["state"] != "running":
                 break
+    except CrawlCancelled:
+        pass  # terminal state already in the DB — nothing to overwrite
     except Exception as e:  # noqa: BLE001 — surfaced via job state
         err = f"{type(e).__name__}: {e}"
         _worker_errors[f"{s['key']}:{job_id}"] = err
         job = idx.job(job_id)
         if job and job["state"] == "running":
             idx.save_job(job_id, "error", job["queue"], job["errors"] + [err])
+    finally:
+        idx.release_lease(job_id, _owner.value)
 
 
-def _ensure_worker(s: dict, job_id: str) -> None:
+def _ensure_worker(s: dict, job_id: str) -> bool:
     """Start the crawl worker if none is alive — also the resume path after
-    the server restarts mid-crawl (the queue is durable, the thread isn't)."""
+    the server restarts mid-crawl (the queue is durable, the thread isn't).
+    The cross-process lease makes it exactly one worker per job across all
+    IDE windows; False when another live process owns the crawl."""
     key = f"{s['key']}:{job_id}"
     with _workers_lock:
         t = _workers.get(key)
         if t is not None and t.is_alive():
-            return
+            return True
+        idx = _index_for(s["key"])
+        if not idx.acquire_lease(job_id, _owner.value, _owner.pid):
+            prog = _progress.setdefault(job_id, Progress())
+            prog.worker = "another IDE window"
+            return False
+        prog = _progress.setdefault(job_id, Progress())
+        prog.worker = "self"
         _workers[key] = threading.Thread(
             target=_worker_loop, args=(s, job_id),
             name=f"crawl-{job_id}", daemon=True)
         _workers[key].start()
+        return True
 
 
-@mcp.tool()
+def _progress_for(idx: Index, job_id: str) -> dict:
+    """Merge durable job progress with the live registry (or the persisted
+    blob another process checkpoints) — phase/rate/worker come along."""
+    p = idx.job_progress(job_id)
+    live = _progress.get(job_id)
+    if live is not None:
+        p.update(live.snapshot())
+    else:
+        blob = idx.meta_get(f"progress:{job_id}")
+        other = Progress.from_blob(blob) if blob else None
+        if other is not None:
+            p.update(other.snapshot())
+    return p
+
+
+@tool(mcp)
 def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
     """Begin crawling the root page and all descendants in a background
     thread. The crawl runs to completion without further input — call
     crawl_step only to read progress."""
     s = _scope(scope_handle)
     job_id = _crawler(s).start(s["root"])
-    _ensure_worker(s, job_id)
+    _cancel_flags.pop(job_id, None)
+    _progress[job_id] = Progress()
+    if not _ensure_worker(s, job_id):
+        return {"job_id": job_id, "state": "running",
+                "worker": "another IDE window",
+                "note": "crawl runs in another IDE window — crawl_step to poll"}
     return {"job_id": job_id, "state": "running",
             "note": "crawl runs in the background — call crawl_step to poll"}
 
 
-@mcp.tool()
+@tool(mcp)
 def crawl_step(scope_handle: str, job_id: str) -> dict:
     """Read crawl progress instantly. A running job with no live worker (e.g.
     the server restarted mid-crawl) is resumed automatically; the queue and
@@ -325,14 +384,39 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
         else:
             note = None
         _ensure_worker(s, job_id)
-        p = idx.job_progress(job_id)
+        p = _progress_for(idx, job_id)
         if note:
             p["note"] = note
         return p
-    p = idx.job_progress(job_id)
+    p = _progress_for(idx, job_id)
     if p["state"] == "done":
         p["note"] = "no further calls needed — the index is published"
     return p
+
+
+@tool(mcp)
+def cancel_crawl(scope_handle: str, job_id: str) -> dict:
+    """Stop a running crawl within seconds and mark the job cancelled — it
+    never auto-resumes. The previously published snapshot is kept intact;
+    start_crawl re-runs (unchanged pages are reused)."""
+    s = _scope(scope_handle)
+    idx = _index_for(s["key"])
+    job = idx.job(job_id)
+    if job is None:
+        raise AccessError(f"unknown job {job_id}")
+    if job["state"] != "running":
+        return {"job_id": job_id, "state": job["state"],
+                "note": "already finished — nothing to cancel"}
+    _cancel_flags.setdefault(job_id, threading.Event()).set()
+    idx.save_job(job_id, "cancelled", job["queue"], job["errors"])
+    prog = _progress.get(job_id)
+    if prog is not None:
+        prog.set_phase("cancelled")
+    seen = idx.meta_get(f"seen:{job_id}")
+    return {"job_id": job_id, "state": "cancelled",
+            "pages_seen": len(json.loads(seen)) if seen else 0,
+            "note": "previous snapshot kept — start_crawl to re-run "
+                    "(unchanged pages are reused)"}
 
 
 def _coverage(idx: Index) -> str:
@@ -344,7 +428,7 @@ def _coverage(idx: Index) -> str:
     return "partial" if job["errors"] else "complete"
 
 
-@mcp.tool()
+@tool(mcp, heavy=True)
 def search(scope_handle: str, question: str) -> dict:
     """Hybrid retrieve + local rerank; returns bounded, cited evidence."""
     s = _scope(scope_handle)
@@ -373,10 +457,11 @@ def search(scope_handle: str, question: str) -> dict:
     # snapshot epoch so a refresh can't silently re-point a citation
     set_id = f"ev:{s['key'][:8]}:{uuid.uuid4().hex[:16]}"
     # bound the session cache — sets are never reused after the turn ends
-    while len(_evidence_sets) >= 32:
-        _evidence_sets.pop(next(iter(_evidence_sets)))
-    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
-                              "epoch": idx.snapshot_epoch()}
+    with _state_lock:
+        while len(_evidence_sets) >= 32:
+            _evidence_sets.pop(next(iter(_evidence_sets)))
+        _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
+                                  "epoch": idx.snapshot_epoch()}
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -396,7 +481,7 @@ def search(scope_handle: str, question: str) -> dict:
     }
 
 
-@mcp.tool()
+@tool(mcp)
 def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
                  page_id: str | None = None) -> dict:
     """Return full text of chunks — same scope only. Pass `chunk_ids` for
@@ -429,7 +514,7 @@ def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
         for c in out]}
 
 
-@mcp.tool()
+@tool(mcp)
 def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
     """Store a saved correction — disclosed alongside the docs on
@@ -443,7 +528,7 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
             "note": "will be disclosed on similar questions"}
 
 
-@mcp.tool()
+@tool(mcp)
 def feedback_report(scope_handle: str) -> dict:
     """Aggregated corrections — the agent infers which doc keeps
     getting corrected and suggests it to the user."""
@@ -451,11 +536,12 @@ def feedback_report(scope_handle: str) -> dict:
     return _feedback_for(s["key"]).report()
 
 
-@mcp.tool()
+@tool(mcp)
 def verify_citations(scope_handle: str, evidence_set: str,
                      mappings: list[dict]) -> dict:
     s = _scope(scope_handle)  # binds or SetupError — never KeyError below
-    rec = _evidence_sets.get(evidence_set)
+    with _state_lock:
+        rec = _evidence_sets.get(evidence_set)
     # full 24-char scope key — the key[:8] prefix in the id is cosmetic
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
