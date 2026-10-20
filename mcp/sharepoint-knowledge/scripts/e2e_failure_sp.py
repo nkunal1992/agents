@@ -134,8 +134,12 @@ def main() -> None:
     outer = sys.executable
     # a healthy wheel of the CURRENT version — the rollback restore needs
     # somewhere to find <dist>==<installed> (not on any index yet)
+    wheel_env = {**env, "SETUPTOOLS_USE_DISTUTILS": "local"}
+    run([outer, "-m", "pip", "install", "--quiet", "setuptools", "wheel"],
+        wheel_env, "wheel build deps")
     run([outer, "-m", "pip", "wheel", str(REPO_SVC), "-w", str(wheels),
-         "--no-deps", "--quiet"], env, "build current-version wheel")
+         "--no-deps", "--no-build-isolation", "--quiet"], wheel_env,
+        "build current-version wheel")
     bad_src = sandbox / "bad-pkg"
     import re as _re
     shutil.copytree(REPO_SVC, bad_src,
@@ -149,7 +153,8 @@ def main() -> None:
     broken.write_text('raise RuntimeError("selftest-canary")\n'
                       + broken.read_text())
     run([outer, "-m", "pip", "wheel", str(bad_src), "-w", str(wheels),
-         "--no-deps", "--quiet"], env, "build broken 99.0.0 wheel")
+         "--no-deps", "--no-build-isolation", "--quiet"], wheel_env,
+        "build broken 99.0.0 wheel")
     env_upd = {**env, "PIP_FIND_LINKS": str(wheels),
                "KNOWLEDGE_UPDATE_INDEX": "http://127.0.0.1:9/{dist}"}
     u = run([str(vpy), "-m", "sharepoint_knowledge.cli_sp", "update", "--to", "99.0.0"],
@@ -175,7 +180,8 @@ def main() -> None:
     pp.write_text(_re.sub(r'version = "[^"]+"', 'version = "99.0.1"',
                           pp.read_text(), count=1))
     run([outer, "-m", "pip", "wheel", str(good_src), "-w", str(wheels),
-         "--no-deps", "--quiet"], env, "build healthy 99.0.1 wheel")
+         "--no-deps", "--no-build-isolation", "--quiet"], wheel_env,
+        "build healthy 99.0.1 wheel")
     u = run([str(vpy), "-m", "sharepoint_knowledge.cli_sp", "update", "--to", "99.0.1"],
             env_upd, check_rc=False)
     check(u.returncode == 0, "healthy update succeeds", u.stdout[-1500:])
