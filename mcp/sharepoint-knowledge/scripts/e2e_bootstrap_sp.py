@@ -54,7 +54,8 @@ def venv_bin(venv_dir: Path) -> Path:
 
 
 def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
-              graph_base: str):
+              graph_base: str, spec: str | None = None,
+              engine_spec: str | None = None):
     home = sandbox / "home"
     sp_home = home / ".sharepoint-knowledge"
     work = sandbox / "work"
@@ -87,18 +88,41 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     cli = venv_bin(venv_dir) / ("sharepoint-knowledge.exe"
                               if os.name == "nt" else "sharepoint-knowledge")
 
-    engine = REPO_SVC.parents[0] / "confluence-knowledge"
-    run([str(vpy), "-m", "pip", "install", str(engine)], env,
-        f"engine install {engine.name}")
-    if use_wheel:
+    # engine: --engine-spec <whl|dir> → install it + service --no-deps;
+    # "index" → let pip resolve; default → repo source (not yet on index)
+    no_deps = False
+    if engine_spec == "index":
+        pass
+    else:
+        eng = engine_spec or str(REPO_SVC.parents[0] / "confluence-knowledge")
+        eng_install = f"{eng}[models,files]" if engine_spec else str(eng)
+        run([str(vpy), "-m", "pip", "install", eng_install], env,
+            f"engine install {Path(str(eng)).name}")
+        no_deps = engine_spec is not None
+    if spec:
+        src_spec = spec
+    elif use_wheel:
         wheels = sorted(service_src.parent.glob("sharepoint_knowledge-*.whl"))
         check(wheels, "bundle contains a wheel",
               list(service_src.parent.iterdir()))
         src_spec = f"{wheels[-1]}[models]"
     else:
         src_spec = f"{service_src}[models]"
-    run([str(vpy), "-m", "pip", "install", src_spec], env,
-        f"venv + pip install {src_spec}")
+    if no_deps:
+        # engine pinned outside the index (e.g. an rc wheel that ~= specs
+        # won't accept): install the service with --no-deps, then its
+        # non-engine requirements from the installed metadata
+        run([str(vpy), "-m", "pip", "install", "--no-deps", src_spec], env,
+            f"venv + pip install --no-deps {src_spec}")
+        import importlib.metadata as _md
+        reqs = [r for r in (_md.requires("sharepoint-knowledge") or [])
+                if "confluence-knowledge" not in r and "extra ==" not in r]
+        if reqs:
+            run([str(vpy), "-m", "pip", "install"] + reqs, env,
+                f"service deps {len(reqs)}")
+    else:
+        run([str(vpy), "-m", "pip", "install", src_spec], env,
+            f"venv + pip install {src_spec}")
 
     cache = os.environ.get("CK_MODEL_CACHE")
     models_dir = sp_home / "models"
@@ -175,6 +199,10 @@ async def qa_roundtrip(vpy: Path, env: dict, site_url: str) -> None:
 
 def main() -> None:
     use_wheel = "--wheel" in sys.argv
+    spec = sys.argv[sys.argv.index("--spec") + 1] \
+        if "--spec" in sys.argv else None
+    engine_spec = (sys.argv[sys.argv.index("--engine-spec") + 1]
+                   if "--engine-spec" in sys.argv else None)
     service_src = (BUNDLE_SVC if BUNDLE_SVC.exists() else REPO_SVC).resolve()
     if "--service" in sys.argv:
         service_src = Path(sys.argv[sys.argv.index("--service") + 1]).resolve()
@@ -184,7 +212,8 @@ def main() -> None:
     print(f"sandbox: {sandbox}  fake-graph: {graph_base}")
     try:
         vpy, env, site_url = bootstrap(sandbox, service_src, use_wheel,
-                                       graph_base)
+                                       graph_base, spec=spec,
+                                       engine_spec=engine_spec)
         asyncio.run(qa_roundtrip(vpy, env, site_url))
         check(any(h == "/v1.0/me" for h in hits), "identity heartbeat hit")
         check(all(h.startswith("/download/") for h in noauth),

@@ -6,7 +6,8 @@
 mcp/confluence-knowledge/.venv/
 mcp/confluence-knowledge/dist/
 mcp/confluence-knowledge/*.egg-info/
-mcp/confluence-knowledge/**/__pycache__/
+__pycache__/
+*.pyc
 mcp/confluence-knowledge/.pytest_cache/
 mcp/confluence-knowledge/.ruff_cache/
 dist/

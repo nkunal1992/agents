@@ -58,7 +58,9 @@ def main() -> None:
     vpy = bindir / ("python.exe" if os.name == "nt" else "python")
     cli = bindir / ("confluence-knowledge.exe" if os.name == "nt"
                     else "confluence-knowledge")
-    run([str(vpy), "-m", "pip", "install", str(REPO_SVC) + "[models]"], env,
+    spec = sys.argv[sys.argv.index("--spec") + 1] \
+        if "--spec" in sys.argv else str(REPO_SVC) + "[models]"
+    run([str(vpy), "-m", "pip", "install", spec], env,
         "install")
 
     cache = os.environ.get("CK_MODEL_CACHE")

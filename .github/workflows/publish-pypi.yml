@@ -1,32 +1,372 @@
 name: publish-pypi
+
+# Gate → build once → test the exact wheel → publish → verify from PyPI.
+#
+# Release procedure (see docs/*-knowledge.md "Maintainers: publishing"):
+#   1. bump `version` in mcp/<pkg>/pyproject.toml on a PR, merge to main
+#   2. tag `<pkg>-v<X.Y.Z>rc1` → this workflow builds it as an rc, gates on
+#      tests + e2e, publishes the pre-release (pip ignores it — users can't
+#      get it), then verifies it by installing FROM PyPI on 3 OSes
+#   3. tag `<pkg>-v<X.Y.Z>` on the SAME commit — validate() refuses unless a
+#      green RC run exists for this SHA
+#   Order: confluence-knowledge first — local/SP pins (~=) only accept
+#   released finals, so their validate() fails until the engine is out.
 on:
   push:
     tags: ["confluence-knowledge-v*", "local-knowledge-v*", "sharepoint-knowledge-v*"]
 
+concurrency: publish-${{ github.ref_name }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write  # trusted publishing — falls back to secret token
+      actions: read  # gh run list — the final-tag RC check
+    outputs:
+      pkg: ${{ steps.gate.outputs.pkg }}
+      version: ${{ steps.gate.outputs.version }}
+      base: ${{ steps.gate.outputs.base }}
+      is_rc: ${{ steps.gate.outputs.is_rc }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # merge-base needs full history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest packaging
+      - name: Gate unit tests
+        run: pytest scripts/tests -q
+      - name: Validate tag
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin main --depth=50
+          python scripts/release_gate.py validate \
+            --tag "${{ github.ref_name }}" --sha "${{ github.sha }}"
+
+  build:
+    runs-on: ubuntu-latest
+    needs: validate
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # tag <pkg>-vX.Y.Z → package dir mcp/<pkg>
-      - name: Pick the package dir from the tag
-        id: pkg
+      - name: Inject rc version (rc builds only)
+        if: needs.validate.outputs.is_rc == 'True'
+        run: python scripts/release_gate.py set-version \
+          --pkg "${{ needs.validate.outputs.pkg }}" \
+          --version "${{ needs.validate.outputs.version }}"
+      - name: Build dists
         run: |
-          name="${GITHUB_REF_NAME%-v*}"
-          echo "dir=${name}" >> "$GITHUB_OUTPUT"
-          echo "building mcp/${name}"
-      - name: build dists
-        run: pip install build && python -m build "mcp/${{ steps.pkg.outputs.dir }}"
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        # API-token auth: PYPI_API_TOKEN repository secret on GitHub.
-        # (Trusted publishing works too — PyPI project → Publishing — but the
-        #  secret is explicit and needs no per-project setup.)
+          pip install build twine
+          python -m build "mcp/${{ needs.validate.outputs.pkg }}"
+          twine check "mcp/${{ needs.validate.outputs.pkg }}/dist"/*
+      - uses: actions/upload-artifact@v4
         with:
-          packages-dir: "mcp/${{ steps.pkg.outputs.dir }}/dist/"
+          name: dist-${{ needs.validate.outputs.pkg }}
+          path: mcp/${{ needs.validate.outputs.pkg }}/dist/
+          retention-days: 7
+
+  test-artifact:
+    # unit tests + CLI smoke on the BUILT wheel — not the repo source
+    runs-on: ${{ matrix.os }}
+    needs: [validate, build]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.validate.outputs.pkg }}
+          path: dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the built wheel into a fresh venv
+        shell: bash
+        run: |
+          python -m venv .venv-gate
+          VPY=".venv-gate/bin/python"
+          [ -f ".venv-gate/Scripts/python.exe" ] && VPY=".venv-gate/Scripts/python.exe"
+          echo "VPY=$VPY" >> "$GITHUB_ENV"
+          "$VPY" -m pip install --quiet "dist/$(ls dist | grep '\.whl$')[dev]"
+      - name: Assert import comes from the wheel (not repo source)
+        shell: bash
+        run: |
+          "$VPY" - <<'PY'
+          import importlib, sys
+          mod = {"confluence-knowledge": "confluence_knowledge",
+                 "local-knowledge": "local_knowledge",
+                 "sharepoint-knowledge": "sharepoint_knowledge"}["${{ needs.validate.outputs.pkg }}"]
+          m = importlib.import_module(mod)
+          assert "site-packages" in str(m.__file__), m.__file__
+          print("installed wheel:", m.__file__)
+          PY
+      - name: Unit tests against the wheel
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          "$VPY" -m pytest "mcp/${{ needs.validate.outputs.pkg }}/tests" -q
+      - name: CLI smoke
+        shell: bash
+        run: |
+          "$VPY" -m pip show ${{ needs.validate.outputs.pkg }} >/dev/null
+          CLI=".venv-gate/bin/${{ needs.validate.outputs.pkg }}"
+          [ -f ".venv-gate/Scripts/${{ needs.validate.outputs.pkg }}.exe" ] && \
+            CLI=".venv-gate/Scripts/${{ needs.validate.outputs.pkg }}.exe"
+          "$CLI" --help >/dev/null
+          "$CLI" doctor || test $? -le 4
+
+  e2e-artifact:
+    # real bootstrap replay against the BUILT wheel — 3 OSes
+    runs-on: ${{ matrix.os }}
+    needs: [validate, build]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.validate.outputs.pkg }}
+          path: dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install engine for model warmup
+        run: pip install -e './mcp/confluence-knowledge[models]'
+      - name: Cache model artifacts
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: ~/.cache/ck-models
+          key: ck-models-${{ hashFiles('mcp/confluence-knowledge/src/confluence_knowledge/models.lock.json') }}-${{ runner.os }}
+      - name: Warm model cache (only on lock change)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -c "from pathlib import Path; from confluence_knowledge.retrieval import prepare_models; prepare_models(Path.home()/'.cache'/'ck-models')"
+      - name: Bootstrap e2e on the wheel
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+        run: |
+          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          case "${{ needs.validate.outputs.pkg }}" in
+            confluence-knowledge)
+              python mcp/confluence-knowledge/scripts/e2e_bootstrap.py \
+                --spec "$WHEEL[models]" ;;
+            local-knowledge)
+              python mcp/local-knowledge/scripts/e2e_bootstrap_local.py \
+                --spec "$WHEEL[models]" --engine-spec index ;;
+            sharepoint-knowledge)
+              python mcp/sharepoint-knowledge/scripts/e2e_bootstrap_sp.py \
+                --spec "$WHEEL[models]" --engine-spec index ;;
+          esac
+      - name: Failure e2e on the wheel
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+        run: |
+          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          case "${{ needs.validate.outputs.pkg }}" in
+            confluence-knowledge)
+              python mcp/confluence-knowledge/scripts/e2e_failure.py \
+                --spec "$WHEEL[models]" ;;
+            local-knowledge)
+              python mcp/local-knowledge/scripts/e2e_failure_local.py \
+                --spec "$WHEEL[models]" --engine-spec index ;;
+            sharepoint-knowledge)
+              python mcp/sharepoint-knowledge/scripts/e2e_failure_sp.py \
+                --spec "$WHEEL[models]" --engine-spec index ;;
+          esac
+
+  downstream:
+    # engine releases only: does the new engine wheel break local/SP?
+    runs-on: ${{ matrix.os }}
+    needs: [validate, build]
+    if: needs.validate.outputs.pkg == 'confluence-knowledge'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        svc: [local-knowledge, sharepoint-knowledge]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.validate.outputs.pkg }}
+          path: dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install packaging
+      - name: Install engine for model warmup
+        run: pip install -e './mcp/confluence-knowledge[models]'
+      - name: Cache model artifacts
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: ~/.cache/ck-models
+          key: ck-models-${{ hashFiles('mcp/confluence-knowledge/src/confluence_knowledge/models.lock.json') }}-${{ runner.os }}
+      - name: Warm model cache (only on lock change)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -c "from pathlib import Path; from confluence_knowledge.retrieval import prepare_models; prepare_models(Path.home()/'.cache'/'ck-models')"
+      - name: Repo-HEAD service e2e with the new engine wheel
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+        run: |
+          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          case "${{ matrix.svc }}" in
+            local-knowledge) SCRIPT=e2e_bootstrap_local.py ;;
+            sharepoint-knowledge) SCRIPT=e2e_bootstrap_sp.py ;;
+          esac
+          python "mcp/${{ matrix.svc }}/scripts/$SCRIPT" \
+            --service "mcp/${{ matrix.svc }}" --engine-spec "$WHEEL"
+      - name: Published service e2e (when its pin admits this engine)
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+          SVC: ${{ matrix.svc }}
+          ENGINE_VER: ${{ needs.validate.outputs.version }}
+        run: |
+          WHEEL="$PWD/dist/$(ls dist | grep '\.whl$')"
+          SPEC=$(python - <<'PY'
+          import json, os, urllib.request
+          from packaging.specifiers import SpecifierSet
+          from packaging.version import Version
+          svc, eng = os.environ["SVC"], os.environ["ENGINE_VER"]
+          d = json.load(urllib.request.urlopen(
+              f"https://pypi.org/pypi/{svc}/json"))
+          pub = d["info"]["version"]
+          req = next((r for r in (d["info"].get("requires_dist") or [])
+                      if r.startswith("confluence-knowledge")), "")
+          spec = req.split(";")[0].split("]")[-1][len("confluence-knowledge"):]
+          if SpecifierSet(spec or "").contains(Version(eng),
+                                               prereleases=True):
+              print(f"{svc}[models]=={pub}")
+          else:
+              print("")
+          PY
+          )
+          if [ -z "$SPEC" ]; then
+            echo "published ${{ matrix.svc }} pin doesn't admit ${{ needs.validate.outputs.version }} — skipping"
+            exit 0
+          fi
+          echo "testing published $SPEC against engine wheel"
+          case "${{ matrix.svc }}" in
+            local-knowledge) SCRIPT=e2e_bootstrap_local.py ;;
+            sharepoint-knowledge) SCRIPT=e2e_bootstrap_sp.py ;;
+          esac
+          python "mcp/${{ matrix.svc }}/scripts/$SCRIPT" \
+            --spec "$SPEC" --engine-spec "$WHEEL"
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [validate, build, test-artifact, e2e-artifact, downstream]
+    if: >-
+      ${{ always()
+          && needs.validate.result == 'success'
+          && needs.test-artifact.result == 'success'
+          && needs.e2e-artifact.result == 'success'
+          && (needs.downstream.result == 'success'
+              || needs.downstream.result == 'skipped') }}
+    permissions:
+      contents: read
+      id-token: write  # trusted publishing — falls back to secret token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.validate.outputs.pkg }}
+          path: "mcp/${{ needs.validate.outputs.pkg }}/dist/"
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: "mcp/${{ needs.validate.outputs.pkg }}/dist/"
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+  verify-published:
+    # the exact thing users get — fresh install FROM PyPI on 3 OSes.
+    # For RCs this job's success is what allows the final tag.
+    runs-on: ${{ matrix.os }}
+    needs: [validate, publish]
+    permissions:
+      issues: write  # auto-issue when a FINAL fails verification
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Wait for the release to be installable
+        shell: bash
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://pypi.org/pypi/${{ needs.validate.outputs.pkg }}/${{ needs.validate.outputs.version }}/json")
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "release not on PyPI after 10 min" && exit 1
+      - name: Install engine for model warmup
+        run: pip install -e './mcp/confluence-knowledge[models]'
+      - name: Cache model artifacts
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: ~/.cache/ck-models
+          key: ck-models-${{ hashFiles('mcp/confluence-knowledge/src/confluence_knowledge/models.lock.json') }}-${{ runner.os }}
+      - name: Warm model cache (only on lock change)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -c "from pathlib import Path; from confluence_knowledge.retrieval import prepare_models; prepare_models(Path.home()/'.cache'/'ck-models')"
+      - name: Fresh-install e2e from PyPI
+        shell: bash
+        env:
+          CK_MODEL_CACHE: ~/.cache/ck-models/models
+        run: |
+          SPEC="${{ needs.validate.outputs.pkg }}[models]==${{ needs.validate.outputs.version }}"
+          case "${{ needs.validate.outputs.pkg }}" in
+            confluence-knowledge)
+              python mcp/confluence-knowledge/scripts/e2e_bootstrap.py \
+                --spec "$SPEC" ;;
+            local-knowledge)
+              python mcp/local-knowledge/scripts/e2e_bootstrap_local.py \
+                --spec "$SPEC" --engine-spec index ;;
+            sharepoint-knowledge)
+              python mcp/sharepoint-knowledge/scripts/e2e_bootstrap_sp.py \
+                --spec "$SPEC" --engine-spec index ;;
+          esac
+      - name: Final release failed verification — file yank issue
+        if: ${{ failure() && needs.validate.outputs.is_rc == 'False' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --label bug --title \
+            "Release ${{ needs.validate.outputs.pkg }} ${{ needs.validate.outputs.version }} failed post-publish verification — yank it" \
+            --body "Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          The release was uploaded to PyPI but failed the fresh-install
+          verification on ${{ matrix.os }}.
+
+          **Action: yank the release** — PyPI → ${{ needs.validate.outputs.pkg }}
+          → Manage → Releases → ${{ needs.validate.outputs.version }} → Options
+          → Yank (pick a reason). Effects: \`pip install -U\` and the services'
+          own \`update\` skip it, and doctor flags it for anyone already on it.
+          Then fix forward through the normal RC → final flow."
