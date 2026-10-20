@@ -56,6 +56,9 @@ class LocalCrawler:
     def start(self) -> str:
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
+        stamped = self.index.model_id()
+        if stamped is not None and stamped != _MODEL_ID:
+            self.index.clear_scope()
         self.index.create_job(job_id, str(self.root))
         first = f"dir:{self.root}" if self.root.is_dir() else f"file:{self.root}"
         self.index.save_job(job_id, "running", [first], [])

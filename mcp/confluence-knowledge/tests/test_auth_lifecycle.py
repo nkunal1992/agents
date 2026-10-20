@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from confluence_knowledge import server
-from confluence_knowledge.client import RULES_DC, ConfluenceClient
+from confluence_knowledge.client import RULES_DC, AccessError, ConfluenceClient
 from confluence_knowledge.crawl import Crawler
 from confluence_knowledge.index import Index
 from confluence_knowledge.jobs import Progress, crawl_control
@@ -60,7 +60,7 @@ def _flipping_auth():
 
 
 def test_auth_pause_then_resume(tmp_path, monkeypatch):
-    import confluence_knowledge.jobs as jobs
+    from confluence_knowledge import jobs
     monkeypatch.setattr(jobs, "_AUTH_PROBE_S", 0.05)
     client, factory, state = _flipping_auth()
     idx = Index(tmp_path / "s.db")
@@ -81,7 +81,7 @@ def test_auth_pause_then_resume(tmp_path, monkeypatch):
 
 
 def test_auth_pause_times_out(tmp_path, monkeypatch):
-    import confluence_knowledge.jobs as jobs
+    from confluence_knowledge import jobs
     monkeypatch.setattr(jobs, "_AUTH_PROBE_S", 0.02)
     monkeypatch.setattr(jobs, "_AUTH_PAUSE_MAX_S", 0.2)
     client, factory, _ = _flipping_auth()
@@ -95,13 +95,13 @@ def test_auth_pause_times_out(tmp_path, monkeypatch):
     c._embedder = _Embed()
     # pause ceiling → the step surfaces the auth error rather than
     # hanging forever; the worker loop would persist it as job "error"
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(AccessError) as exc:
         c.step(job, batch=None)
     assert "auth pause timed out" in str(exc.value)
 
 
 def test_auth_pause_notifies(tmp_path, monkeypatch):
-    import confluence_knowledge.jobs as jobs
+    from confluence_knowledge import jobs
     monkeypatch.setattr(jobs, "_AUTH_PROBE_S", 0.02)
     monkeypatch.setattr(jobs, "_AUTH_PAUSE_MAX_S", 0.2)
     got = []
@@ -115,6 +115,6 @@ def test_auth_pause_notifies(tmp_path, monkeypatch):
                               owner=server._owner, hb_s=60,
                               notify=lambda t, b: got.append((t, b)))
     c._embedder = _Embed()
-    with pytest.raises(Exception):
+    with pytest.raises(AccessError):
         c.step(job, batch=None)
     assert got and "token" in got[0][1]

@@ -221,6 +221,9 @@ class SPCrawler:
     def start(self, root_entry: str) -> str:
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
+        stamped = self.index.model_id()
+        if stamped is not None and stamped != _MODEL_ID:
+            self.index.clear_scope()
         self.index.create_job(job_id, root_entry)
         self.index.save_job(job_id, "running", [root_entry], [])
         return job_id

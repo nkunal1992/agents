@@ -211,8 +211,7 @@ def test_stale_model_notifies_and_autoreindexes(wired_status, monkeypatch):
 
 
 def test_fingerprint_covers_persisted_models():
-    from confluence_knowledge.retrieval import (
-        EMBED_MODEL_ID, MODEL_MARKER, RERANK_REPO, SPARSE_MODEL_ID)
+    from confluence_knowledge.retrieval import EMBED_MODEL_ID, MODEL_MARKER, RERANK_REPO, SPARSE_MODEL_ID
     assert EMBED_MODEL_ID in MODEL_MARKER
     assert SPARSE_MODEL_ID in MODEL_MARKER
     # reranker deliberately absent — query-time only, must not force a

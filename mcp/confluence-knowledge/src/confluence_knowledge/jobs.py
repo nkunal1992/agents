@@ -180,7 +180,7 @@ class CrawlControl:
                     "confluence-knowledge",
                     "session expired — provide a new API token to "
                     "continue the crawl")
-            except Exception:  # noqa: BLE001 — notify is best-effort
+            except Exception:  # noqa: BLE001,S110 — notify is best-effort
                 pass
         since = time.time()
         while True:
@@ -195,7 +195,7 @@ class CrawlControl:
                 if probe():
                     self.progress.set_phase("resuming: token rotated")
                     return
-            except Exception:  # noqa: BLE001 — probe errors mean still dead
+            except Exception:  # noqa: BLE001,S110 — probe errors = still dead
                 pass
             self.sleep(_AUTH_PROBE_S)
             self._heartbeat()

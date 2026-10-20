@@ -4,8 +4,6 @@ not deadlock a crawl."""
 import threading
 import time
 
-import pytest
-
 from confluence_knowledge import jobs, server
 from confluence_knowledge.index import Index
 from confluence_knowledge.jobs import Progress, crawl_control
