@@ -179,8 +179,9 @@ def main() -> None:
             engine_dist="confluence-knowledge"))
     if args.cmd == "selftest":
         from confluence_knowledge.selftest import run
-        print(__import__("json").dumps(
-            run(home(), "sharepoint_knowledge.server_sp"), indent=2))
+        rep = run(home(), "sharepoint_knowledge.server_sp")
+        print(__import__("json").dumps(rep, indent=2))
+        sys.exit(0 if rep["ok"] else 1)
     if args.cmd == "register":
         results = _register(
             ide=args.ide,
