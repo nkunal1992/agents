@@ -45,7 +45,9 @@ pausing between them; the user sees each command anyway.
    `confluence-knowledge doctor` prints a **checks** block — each flag maps
    to exactly one fix; run ONLY that fix, never reinstall on red flags:
    - `configured: false` or `creds_valid ✗` → `setup` (rotate credentials)
-   - `deps ✗` → `"$VENV_PY" -m pip install -U "confluence-knowledge[models]"`
+   - `deps ✗` → run the pinned reinstall doctor prints
+     (`pip install "confluence-knowledge[models]==<installed>"` — a repair must never
+     upgrade into an unverified release)
    - `model_embed / model_rerank / model_rerank_light / model_sparse ✗` →
      `prepare-models` (a partial download — never pip reinstall)
    - `registration ✗` → `register --ide auto --workspace "<repo>"`
@@ -53,11 +55,16 @@ pausing between them; the user sees each command anyway.
    - `index:* older model` → `start_crawl` on that scope (one rebuild)
    - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
    - `python ✗` → venv was built on <3.11 — rebuild it from step 1
-   - `update available` in doctor's output → upgrade once via the venv
-     python (`"$VENV_PY" -m pip install -U "confluence-knowledge[models]"` —
-     works on every OS; the `update` subcommand prints this same command on
-     Windows where a running exe can't self-replace), then `prepare-models`,
-     then re-doctor.
+   - `update available` → `confluence-knowledge update` — installs the newest
+     **soaked** release (3-day delay by design), self-tests it, and rolls
+     back automatically if it fails. A freshly published release shows as
+     "soaking until <date>" — that's intentional, wait. If the update ends
+     with "rolled back" the old version is already restored and verified;
+     report the failure, don't retry blindly. On Windows the update must run
+     through the venv python — `update` prints the exact command. After a
+     successful update: reload the IDE window, then re-run doctor.
+   - `release ✗` → the installed version was yanked — `confluence-knowledge update` moves
+     to the last-good release.
    - all green but tools still absent → `register` (step 4) + reload
      handoff. Never re-run install/prepare-models on a healthy setup.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in

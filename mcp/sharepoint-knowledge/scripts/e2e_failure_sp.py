@@ -127,6 +127,61 @@ def main() -> None:
     check("creds_valid" in d.stdout and "setup" in d.stdout,
           "revoked token → creds flag + setup remediation", d.stdout)
 
+
+    # ---- break N: bad upgrade — install ok but selftest fails → rollback --
+    wheels = sandbox / "wheels"
+    wheels.mkdir()
+    outer = sys.executable
+    # a healthy wheel of the CURRENT version — the rollback restore needs
+    # somewhere to find <dist>==<installed> (not on any index yet)
+    run([outer, "-m", "pip", "wheel", str(REPO_SVC), "-w", str(wheels),
+         "--no-deps", "--quiet"], env, "build current-version wheel")
+    bad_src = sandbox / "bad-pkg"
+    import re as _re
+    shutil.copytree(REPO_SVC, bad_src,
+                    ignore=shutil.ignore_patterns(
+                        "dist", "build", "__pycache__", "*.egg-info",
+                        ".venv", "tests", "scripts"))
+    pp = bad_src / "pyproject.toml"
+    pp.write_text(_re.sub(r'version = "[^"]+"', 'version = "99.0.0"',
+                          pp.read_text(), count=1))
+    broken = bad_src / "src" / "sharepoint_knowledge" / "server_sp.py"
+    broken.write_text('raise RuntimeError("selftest-canary")\n'
+                      + broken.read_text())
+    run([outer, "-m", "pip", "wheel", str(bad_src), "-w", str(wheels),
+         "--no-deps", "--quiet"], env, "build broken 99.0.0 wheel")
+    env_upd = {**env, "PIP_FIND_LINKS": str(wheels),
+               "KNOWLEDGE_UPDATE_INDEX": "http://127.0.0.1:9/{dist}"}
+    u = run([str(cli), "update", "--to", "99.0.0"], env_upd,
+            check_rc=False)
+    check(u.returncode == 3, "broken update exits 3", u.returncode)
+    check("rolled back" in u.stdout, "rollback reported",
+          u.stdout[-1500:])
+    v = run([str(vpy), "-m", "pip", "show", "sharepoint-knowledge"], env, "pip show")
+    check("99.0.0" not in v.stdout.split("Version")[1],
+          "previous version restored", v.stdout[:200])
+    d = run([str(cli), "selftest"], env_upd, check_rc=False)
+    check(d.returncode == 0, "restored install passes selftest",
+          d.stdout[-800:])
+
+    # healthy upgrade: same version bump, no injected failure — must stick
+    good_src = sandbox / "good-pkg"
+    shutil.copytree(REPO_SVC, good_src,
+                    ignore=shutil.ignore_patterns(
+                        "dist", "build", "__pycache__", "*.egg-info",
+                        ".venv", "tests", "scripts"))
+    pp = good_src / "pyproject.toml"
+    pp.write_text(_re.sub(r'version = "[^"]+"', 'version = "99.0.1"',
+                          pp.read_text(), count=1))
+    run([outer, "-m", "pip", "wheel", str(good_src), "-w", str(wheels),
+         "--no-deps", "--quiet"], env, "build healthy 99.0.1 wheel")
+    u = run([str(cli), "update", "--to", "99.0.1"], env_upd,
+            check_rc=False)
+    check(u.returncode == 0, "healthy update succeeds", u.stdout[-1500:])
+    v = run([str(vpy), "-m", "pip", "show", "sharepoint-knowledge"], env, "pip show")
+    check("99.0.1" in v.stdout.split("Version")[1],
+          "healthy upgrade installed", v.stdout[:200])
+
     print("\nE2E FAILURE-MODE OK")
     srv.shutdown()
 

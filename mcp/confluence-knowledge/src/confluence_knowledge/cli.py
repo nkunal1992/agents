@@ -97,6 +97,15 @@ def _doctor() -> int:
     from .update import check
     try:
         s = status()
+        upd = check("confluence-knowledge")
+        if upd.get("installed_yanked"):
+            s.setdefault("checks", []).append({
+                "flag": "release", "ok": False,
+                "detail": f"installed {upd['installed']} was yanked"
+                          + (f" ({upd['yank_reason']})"
+                             if upd.get("yank_reason") else ""),
+                "remediation": "confluence-knowledge update "
+                               "(moves to the last-good release)"})
         print(json.dumps(s, indent=2))
         bad = [c for c in s.get("checks", []) if not c["ok"]]
         if bad:
@@ -105,17 +114,19 @@ def _doctor() -> int:
                 print(f"  ✗ {c['flag']}: {c['detail']}")
                 if c.get("remediation"):
                     print(f"    → {c['remediation']}")
-        upd = check("confluence-knowledge")
         if upd["installed"]:
             line = f"version: {upd['installed']}"
             if upd["latest"]:
                 line += f" (latest: {upd['latest']})"
             elif upd["latest"] is None:
                 line += " (latest: unchecked — offline or internal mirror)"
+            if upd.get("pending"):
+                line += (f" — {upd['pending']['version']} soaking until "
+                         f"{upd['pending']['offered_after']}")
             print(line)
         if upd["update_available"]:
             print("update available: run `confluence-knowledge update` "
-                  "(or pip install -U confluence-knowledge[models])")
+                  "(soaked release, self-tested, rolls back on failure)")
         if s.get("configured"):
             from .server import _client_for  # internal but fine in CLI
             profile = SiteProfile.load(default_home())
@@ -141,7 +152,17 @@ def main() -> None:
     sub.add_parser("setup", help="guided credential + config setup")
     sub.add_parser("doctor", help="verify config, credentials, models")
     sub.add_parser("prepare-models", help="download the pinned local models")
-    sub.add_parser("update", help="upgrade this package via pip -U")
+    u = sub.add_parser("update", help="safe upgrade — soaked release, "
+                     "self-test, auto-rollback")
+    g = u.add_mutually_exclusive_group()
+    g.add_argument("--latest", action="store_true",
+                   help="skip the release soak")
+    g.add_argument("--to", metavar="VERSION",
+                   help="install an exact version")
+    g.add_argument("--rollback", action="store_true",
+                   help="restore the previous environment")
+    sub.add_parser("selftest", help="verify the install end to end "
+                   "(tools, models, mini-RAG)")
     reg = sub.add_parser(
         "register",
         help="write this server into the IDE's MCP config (no manual paste)")
@@ -166,27 +187,15 @@ def main() -> None:
             print(line)
         return
     if args.cmd == "update":
-        import subprocess
-        cmd = [sys.executable, "-m", "pip", "install", "-U",
-               "confluence-knowledge[models]"]
-        # a running MCP server holds open files — on Windows pip can't
-        # replace them and on any OS the old code keeps serving until the
-        # IDE restarts. Say it plainly before doing anything.
-        print("note: quit the IDE (or stop the MCP server) before updating —"
-              " a running server can't be replaced cleanly", flush=True)
-        if os.name == "nt":
-            # this exe is the running process on Windows — pip can't replace
-            # a file that's in use; hand the user the equivalent python -m
-            # pip command instead (same mechanism `pip install -U pip` uses)
-            print("on Windows, upgrade via the venv python directly:\n  "
-                  + " ".join(f'"{c}"' if " " in c else c for c in cmd))
-            return
-        r = subprocess.run(cmd, check=False)
-        if r.returncode == 0:
-            print("\nupdated — run `confluence-knowledge prepare-models` "
-                  "(new releases may pin new model artifacts) then "
-                  "`confluence-knowledge doctor`")
-        sys.exit(r.returncode)
+        from .update import run_update
+        sys.exit(run_update(
+            "confluence-knowledge", cli_module="confluence_knowledge.cli",
+            home=default_home(), server_module="confluence_knowledge.server",
+            to=args.to, latest=args.latest, rollback=args.rollback))
+    if args.cmd == "selftest":
+        from .selftest import run
+        print(__import__("json").dumps(
+            run(default_home(), "confluence_knowledge.server"), indent=2))
     if args.cmd == "register":
         from .registration import register
         try:

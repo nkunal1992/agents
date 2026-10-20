@@ -76,3 +76,25 @@ def test_agent_documents_per_account_index():
     must explain that a different sign-in re-crawls by design."""
     doc = AGENT.read_text()
     assert "per-account" in doc
+
+
+def test_agent_describes_safe_update():
+    """`update` is a safe flow: soaked releases only, self-test after
+    install, automatic rollback. The agent must relay that contract plus
+    the yanked-release flag."""
+    doc = AGENT.read_text()
+    assert "soaked" in doc or "soak" in doc, "agent must explain the release soak"
+    assert "rolled back" in doc, "agent must explain automatic rollback"
+    assert "release" in doc and "yanked" in doc, "agent must cover the release flag"
+    assert "selftest" in doc or "self-test" in doc
+    assert "-U" not in doc or "never" in doc.lower(), \
+        "agent must not prescribe `pip install -U` anymore"
+
+
+def test_agent_update_targets_subcommand_not_pip():
+    """The `update` path goes through the CLI's safe flow — an agent that
+    tells users to `pip install -U` bypasses the soak + rollback."""
+    doc = AGENT.read_text()
+    import re as _re
+    assert not _re.search(r"pip install -U", doc), \
+        "agent prescribes raw `pip install -U` — must route through update"

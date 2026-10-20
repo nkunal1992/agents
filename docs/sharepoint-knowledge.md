@@ -84,6 +84,33 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
   connector-agnostic; needs a second client + auth module
 - App-only client-credentials fallback for tenants that block device flow
 
+## Updating safely
+
+`sharepoint-knowledge update` is deliberately conservative:
+
+- **Only soaked releases** — a release must sit on PyPI for 3 days before
+  it's offered (`sharepoint-knowledge update --latest` skips the soak; `--to <ver>` pins
+  exactly). A just-published version shows as "soaking until <date>" in
+  doctor — that's the intended delay, not a bug.
+- **Self-test after install** — it runs `import server → tool list →
+  health checks → a real mini-RAG` on the new code before declaring
+  success.
+- **Automatic rollback** — a `pip freeze` snapshot goes to
+  `<home>/rollback/`; any stage failing restores the previous environment
+  and re-verifies it. `sharepoint-knowledge update --rollback` restores the last
+  snapshot manually. The last 3 snapshots are kept.
+- **Yanked releases** — never installable. If you're on one, doctor shows
+  a `release` flag and `update` moves you to the last-good release even
+  when that's a downgrade.
+- **Quit the IDE first** — a running MCP server holds the old code open.
+  On Windows a running exe can't replace itself, so `update` prints the
+  equivalent `venv-python -m <cli_module> update` command to run instead.
+- `sharepoint-knowledge selftest` — the same checks on demand ("is my install actually
+  working?"), exit 0/1.
+
+Env knobs: `KNOWLEDGE_UPDATE_INDEX` (mirror URL template),
+`KNOWLEDGE_UPDATE_SOAK_DAYS` (default 3 — 0 disables the delay).
+
 ## Maintainers: publishing (gated)
 
 Every release goes through `.github/workflows/publish-pypi.yml`:
@@ -130,7 +157,7 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
 
 | Flag | Means | Fix |
 |---|---|---|
-| `deps` | an install was interrupted — a dep isn't importable | `pip install -U <cli>[models]` |
+| `deps` | an install was interrupted — a dep isn't importable | the pinned reinstall doctor prints — `pip install "sharepoint-knowledge[models]==<installed>"` |
 | `model_embed / model_rerank / model_rerank_light / model_sparse` | partial model download (dir exists, locked file missing) | `prepare-models` |
 | `registration` | no IDE config contains the server | `register --ide auto` |
 | `index:<scope>` | `corrupt` → delete index, re-crawl; `older model` → one `start_crawl` rebuild | `clean` / `start_crawl` |

@@ -42,7 +42,9 @@ Then run the steps below end-to-end without pausing.
    step 1 if it fails) — then run its
    `local-knowledge doctor` prints a **checks** block — each flag maps to
    exactly one fix; run ONLY that fix, never reinstall on red flags:
-   - `deps ✗` → `"$VENV_PY" -m pip install -U "local-knowledge[models]"`
+   - `deps ✗` → run the pinned reinstall doctor prints
+     (`pip install "local-knowledge[models]==<installed>"` — a repair must never
+     upgrade into an unverified release)
    - `model_embed / model_rerank / model_rerank_light / model_sparse ✗` →
      `prepare-models` (a partial download — never pip reinstall)
    - `registration ✗` → `register --ide auto --workspace "<repo>"`
@@ -50,9 +52,16 @@ Then run the steps below end-to-end without pausing.
    - `index:* older model` → `start_crawl` on that scope (one rebuild)
    - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
    - `python ✗` → venv was built on <3.11 — rebuild it from step 1
-   - `update available` → upgrade once via the venv python (`"$VENV_PY" -m
-     pip install -U "local-knowledge[models]"`), then `prepare-models`,
-     then re-doctor.
+   - `update available` → `local-knowledge update` — installs the newest
+     **soaked** release (3-day delay by design), self-tests it, and rolls
+     back automatically if it fails. A freshly published release shows as
+     "soaking until <date>" — that's intentional, wait. If the update ends
+     with "rolled back" the old version is already restored and verified;
+     report the failure, don't retry blindly. On Windows the update must run
+     through the venv python — `update` prints the exact command. After a
+     successful update: reload the IDE window, then re-run doctor.
+   - `release ✗` → the installed version was yanked — `local-knowledge update` moves
+     to the last-good release.
    - all green but tools still absent → `register` (step 3) + reload
      handoff. Never re-run install/prepare-models on a healthy setup.
 1. **Preflight — find a working Python, not a bare `pip`.** Try these in
