@@ -99,6 +99,15 @@ class Progress:
             return None
 
 
+# Memory-guard pause ceiling: a miscalibrated KNOWLEDGE_MIN_FREE_MB (or
+# baseline drift on a busy machine) can make the floor permanently
+# unreachable — a crawl must never deadlock. After this much paused time
+# the guard yields for a cool-down, then may re-engage (#172).
+_MEM_PAUSE_MAX_S = float(os.environ.get("KNOWLEDGE_MEM_PAUSE_MAX_S", "600"))
+_MEM_PAUSE_COOLDOWN_S = float(
+    os.environ.get("KNOWLEDGE_MEM_PAUSE_COOLDOWN_S", "60"))
+
+
 class CrawlControl:
     """Per-job hook the crawler consults between queue items and embed
     flushes: cancellation, memory guard, lease heartbeat, phase, rate."""
@@ -117,6 +126,8 @@ class CrawlControl:
         self._last_hb = 0.0
         self._battery_checked = 0.0
         self._battery = False
+        self._paused_since: float | None = None
+        self._pause_override_until = 0.0
 
     def check(self) -> None:
         """Call between queue items and embed flushes. Order: cancel →
@@ -124,12 +135,27 @@ class CrawlControl:
         if self.cancel_flag is not None and self.cancel_flag.is_set():
             raise CrawlCancelled()
         self._heartbeat()
+        if time.time() < self._pause_override_until:
+            return
         while not limits().memory_ok():
+            if self._paused_since is None:
+                self._paused_since = time.time()
+            elif time.time() - self._paused_since >= _MEM_PAUSE_MAX_S:
+                # the floor is unreachable (baseline drift or a miscalibrated
+                # KNOWLEDGE_MIN_FREE_MB) — never deadlock: resume for a
+                # cool-down window, then let the guard re-engage (#172)
+                self.progress.set_phase(
+                    "resuming: memory floor unreachable")
+                self._paused_since = None
+                self._pause_override_until = \
+                    time.time() + _MEM_PAUSE_COOLDOWN_S
+                return
             self.progress.set_phase("paused: low memory")
             if self.cancel_flag is not None and self.cancel_flag.is_set():
                 raise CrawlCancelled()
             self.sleep(2)
             self._heartbeat()
+        self._paused_since = None
 
     def _heartbeat(self) -> None:
         now = time.time()

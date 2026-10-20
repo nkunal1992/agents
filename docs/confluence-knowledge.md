@@ -236,9 +236,14 @@ The server is designed to stay out of the way on a developer laptop:
   `worker: "another IDE window"` instead of a second worker.
 - **Adaptive protection**: `KNOWLEDGE_MIN_FREE_MB` (default 1500, 0
   disables) pauses embedding when free memory drops below the floor and
-  resumes when it recovers; on battery, `KNOWLEDGE_BATTERY_SAVER`
-  (default 1) halves fetch concurrency and ~halves embed duty cycles —
-  powered-off laptops don't run the fan at full speed.
+  resumes when it recovers. A pause can never deadlock: after
+  `KNOWLEDGE_MEM_PAUSE_MAX_S` (default 600 s) paused the crawl resumes
+  anyway for `KNOWLEDGE_MEM_PAUSE_COOLDOWN_S` (default 60 s) before the
+  guard may re-engage — the phase reads
+  `resuming: memory floor unreachable`. On battery,
+  `KNOWLEDGE_BATTERY_SAVER` (default 1) halves fetch concurrency and
+  ~halves embed duty cycles — powered-off laptops don't run the fan at
+  full speed.
 - **Cancelling**: `cancel_crawl` stops a running crawl within seconds and
   marks it `cancelled` — a terminal state that never auto-resumes. The
   previously published snapshot is untouched; `start_crawl` re-runs and
@@ -266,7 +271,7 @@ The server is designed to stay out of the way on a developer laptop:
 | `search` says "crawl … still running" | the background crawl hasn't finished; poll `crawl_step` for progress. The index is published only when the whole subtree is crawled |
 | `crawl_step` returns `state: abandoned` | the job was superseded by a newer crawl or its resume was fenced (e.g. model upgrade changed vector dims) — it can never finish; call `start_crawl` for a fresh job |
 | `crawl_step` returns `state: cancelled` | a user ran `cancel_crawl` — it never resumes; `start_crawl` for a fresh job (unchanged pages are reused) |
-| crawl seems stuck in `paused: low memory` | free RAM fell under `KNOWLEDGE_MIN_FREE_MB` — the crawl waits for memory to recover (safe to leave running); close apps or raise the threshold / set 0 to disable |
+| crawl seems stuck in `paused: low memory` | free RAM fell under `KNOWLEDGE_MIN_FREE_MB` — the crawl waits for memory to recover, and yields after `KNOWLEDGE_MEM_PAUSE_MAX_S` (600 s) if the floor stays unreachable; close apps, lower the floor, or set it to 0 to disable |
 | `crawl_step` shows `worker: another IDE window` | another window owns the crawl's lease — progress still polls fine; the local server won't race it |
 | Two `python.exe … confluence_knowledge.server` processes on Windows | expected, not a duplicate: a venv's `Scripts\python.exe` is a launcher that starts the base interpreter as its child. Only one server is running |
 | 403 on some pages | your account lacks permission — those pages are reported as inaccessible |
