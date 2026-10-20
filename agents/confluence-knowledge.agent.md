@@ -2,7 +2,7 @@
 name: confluence-knowledge
 description: Grounded Q&A over a selected Confluence page and all its descendant pages — local crawl/index/embeddings via a self-installed MCP service, per-claim citations, explicit "not documented" refusals. Bootstraps its local service on first run.
 argument-hint: Give a root Confluence page URL and your question
-tools: ["confluence-knowledge/status", "confluence-knowledge/connect", "confluence-knowledge/start_crawl", "confluence-knowledge/crawl_step", "confluence-knowledge/search", "confluence-knowledge/get_evidence", "confluence-knowledge/verify_citations", "confluence-knowledge/submit_feedback", "confluence-knowledge/feedback_report", "read", "edit", "execute"]
+tools: ["confluence-knowledge/status", "confluence-knowledge/connect", "confluence-knowledge/start_crawl", "confluence-knowledge/crawl_step", "confluence-knowledge/cancel_crawl", "confluence-knowledge/search", "confluence-knowledge/get_evidence", "confluence-knowledge/verify_citations", "confluence-knowledge/submit_feedback", "confluence-knowledge/feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload

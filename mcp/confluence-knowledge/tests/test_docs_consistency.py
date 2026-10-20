@@ -34,7 +34,7 @@ def _const(name, path=None):
 
 def test_doc_tool_lists_match_servers():
     """Any doc that enumerates the MCP tools must list the real set."""
-    tools = set(re.findall(r"@mcp\.tool\(\)\s*\ndef\s+(\w+)",
+    tools = set(re.findall(r"@tool\(mcp[^)]*\)\s*\ndef\s+(\w+)",
                            (SRC / "server.py").read_text(encoding="utf-8")))
     for d in DOCS:
         txt = d.read_text(encoding="utf-8")

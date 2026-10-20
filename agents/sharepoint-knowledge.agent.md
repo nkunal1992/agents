@@ -2,7 +2,7 @@
 name: sharepoint-knowledge
 description: Grounded Q&A over a SharePoint site, library, or folder — Site Pages + docx/pdf/pptx/xlsx/csv/md/txt crawled and indexed locally via a self-installed MCP service, Entra device-code sign-in, per-claim citations, explicit "not documented" refusals.
 argument-hint: Give a SharePoint site, library, or folder URL and your question
-tools: ["sharepoint-knowledge/status", "sharepoint-knowledge/connect", "sharepoint-knowledge/start_crawl", "sharepoint-knowledge/crawl_step", "sharepoint-knowledge/search", "sharepoint-knowledge/get_evidence", "sharepoint-knowledge/verify_citations", "sharepoint-knowledge/submit_feedback", "sharepoint-knowledge/feedback_report", "read", "edit", "execute"]
+tools: ["sharepoint-knowledge/status", "sharepoint-knowledge/connect", "sharepoint-knowledge/start_crawl", "sharepoint-knowledge/crawl_step", "sharepoint-knowledge/cancel_crawl", "sharepoint-knowledge/search", "sharepoint-knowledge/get_evidence", "sharepoint-knowledge/verify_citations", "sharepoint-knowledge/submit_feedback", "sharepoint-knowledge/feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload

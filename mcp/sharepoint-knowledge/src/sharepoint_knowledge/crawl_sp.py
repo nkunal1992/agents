@@ -96,12 +96,13 @@ def _expand_list_entries(client: ConfluenceClient, site_id: str,
 
 class SPCrawler:
     def __init__(self, client: ConfluenceClient, index: Index, embedder=None,
-                 downloader=None, sparse=None):
+                 downloader=None, sparse=None, control=None):
         self.client = client
         self.index = index
         self.embedder = embedder
         self.sparse = sparse
         self.downloader = downloader  # injected for tests; real one in server
+        self.control = control        # cancellation/heartbeat/phase hook
 
     def _chunk_kwargs(self) -> dict:
         measure = getattr(self.embedder, "count_tokens", None)
@@ -238,6 +239,11 @@ class SPCrawler:
             self.index.db.execute(
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
+            if self.control is not None:
+                self.index.db.execute(
+                    "INSERT OR REPLACE INTO meta VALUES (?,?)",
+                    (f"progress:{job_id}",
+                     json.dumps(self.control.progress.snapshot())))
 
     def step(self, job_id: str) -> dict:
         job = self.index.job(job_id)
@@ -281,6 +287,8 @@ class SPCrawler:
         # stages; unchanged items reuse their live rows (version check
         # skips the download entirely; content_hash skips re-embedding)
         conc = limits().fetch_concurrency
+        if self.control is not None:
+            conc = self.control.fetch_concurrency(conc)
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (pid, page, chunks, hash) to stage
         visited_submit: set[str] = set()
@@ -292,12 +300,23 @@ class SPCrawler:
             buf, pending = pending, []
             vecs = sp = None
             if self.embedder is not None:
+                if self.control is not None:
+                    self.control.check()
+                    self.control.phase("embedding"
+                                       + (" (battery saver)" if
+                                          self.control.battery_saver()
+                                          else ""))
                 texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
                          for _, pg, chunks, _ in buf for c in chunks]
                 if texts:
+                    t0 = time.monotonic()
                     vecs = self.embedder.embed(texts)
                     if self.sparse is not None:
                         sp = self.sparse.embed(texts)
+                    if self.control is not None and \
+                            self.control.battery_saver():
+                        # ~50% duty cycle on battery — halves sustained CPU
+                        time.sleep(max(0.0, time.monotonic() - t0))
             off = 0
             for pid, pg, chunks, h in buf:
                 n = len(chunks)
@@ -315,6 +334,9 @@ class SPCrawler:
                     return False
                 off += n
             seen.update(pid for pid, *_ in buf)
+            if self.control is not None:
+                self.control.page_done(len(buf))
+                self.control.phase("fetching")
             return True
 
         def _stage_result(pid, page, chunks) -> bool:
@@ -376,6 +398,10 @@ class SPCrawler:
         with ThreadPoolExecutor(max_workers=conc,
                                 thread_name_prefix="crawl-fetch") as pool:
             while queue or inflight:
+                if self.control is not None:
+                    self.control.check()
+                    self.control.progress.remaining = \
+                        len(queue) + len(inflight)
                 if len(seen) >= MAX_FILES:
                     errors.append(
                         f"file cap reached ({MAX_FILES}) — remaining skipped")
@@ -498,6 +524,8 @@ class SPCrawler:
                     "remaining": len(queue), "pages_seen": len(seen),
                     "errors": errors, "warnings": warns}
         if not queue:
+            if self.control is not None:
+                self.control.phase("publishing")
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",

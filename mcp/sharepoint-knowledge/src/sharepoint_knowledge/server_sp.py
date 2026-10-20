@@ -11,6 +11,13 @@ import uuid
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
 from confluence_knowledge.index import Index
+from confluence_knowledge.jobs import (
+    CrawlCancelled,
+    LeaseOwner,
+    Progress,
+    crawl_control,
+)
+from confluence_knowledge.mcp_async import tool
 from confluence_knowledge.models import ModelPool
 from confluence_knowledge.resources import lower_priority
 from confluence_knowledge.retrieval import (
@@ -30,11 +37,16 @@ from .settings_sp import APP_NAME, SPProfile, graph_base, home, index_root, work
 
 mcp = FastMCP("sharepoint-knowledge")
 
+# tools run on worker threads now (mcp_async) — one lock guards the caches
+_state_lock = threading.RLock()
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}
 _feedback: dict[str, FeedbackStore] = {}
 _clients: dict[str, object] = {}
+_owner = LeaseOwner()   # process identity for cross-process crawl leases
+_progress: dict[str, Progress] = {}  # job_id → live progress (lock-free reads)
+_cancel_flags: dict[str, threading.Event] = {}  # job_id → cancel requested
 # module globals kept for test injection; the pool owns real model objects
 _EMBEDDER = None
 _RERANKER = None
@@ -50,14 +62,20 @@ EVIDENCE_CHAR_CAP = 12000  # payload cap; `truncated` flags longer chunks
 def _index_for(scope_key: str) -> Index:
     idx = _indexes.get(scope_key)
     if idx is None:
-        idx = _indexes[scope_key] = Index(index_root() / f"{scope_key}.db")
+        with _state_lock:
+            idx = _indexes.get(scope_key)
+            if idx is None:
+                idx = _indexes[scope_key] = Index(index_root() / f"{scope_key}.db")
     return idx
 
 def _feedback_for(scope_key: str) -> FeedbackStore:
     st = _feedback.get(scope_key)
     if st is None:
-        st = _feedback[scope_key] = FeedbackStore(
-            index_root(), scope_key, "sharepoint-knowledge")
+        with _state_lock:
+            st = _feedback.get(scope_key)
+            if st is None:
+                st = _feedback[scope_key] = FeedbackStore(
+                    index_root(), scope_key, "sharepoint-knowledge")
     return st
 
 
@@ -135,8 +153,11 @@ def _client_for(account: str) -> object:
     token = acquire_token(profile, workdir_from_home(), home())
     entry = _clients.get(account)
     if entry is None or entry[0] != token:
-        entry = (token, make_client(graph_base(), token))
-        _clients[account] = entry
+        with _state_lock:
+            entry = _clients.get(account)
+            if entry is None or entry[0] != token:
+                entry = (token, make_client(graph_base(), token))
+                _clients[account] = entry
     return entry[1]
 
 
@@ -156,7 +177,7 @@ def _scope(scope_handle: str) -> dict:
     return s
 
 
-@mcp.tool()
+@tool(mcp)
 def status() -> dict:
     """Report setup readiness — profile present, token reachable, models."""
     try:
@@ -201,7 +222,7 @@ def status() -> dict:
     }
 
 
-@mcp.tool()
+@tool(mcp)
 def connect(root: str) -> dict:
     """Bind a scope to a SharePoint URL — a site (pages + all libraries),
     or a library/folder path inside it. One root per connect."""
@@ -223,8 +244,9 @@ def connect(root: str) -> dict:
     idx = _index_for(scope_key)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root}"
-    _scopes[handle] = {"key": scope_key, "root_entry": root_entry,
-                       "site_web": site_web, "client": cli}
+    with _state_lock:
+        _scopes[handle] = {"key": scope_key, "root_entry": root_entry,
+                           "site_web": site_web, "client": cli}
     _start_warmup()
     stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
     return {
@@ -250,44 +272,85 @@ def _worker_loop(s: dict, job_id: str) -> None:
     try:
         _start_warmup()
         _models_ready.wait()
+        prog = _progress.setdefault(job_id, Progress())
         c = SPCrawler(s["client"], idx, embedder=_embedder(),
-                      downloader=download_file, sparse=_sparse())
+                      downloader=download_file, sparse=_sparse(),
+                      control=crawl_control(
+                          idx, job_id, prog,
+                          _cancel_flags.setdefault(
+                              job_id, threading.Event()),
+                          _owner))
         r = c.step(job_id)
         while r["state"] == "running":
             r = c.step(job_id)
+    except CrawlCancelled:
+        pass  # terminal state already in the DB — nothing to overwrite
     except Exception as e:  # noqa: BLE001 — surfaced via job state
         err = f"{type(e).__name__}: {e}"
         _worker_errors[f"{s['key']}:{job_id}"] = err
         job = idx.job(job_id)
         if job and job["state"] == "running":
             idx.save_job(job_id, "error", job["queue"], job["errors"] + [err])
+    finally:
+        idx.release_lease(job_id, _owner.value)
 
 
-def _ensure_worker(s: dict, job_id: str) -> None:
+def _ensure_worker(s: dict, job_id: str) -> bool:
+    """Start the worker unless another process holds the job's lease —
+    exactly one worker per job across IDE windows."""
     key = f"{s['key']}:{job_id}"
     with _workers_lock:
         t = _workers.get(key)
         if t is not None and t.is_alive():
-            return
+            return True
+        idx = _index_for(s["key"])
+        if not idx.acquire_lease(job_id, _owner.value, _owner.pid):
+            prog = _progress.setdefault(job_id, Progress())
+            prog.worker = "another IDE window"
+            return False
+        prog = _progress.setdefault(job_id, Progress())
+        prog.worker = "self"
         _workers[key] = threading.Thread(
             target=_worker_loop, args=(s, job_id),
             name=f"crawl-{job_id}", daemon=True)
         _workers[key].start()
+        return True
 
 
-@mcp.tool()
+def _progress_for(idx: Index, job_id: str) -> dict:
+    p = idx.job_progress(job_id)
+    live = _progress.get(job_id)
+    if live is not None:
+        p.update(live.snapshot())
+    else:
+        blob = idx.meta_get(f"progress:{job_id}")
+        other = Progress.from_blob(blob) if blob else None
+        if other is not None:
+            p.update(other.snapshot())
+    warns = idx.meta_get(f"warns:{job_id}")
+    if warns:
+        p["warnings"] = json.loads(warns)
+    return p
+
+
+@tool(mcp)
 def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
     """Begin indexing the root in the background (Site Pages + libraries)."""
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     c = SPCrawler(s["client"], idx)
     job_id = c.start(s["root_entry"])
-    _ensure_worker(s, job_id)
+    _cancel_flags.pop(job_id, None)
+    _progress[job_id] = Progress()
+    if not _ensure_worker(s, job_id):
+        return {"job_id": job_id, "state": "running",
+                "worker": "another IDE window",
+                "note": "crawl runs in another IDE window — crawl_step to poll"}
     return {"job_id": job_id, "state": "running",
             "note": "crawl runs in the background — call crawl_step to poll"}
 
 
-@mcp.tool()
+@tool(mcp)
 def crawl_step(scope_handle: str, job_id: str) -> dict:
     """Read crawl progress instantly; resumes a dead worker automatically."""
     s = _scope(scope_handle)
@@ -295,14 +358,6 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
     job = idx.job(job_id)
     if job is None:
         raise AccessError(f"unknown job {job_id}")
-
-    def progress() -> dict:
-        p = idx.job_progress(job_id)
-        warns = idx.meta_get(f"warns:{job_id}")
-        if warns:
-            p["warnings"] = json.loads(warns)
-        return p
-
     if job["state"] == "running":
         if not _models_ready.is_set():
             _start_warmup()
@@ -310,14 +365,39 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
         else:
             note = None
         _ensure_worker(s, job_id)
-        p = progress()
+        p = _progress_for(idx, job_id)
         if note:
             p["note"] = note
         return p
-    p = progress()
+    p = _progress_for(idx, job_id)
     if p["state"] == "done":
         p["note"] = "no further calls needed — the index is published"
     return p
+
+
+@tool(mcp)
+def cancel_crawl(scope_handle: str, job_id: str) -> dict:
+    """Stop a running crawl within seconds and mark the job cancelled — it
+    never auto-resumes. The previously published snapshot is kept intact;
+    start_crawl re-runs (unchanged items are reused)."""
+    s = _scope(scope_handle)
+    idx = _index_for(s["key"])
+    job = idx.job(job_id)
+    if job is None:
+        raise AccessError(f"unknown job {job_id}")
+    if job["state"] != "running":
+        return {"job_id": job_id, "state": job["state"],
+                "note": "already finished — nothing to cancel"}
+    _cancel_flags.setdefault(job_id, threading.Event()).set()
+    idx.save_job(job_id, "cancelled", job["queue"], job["errors"])
+    prog = _progress.get(job_id)
+    if prog is not None:
+        prog.set_phase("cancelled")
+    seen = idx.meta_get(f"seen:{job_id}")
+    return {"job_id": job_id, "state": "cancelled",
+            "pages_seen": len(json.loads(seen)) if seen else 0,
+            "note": "previous snapshot kept — start_crawl to re-run "
+                    "(unchanged items are reused)"}
 
 
 def _coverage(idx: Index) -> str:
@@ -329,7 +409,7 @@ def _coverage(idx: Index) -> str:
     return "partial" if job["errors"] else "complete"
 
 
-@mcp.tool()
+@tool(mcp, heavy=True)
 def search(scope_handle: str, question: str) -> dict:
     """Hybrid retrieve + local rerank; returns bounded, cited evidence."""
     s = _scope(scope_handle)
@@ -356,10 +436,11 @@ def search(scope_handle: str, question: str) -> dict:
     # snapshot epoch so a refresh can't silently re-point a citation
     set_id = f"ev:{s['key'][:8]}:{uuid.uuid4().hex[:16]}"
     # bound the session cache — sets are never reused after the turn ends
-    while len(_evidence_sets) >= 32:
-        _evidence_sets.pop(next(iter(_evidence_sets)))
-    _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
-                              "epoch": idx.snapshot_epoch()}
+    with _state_lock:
+        while len(_evidence_sets) >= 32:
+            _evidence_sets.pop(next(iter(_evidence_sets)))
+        _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
+                                  "epoch": idx.snapshot_epoch()}
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -379,7 +460,7 @@ def search(scope_handle: str, question: str) -> dict:
     }
 
 
-@mcp.tool()
+@tool(mcp)
 def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
                  page_id: str | None = None) -> dict:
     """Return full text of chunks — same scope only. Pass `chunk_ids` for
@@ -412,10 +493,7 @@ def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
         for c in out]}
 
 
-@mcp.tool()
-
-
-@mcp.tool()
+@tool(mcp)
 def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
     """Store a saved correction — disclosed alongside the docs on
@@ -429,18 +507,19 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
             "note": "will be disclosed on similar questions"}
 
 
-@mcp.tool()
+@tool(mcp)
 def feedback_report(scope_handle: str) -> dict:
     """Aggregated corrections — the agent infers which doc keeps
     getting corrected and suggests it to the user."""
     s = _scope(scope_handle)
     return _feedback_for(s["key"]).report()
 
-@mcp.tool()
+@tool(mcp)
 def verify_citations(scope_handle: str, evidence_set: str,
                      mappings: list[dict]) -> dict:
     s = _scope(scope_handle)
-    rec = _evidence_sets.get(evidence_set)
+    with _state_lock:
+        rec = _evidence_sets.get(evidence_set)
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")

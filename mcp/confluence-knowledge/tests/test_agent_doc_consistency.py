@@ -47,7 +47,7 @@ def test_agent_frontmatter_tools_exist():
                 if "confluence-knowledge/" in t}
     srv = (Path(__file__).parents[1] / "src" /
            "confluence_knowledge" / "server.py").read_text()
-    real = set(re.findall(r"@mcp\.tool\(\)\s*\ndef\s+(\w+)", srv))
+    real = set(re.findall(r"@tool\(mcp[^)]*\)\s*\ndef\s+(\w+)", srv))
     missing = declared - real
     assert not missing, f"agent frontmatter names tools not in server: {missing}"
 

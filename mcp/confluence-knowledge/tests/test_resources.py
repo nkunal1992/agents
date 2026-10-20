@@ -22,9 +22,12 @@ def test_limits_env_overrides_and_invalid(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_MAX_BATCH", "8")
     monkeypatch.setenv("KNOWLEDGE_IDLE_UNLOAD_S", "60")
     monkeypatch.setenv("KNOWLEDGE_FETCH_CONCURRENCY", "3")
+    monkeypatch.setenv("KNOWLEDGE_MIN_FREE_MB", "2048")
+    monkeypatch.setenv("KNOWLEDGE_BATTERY_SAVER", "0")
     assert limits() == Limits(threads=7, batch_tokens=3_000_000,
                               max_batch=8, idle_unload_s=60.0,
-                              fetch_concurrency=3)
+                              fetch_concurrency=3, min_free_mb=2048,
+                              battery_saver=False)
     monkeypatch.setenv("KNOWLEDGE_THREADS", "bogus")
     monkeypatch.setenv("KNOWLEDGE_MAX_BATCH", "0")   # clamps to ≥1
     monkeypatch.setenv("KNOWLEDGE_FETCH_CONCURRENCY", "99")  # clamps to ≤16

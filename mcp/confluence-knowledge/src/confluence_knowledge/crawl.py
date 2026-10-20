@@ -120,12 +120,15 @@ from .retrieval import MODEL_MARKER as _MODEL_ID
 
 class Crawler:
     def __init__(self, client: ConfluenceClient, index: Index, env: str,
-                 embedder=None, sparse=None, site_url: str | None = None):
+                 embedder=None, sparse=None, site_url: str | None = None,
+                 control=None):
         self.client = client
         self.index = index
         self.env = env
         self.embedder = embedder  # retrieval.LocalEmbedder or None
         self.sparse = sparse      # retrieval.LocalSparseEmbedder or None
+        # cancellation/heartbeat/phase/rate hook — None for tests/CLI
+        self.control = control
         # fallback base for page links when a response carries no _links.base
         if site_url and env == "cloud" and not site_url.rstrip("/").endswith("/wiki"):
             site_url = site_url.rstrip("/") + "/wiki"
@@ -180,6 +183,13 @@ class Crawler:
             self.index.db.execute(
                 "UPDATE jobs SET queue=?, errors=? WHERE job_id=?",
                 (json.dumps(queue), json.dumps(errors), job_id))
+            if self.control is not None:
+                # persisted so OTHER server processes (second IDE window)
+                # can read progress without the in-memory registry
+                self.index.db.execute(
+                    "INSERT OR REPLACE INTO meta VALUES (?,?)",
+                    (f"progress:{job_id}",
+                     json.dumps(self.control.progress.snapshot())))
 
     def step(self, job_id: str, batch: int | None = 10,
              budget_s: float | None = None) -> dict:
@@ -236,6 +246,8 @@ class Crawler:
         # stage. Embedding accumulates an EMBED_FLUSH-chunk buffer so a
         # burst of arrivals merges into few model calls.
         conc = limits().fetch_concurrency
+        if self.control is not None:
+            conc = self.control.fetch_concurrency(conc)
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (pid, page, chunks, warns, hash)
         visited_submit: set[str] = set()  # dedupe at submit time
@@ -250,12 +262,24 @@ class Crawler:
             buf, pending = pending, []
             vecs = sp = None
             if self.embedder is not None:
+                if self.control is not None:
+                    self.control.check()
+                    self.control.phase("embedding"
+                                       + (" (battery saver)" if
+                                          self.control.battery_saver()
+                                          else ""))
                 texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
                          for _, pg, chunks, _, _ in buf for c in chunks]
                 if texts:
+                    t0 = time.monotonic()
                     vecs = self.embedder.embed(texts)
                     if self.sparse is not None:
                         sp = self.sparse.embed(texts)
+                    if self.control is not None and \
+                            self.control.battery_saver():
+                        # ~50% duty cycle while on battery — halves sustained
+                        # CPU/heat; sessions can't retune threads post-build
+                        time.sleep(max(0.0, time.monotonic() - t0))
             off = 0
             for pid, pg, chunks, warns, h in buf:
                 n = len(chunks)
@@ -273,6 +297,9 @@ class Crawler:
                     return False
                 off += n
             seen.update(pid for pid, *_ in buf)
+            if self.control is not None:
+                self.control.page_done(len(buf))
+                self.control.phase("fetching")
             return True
 
         def _pending_chunks() -> int:
@@ -284,6 +311,10 @@ class Crawler:
                     batch is None or processed < batch) and (
                     deadline is None or processed == 0
                     or time.monotonic() < deadline):
+                if self.control is not None:
+                    self.control.check()     # cancel → heartbeat → mem guard
+                    self.control.progress.remaining = \
+                        len(queue) + len(inflight)
                 if processed and (time.monotonic() - last_ckpt >= 5.0
                                   or processed - last_ckpt_n >= 50):
                     self._checkpoint(
@@ -419,6 +450,8 @@ class Crawler:
             self.index.save_job(job_id, "running", list(queue), errors)
             state = "running"
         else:
+            if self.control is not None:
+                self.control.phase("publishing")
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
             self.index.save_job(job_id, "done", [], errors)

@@ -33,6 +33,34 @@ class Limits:
     max_batch: int          # max items per micro-batch
     idle_unload_s: float    # unload models after this much idle time (0=never)
     fetch_concurrency: int  # concurrent HTTP fetches during a crawl
+    min_free_mb: int        # pause embedding below this much free RAM
+    battery_saver: bool     # halve fetch + embed duty-cycle on battery
+
+    def memory_ok(self) -> bool:
+        """Enough free RAM that embedding won't push the box into swap —
+        swap storms are what actually make a laptop unusable."""
+        if _psutil is None:
+            return True
+        try:
+            return _psutil.virtual_memory().available >= \
+                self.min_free_mb * 1024 * 1024
+        except Exception:  # noqa: BLE001 — can't measure → don't block work
+            return True
+
+    def on_battery(self) -> bool:
+        if not self.battery_saver or _psutil is None:
+            return False
+        try:
+            b = _psutil.sensors_battery()
+            return b is not None and b.power_plugged is False
+        except Exception:  # noqa: BLE001 — desktops have no battery sensor
+            return False
+
+
+try:
+    import psutil as _psutil
+except ImportError:  # pragma: no cover — dep is pinned, guard anyway
+    _psutil = None
 
 
 def limits() -> Limits:
@@ -45,6 +73,8 @@ def limits() -> Limits:
         idle_unload_s=float(
             _int_env("KNOWLEDGE_IDLE_UNLOAD_S", 600, 0, 86_400)),
         fetch_concurrency=_int_env("KNOWLEDGE_FETCH_CONCURRENCY", 6, 1, 16),
+        min_free_mb=_int_env("KNOWLEDGE_MIN_FREE_MB", 1500, 0, 1_000_000),
+        battery_saver=os.environ.get("KNOWLEDGE_BATTERY_SAVER", "1") != "0",
     )
 
 

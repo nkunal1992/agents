@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS sparse_vectors_stage (
   PRIMARY KEY(job_id, chunk_id));
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_stage USING fts5(
   job_id UNINDEXED, chunk_id UNINDEXED, text);
+-- cross-process worker lease: exactly one MCP server process (one IDE
+-- window) runs a worker on a job; heartbeat goes stale on crash/close
+CREATE TABLE IF NOT EXISTS job_lease (
+  job_id TEXT PRIMARY KEY, owner TEXT, pid INTEGER, heartbeat REAL);
 """
 
 _STAGE_TABLES = ("pages_stage", "chunks_stage", "vectors_stage",
@@ -189,6 +193,69 @@ class Index:
                 "remaining": len(job["queue"]),
                 "pages_seen": len(json.loads(seen)) if seen else 0,
                 "errors": job["errors"]}
+
+    def meta_set(self, key: str, value: str) -> None:
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                            (key, value))
+            self.db.commit()
+
+    # ---- cross-process worker lease ----
+    # Every MCP server process (each IDE window spawns one) could otherwise
+    # run a worker on the same job — double CPU/RAM and write contention.
+    # The lease row is the fence; a heartbeat older than `stale_s` (crash,
+    # closed window) or a dead pid on this host can be taken over.
+    def acquire_lease(self, job_id: str, owner: str, pid: int,
+                      stale_s: float = 30.0) -> bool:
+        import socket
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
+        host = socket.gethostname()
+        now = time.time()
+        with self.lock, self.db:
+            row = self.db.execute(
+                "SELECT owner,pid,heartbeat FROM job_lease WHERE job_id=?",
+                (job_id,)).fetchone()
+            if row is not None:
+                if row[0] == owner:
+                    return True          # already ours (resume after retry)
+                stale = (row[2] or 0) < now - stale_s
+                dead = False
+                if not stale and psutil is not None:
+                    try:
+                        owner_host = row[0].rsplit(":", 2)[0]
+                        dead = owner_host == host and \
+                            not psutil.pid_exists(int(row[1]))
+                    except Exception:    # noqa: BLE001 — can't verify → only
+                        dead = False     # staleness may hand it over
+                if not (stale or dead):
+                    return False
+            self.db.execute(
+                "INSERT OR REPLACE INTO job_lease VALUES (?,?,?,?)",
+                (job_id, owner, pid, now))
+            return True
+
+    def heartbeat(self, job_id: str, owner: str) -> str | None:
+        """Refresh our lease; returns the job's current state so the worker
+        notices cross-process cancel/supersede. None when not our lease."""
+        now = time.time()
+        with self.lock, self.db:
+            cur = self.db.execute(
+                "UPDATE job_lease SET heartbeat=? WHERE job_id=? AND owner=?",
+                (now, job_id, owner))
+            if cur.rowcount == 0:
+                return None              # lease was taken over or released
+            row = self.db.execute(
+                "SELECT state FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            return row[0] if row else "missing"
+
+    def release_lease(self, job_id: str, owner: str) -> None:
+        with self.lock, self.db:
+            self.db.execute(
+                "DELETE FROM job_lease WHERE job_id=? AND owner=?",
+                (job_id, owner))
 
     def _purge_dead_stage(self) -> None:
         """Drop staging rows of jobs that can never publish (abandoned/done/
