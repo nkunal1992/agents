@@ -12,12 +12,14 @@ import json
 import time
 import uuid
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from .client import AccessError, ConfluenceClient
 from .extract import extract_chunks
 from .index import Index, StaleJobError
+from .resources import limits
 
 
 @dataclass
@@ -147,6 +149,16 @@ class Crawler:
         page["url"] = _abs_url(page["url"], self.site_url)
         return page
 
+    def _fetch_page(self, pid: str):
+        """Worker task: the page body and its child listing in one fetch —
+        the two network calls the pipeline parallelizes. A children-listing
+        failure is returned, not raised: the page body still stages."""
+        page = self._page(pid)
+        try:
+            return page, self._children(pid, is_folder=False)
+        except AccessError as e:
+            return page, e
+
     def start(self, root_page: str) -> str:
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
@@ -210,79 +222,190 @@ class Crawler:
         levels_raw = self.index.meta_get(f"levels:{job_id}")
         levels: dict[str, int] = (json.loads(levels_raw) if levels_raw
                                   else {job["root_page"]: 0})
-        visited: set[str] = set()
 
         processed = 0
         # checkpoints are throttled — the full seen/levels/queue JSON used
         # to be rewritten per page, which is O(n²) writes on a big tree.
         # A crash between checkpoints replays ≤ a few seconds of pages;
-        # upsert_page is idempotent so re-staging is safe.
+        # upsert_page is idempotent so re-staging is safe. In-flight
+        # fetches are included in the checkpoint so they can't be lost.
         last_ckpt, last_ckpt_n = time.monotonic(), 0
-        while queue and (batch is None or processed < batch) and (
-                deadline is None or processed == 0 or time.monotonic() < deadline):
-            if processed and (time.monotonic() - last_ckpt >= 5.0
-                              or processed - last_ckpt_n >= 50):
-                self._checkpoint(job_id, list(queue), errors, seen, levels,
-                                 keep_failed)
-                last_ckpt, last_ckpt_n = time.monotonic(), processed
-            entry = queue.popleft()       # "page:123" or "folder:456"
-            is_folder = entry.startswith("folder:")
-            pid = entry.split(":", 1)[1] if ":" in entry else entry
-            if pid in visited or pid in seen:
-                continue
-            visited.add(pid)
-            processed += 1
-            if is_folder:
-                # traverse folders to reach descendant pages — never indexed
-                for cid, ctype in self._children(pid, is_folder=True):
-                    if cid not in seen:
-                        queue.append(f"{ctype}:{cid}")
-                continue
-            try:
-                page = self._page(pid)
-            except AccessError as e:
-                errors.append(f"page {pid}: {e}")
-                if not any(m in str(e) for m in
-                           ("401", "403", "404", "permission", "not found")):
-                    keep_failed.add(pid)
-                continue
-            if pid != job["root_page"]:
-                anc = page.get("ancestors") or []
-                if anc and job["root_page"] not in anc:
-                    errors.append(f"page {pid}: outside root subtree — skipped")
-                    continue
-            content_hash = hashlib.sha256(
-                page["storage"].encode()).hexdigest()
-            chunks, warns = extract_chunks(page["storage"],
-                                           **self._chunk_kwargs())
-            for c in chunks:
-                c.chunk_id = f"{pid}:{content_hash[:8]}:{c.ordinal}"
-            vecs, sparse_vecs = None, None
-            if self.embedder is not None and chunks:
-                texts = [f"{page['title']}\n{c.heading_path}\n{c.text}"
-                         for c in chunks]
-                vecs = self.embedder.embed(texts)
-                if self.sparse is not None:
-                    sparse_vecs = self.sparse.embed(texts)
-            try:
-                self.index.upsert_page({
-                    "page_id": pid, "parent_id": None, "title": page["title"],
-                    "url": page["url"], "level": levels.get(pid, 0),
-                    "version": page["version"], "content_hash": content_hash,
-                    "warnings": warns}, chunks, vecs, sparse_vecs,
-                    job_id=job_id)
-            except StaleJobError:
-                return {"job_id": job_id, "state": "abandoned",
-                        "remaining": len(queue), "pages_seen": len(seen),
-                        "errors": errors}
-            seen.add(pid)
-            for cid, ctype in self._children(pid, is_folder=False):
-                if cid not in seen:
-                    levels.setdefault(cid, levels.get(pid, 0) + 1)
-                    queue.append(f"{ctype}:{cid}")
+        # bounded fetch pipeline: KNOWLEDGE_FETCH_CONCURRENCY workers run
+        # the network I/O (page body + child listing) while the main
+        # thread does the CPU work — extract, embed (micro-batched),
+        # stage. Embedding accumulates an EMBED_FLUSH-chunk buffer so a
+        # burst of arrivals merges into few model calls.
+        conc = limits().fetch_concurrency
+        inflight: dict = {}             # future -> entry string
+        pending: list = []              # (pid, page, chunks, warns, hash)
+        visited_submit: set[str] = set()  # dedupe at submit time
 
-        self._checkpoint(job_id, list(queue), errors, seen, levels,
-                         keep_failed)
+        def _flush_pending() -> bool:
+            """Stage all buffered pages; False on StaleJobError. `seen` is
+            updated only after the rows land — a checkpoint taken while
+            pages sit in the buffer must re-crawl them on resume."""
+            nonlocal pending
+            if not pending:
+                return True
+            buf, pending = pending, []
+            vecs = sp = None
+            if self.embedder is not None:
+                texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
+                         for _, pg, chunks, _, _ in buf for c in chunks]
+                if texts:
+                    vecs = self.embedder.embed(texts)
+                    if self.sparse is not None:
+                        sp = self.sparse.embed(texts)
+            off = 0
+            for pid, pg, chunks, warns, h in buf:
+                n = len(chunks)
+                try:
+                    self.index.upsert_page({
+                        "page_id": pid, "parent_id": None,
+                        "title": pg["title"], "url": pg["url"],
+                        "level": levels.get(pid, 0),
+                        "version": pg["version"], "content_hash": h,
+                        "warnings": warns}, chunks,
+                        vecs[off:off + n] if vecs is not None else None,
+                        sp[off:off + n] if sp is not None else None,
+                        job_id=job_id)
+                except StaleJobError:
+                    return False
+                off += n
+            seen.update(pid for pid, *_ in buf)
+            return True
+
+        def _pending_chunks() -> int:
+            return sum(len(chunks) for _, _, chunks, _, _ in pending)
+
+        with ThreadPoolExecutor(max_workers=conc,
+                                thread_name_prefix="crawl-fetch") as pool:
+            while (queue or inflight) and (
+                    batch is None or processed < batch) and (
+                    deadline is None or processed == 0
+                    or time.monotonic() < deadline):
+                if processed and (time.monotonic() - last_ckpt >= 5.0
+                                  or processed - last_ckpt_n >= 50):
+                    self._checkpoint(
+                        job_id, list(queue) + sorted(inflight.values()),
+                        errors, seen, levels, keep_failed)
+                    last_ckpt, last_ckpt_n = time.monotonic(), processed
+                # keep the window full — never submit beyond the batch bound
+                while (queue and len(inflight) < conc and
+                        (batch is None
+                         or processed + len(inflight) < batch)):
+                    entry = queue.popleft()   # "page:123" or "folder:456"
+                    pid = entry.split(":", 1)[1] if ":" in entry else entry
+                    if pid in visited_submit or pid in seen:
+                        continue
+                    visited_submit.add(pid)
+                    if entry.startswith("folder:"):
+                        inflight[pool.submit(
+                            self._children, pid, True)] = entry
+                    else:
+                        inflight[pool.submit(
+                            self._fetch_page, pid)] = entry
+                if not inflight:
+                    break
+                done, _ = wait(tuple(inflight),
+                               return_when=FIRST_COMPLETED)
+                for fut in done:
+                    entry = inflight.pop(fut)
+                    pid = entry.split(":", 1)[1] if ":" in entry else entry
+                    processed += 1
+                    try:
+                        result = fut.result()
+                    except AccessError as e:
+                        errors.append(f"page {pid}: {e}")
+                        if entry.startswith("folder:"):
+                            # the listing died — its whole subtree is now
+                            # unreachable; keep all live rows rather than
+                            # let publish delete pages we never saw
+                            if not any(m in str(e) for m in
+                                       ("401", "403", "404", "permission",
+                                        "not found")):
+                                keep_failed.update(
+                                    self.index.active_pages())
+                        elif not any(m in str(e) for m in
+                                     ("401", "403", "404", "permission",
+                                      "not found")):
+                            keep_failed.add(pid)
+                        continue
+                    except Exception as e:  # noqa: BLE001
+                        # transport-level failure (timeout, conn reset) —
+                        # transient: keep prior content, don't kill a 2h
+                        # crawl over one socket hiccup
+                        errors.append(
+                            f"page {pid}: {type(e).__name__}: {e}")
+                        if entry.startswith("folder:"):
+                            keep_failed.update(self.index.active_pages())
+                        else:
+                            keep_failed.add(pid)
+                        continue
+                    if entry.startswith("folder:"):
+                        # traverse folders to reach descendant pages —
+                        # folders themselves are never indexed
+                        for cid, ctype in result:
+                            if cid not in seen:
+                                queue.append(f"{ctype}:{cid}")
+                        continue
+                    page, kids = result
+                    if isinstance(kids, AccessError):
+                        # page body fetched but its child listing failed —
+                        # descendants are now undiscovered; keep all live
+                        # rows (no subtree mapping exists to be narrower)
+                        errors.append(f"children of {pid}: {kids}")
+                        keep_failed.update(self.index.active_pages())
+                        kids = []
+                    if pid != job["root_page"]:
+                        anc = page.get("ancestors") or []
+                        if anc and job["root_page"] not in anc:
+                            errors.append(
+                                f"page {pid}: outside root subtree — "
+                                "skipped")
+                            continue
+                    content_hash = hashlib.sha256(
+                        page["storage"].encode()).hexdigest()
+                    # unchanged page: reuse its live rows instead of
+                    # re-extracting + re-embedding identical content
+                    if (self.index.live_page_hash(pid) == content_hash
+                            and self.index.copy_live_to_stage(pid,
+                                                              job_id)):
+                        seen.add(pid)
+                    else:
+                        chunks, warns = extract_chunks(
+                            page["storage"], **self._chunk_kwargs())
+                        for c in chunks:
+                            c.chunk_id = \
+                                f"{pid}:{content_hash[:8]}:{c.ordinal}"
+                        pending.append(
+                            (pid, page, chunks, warns, content_hash))
+                        if _pending_chunks() >= 64 and not _flush_pending():
+                            return {"job_id": job_id,
+                                    "state": "abandoned",
+                                    "remaining": len(queue),
+                                    "pages_seen": len(seen),
+                                    "errors": errors}
+                    for cid, ctype in kids:
+                        if cid not in seen:
+                            levels.setdefault(cid,
+                                              levels.get(pid, 0) + 1)
+                            queue.append(f"{ctype}:{cid}")
+            # drain any stragglers still in flight when the batch bound hit
+            for fut, entry in inflight.items():
+                try:
+                    fut.result()          # already done or completes soon
+                except Exception as e:  # noqa: BLE001 — unprocessed anyway
+                    errors.append(
+                        f"prefetch {entry}: "
+                        f"{type(e).__name__} (refetches on resume)")
+        if not _flush_pending():
+            return {"job_id": job_id, "state": "abandoned",
+                    "remaining": len(queue), "pages_seen": len(seen),
+                    "errors": errors}
+
+        self._checkpoint(job_id, list(queue) + sorted(inflight.values()),
+                         errors, seen, levels, keep_failed)
 
         # fence: a newer crawl may have superseded this job while a fetch was
         # in flight — never let an abandoned job publish or resurrect itself

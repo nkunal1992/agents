@@ -116,3 +116,51 @@ def test_publish_is_atomic(tree, idx, tmp_path):
     assert r2["state"] == "done"
     titles = {p["title"] for p in idx.active_pages().values()}
     assert "deep.txt" not in titles
+
+
+def test_unchanged_files_skip_extract_and_embed(tree, idx):
+    """Second crawl over identical bytes: hash match → copy live rows —
+    no re-extract, no re-embed."""
+    import numpy as np
+
+    class Emb:
+        def __init__(self):
+            self.n = 0
+
+        def embed(self, texts):
+            self.n += len(texts)
+            return np.ones((len(texts), 4), dtype=np.float32)
+
+    emb = Emb()
+    c = LocalCrawler(idx, tree, embedder=emb)
+    r = run_all(c, c.start())
+    assert r["state"] == "done" and emb.n > 0
+    seen_first = idx.stats()["pages"]
+
+    emb2 = Emb()
+    c2 = LocalCrawler(idx, tree, embedder=emb2)
+    r2 = run_all(c2, c2.start())
+    assert r2["state"] == "done"
+    assert emb2.n == 0                        # nothing re-embedded
+    assert idx.stats()["pages"] == seen_first
+
+
+def test_changed_file_reembeds_only_itself(tree, idx):
+    import numpy as np
+
+    class Emb:
+        def __init__(self):
+            self.texts = []
+
+        def embed(self, texts):
+            self.texts.extend(texts)
+            return np.ones((len(texts), 4), dtype=np.float32)
+
+    c = LocalCrawler(idx, tree, embedder=Emb())
+    run_all(c, c.start())
+    (tree / "guide.md").write_text("completely rewritten guide")
+    emb = Emb()
+    c2 = LocalCrawler(idx, tree, embedder=emb)
+    run_all(c2, c2.start())
+    assert emb.texts and all("rewritten" in t or "guide.md" in t
+                             for t in emb.texts)

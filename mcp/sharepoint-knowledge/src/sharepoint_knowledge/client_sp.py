@@ -14,10 +14,12 @@ from urllib.parse import urlparse
 
 import httpx
 from confluence_knowledge.client import (
+    _RETRY_MAX,
     AccessError,
     ConfluenceClient,
     EndpointRule,
     SecurityException,
+    _retry_after_seconds,
 )
 
 GRAPH_RULES = [
@@ -55,15 +57,25 @@ def download_file(url: str, max_bytes: int = 25 * 1024 * 1024) -> bytes:
     if u.scheme != "https" and u.hostname not in ("localhost", "127.0.0.1"):
         raise SecurityException(
             "download URL isn't https — refusing to fetch")
-    with httpx.Client(timeout=60.0, follow_redirects=True) as http, \
-            http.stream("GET", url) as r:
-        # bounded stream — don't buffer an unbounded response
-        if r.status_code >= 400:
-            raise AccessError(f"download failed: HTTP {r.status_code}")
-        out = bytearray()
-        for chunk in r.iter_bytes(1 << 20):
-            out += chunk
-            if len(out) > max_bytes:
-                raise AccessError(
-                    f"file exceeds {max_bytes} bytes — refusing to buffer")
-        return bytes(out)
+    import time as _time
+    with httpx.Client(timeout=60.0, follow_redirects=True) as http:
+        for attempt in range(_RETRY_MAX + 1):
+            with http.stream("GET", url) as r:
+                if r.status_code == 429 and attempt < _RETRY_MAX:
+                    wait = _retry_after_seconds(
+                        r.headers.get("retry-after"))
+                else:
+                    # bounded stream — don't buffer an unbounded response
+                    if r.status_code >= 400:
+                        raise AccessError(
+                            f"download failed: HTTP {r.status_code}")
+                    out = bytearray()
+                    for chunk in r.iter_bytes(1 << 20):
+                        out += chunk
+                        if len(out) > max_bytes:
+                            raise AccessError(
+                                f"file exceeds {max_bytes} bytes — "
+                                "refusing to buffer")
+                    return bytes(out)
+            _time.sleep(wait)
+        raise AccessError("download failed: HTTP 429 (still rate limited)")

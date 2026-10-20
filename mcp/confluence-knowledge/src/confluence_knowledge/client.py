@@ -8,10 +8,31 @@ a per-adapter endpoint allowlist. No convenience method can bypass this.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlparse
 
 import httpx
+
+# 429 handling: honor Retry-After (seconds or HTTP-date), clamped — a
+# hostile/buggy server can't park the crawl for an hour. ≤3 retries.
+_RETRY_MAX = 3
+_RETRY_AFTER_CAP_S = 60.0
+
+
+def _retry_after_seconds(value: str | None) -> float:
+    if not value:
+        return 2.0
+    try:
+        return max(0.5, min(_RETRY_AFTER_CAP_S, float(value)))
+    except ValueError:
+        pass
+    try:
+        delta = parsedate_to_datetime(value).timestamp() - time.time()
+        return max(0.5, min(_RETRY_AFTER_CAP_S, delta))
+    except (TypeError, ValueError):
+        return 2.0
 
 
 class SecurityException(RuntimeError):
@@ -63,7 +84,13 @@ class ConfluenceClient:
                 "Write/Delete operations are forbidden."
             )
         api_path = self._validate_path(path)
-        resp = self._http.get(urljoin(self._base, api_path.lstrip("/")), params=params)
+        url = urljoin(self._base, api_path.lstrip("/"))
+        resp = None
+        for attempt in range(_RETRY_MAX + 1):
+            resp = self._http.get(url, params=params)
+            if resp.status_code != 429 or attempt == _RETRY_MAX:
+                break
+            time.sleep(_retry_after_seconds(resp.headers.get("retry-after")))
         if resp.status_code >= 400:
             raise AccessError(self._describe(resp))
         if resp.status_code >= 300:

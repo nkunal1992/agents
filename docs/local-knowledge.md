@@ -87,6 +87,11 @@ runs its own server; `doctor`'s `resources` flag warns when more than 4
 are running. Inference is micro-batched and threads/priority are capped
 so the laptop stays responsive while indexing.
 
+Files and directory listings are fetched on `KNOWLEDGE_FETCH_CONCURRENCY`
+worker threads (default 6) while extraction/embedding stays on the crawl
+thread. Re-crawls skip re-embedding unchanged files (`content_hash`
+match) — a re-scan of a big tree mostly re-reads bytes and reuses rows.
+
 ## Updating safely
 
 `local-knowledge update` is deliberately conservative:

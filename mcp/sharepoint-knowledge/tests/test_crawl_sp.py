@@ -93,3 +93,85 @@ def test_seen_checkpoint_across_restart(idx):
     r1 = run_all(c, c.start(f"site:{SITE_ID}"))
     r2 = run_all(c, c.start(f"site:{SITE_ID}"))
     assert r2["pages_seen"] == r1["pages_seen"]
+
+
+def test_unchanged_items_skip_download_and_embedding(idx):
+    """Re-crawl: same lastModified → no download; same hash → no
+    extract/embed — rows are copied from live instead."""
+    calls = {"dl": 0}
+
+    def counting_dl(url: str) -> bytes:
+        calls["dl"] += 1
+        return BLOBS[url]
+
+    class Emb:
+        def __init__(self):
+            self.n = 0
+
+        def embed(self, texts):
+            self.n += len(texts)
+            import numpy as np
+            return np.ones((len(texts), 4), dtype=np.float32)
+
+    emb = Emb()
+    c = SPCrawler(FakeGraph(site_routes()), idx, embedder=emb,
+                  downloader=counting_dl)
+    run_all(c, c.start(f"site:{SITE_ID}"))
+    assert calls["dl"] == 1 and emb.n > 0
+
+    calls["dl"] = 0
+    emb2 = Emb()
+    c2 = SPCrawler(FakeGraph(site_routes()), idx, embedder=emb2,
+                   downloader=counting_dl)
+    r = run_all(c2, c2.start(f"site:{SITE_ID}"))
+    assert r["state"] == "done" and r["pages_seen"] == 3
+    assert calls["dl"] == 0          # version match skipped the download
+    assert emb2.n == 0               # hash match skipped re-embedding
+    assert f"file:{DRIVE_ID}:f2" in idx.active_pages()
+
+
+def test_download_429_retries(fake_sleep=None):
+    """download_url retry: 429 → sleep(Retry-After) → retry, bounded."""
+    from sharepoint_knowledge.client_sp import download_file
+    calls = [0]
+    url = "https://dl.test/file"
+
+    class FakeStream:
+        def __init__(self, status, body=b"", headers=None):
+            self.status_code = status
+            self.headers = headers or {}
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def iter_bytes(self, n):
+            yield self._body
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def stream(self, method, u):
+            calls[0] += 1
+            if calls[0] <= 2:
+                return FakeStream(429, headers={"retry-after": "0.01"})
+            return FakeStream(200, body=b"payload")
+
+    import sharepoint_knowledge.client_sp as cs
+    orig = cs.httpx.Client
+    cs.httpx.Client = FakeClient
+    try:
+        out = download_file(url)
+    finally:
+        cs.httpx.Client = orig
+    assert out == b"payload" and calls[0] == 3

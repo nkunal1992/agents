@@ -13,10 +13,12 @@ import json
 import time
 import uuid
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 from confluence_knowledge.extract_files import extract_file_chunks, is_secret_name
 from confluence_knowledge.index import Index, StaleJobError
+from confluence_knowledge.resources import limits
 from confluence_knowledge.settings import SetupError
 
 # dirs never worth indexing — noise or actively harmful to read
@@ -95,26 +97,34 @@ class LocalCrawler:
         return out, warns
 
     def _page(self, f: Path) -> tuple[dict, list]:
+        meta, data, _ = self._read(f)
+        chunks, warns = extract_file_chunks(f.name, data,
+                                            **self._chunk_kwargs())
+        meta["warnings"] = warns
+        return meta, chunks
+
+    def _read(self, f: Path) -> tuple[dict, bytes, str]:
+        """Fetch worker: stat + read + hash — extraction stays on the
+        main thread so unchanged files can skip it entirely."""
         try:
             st = f.stat()
             if st.st_size > MAX_FILE_BYTES:
                 return ({"page_id": self._rel(f), "title": f.name,
-                         "url": f"file://{f}", "version": f"{st.st_mtime_ns}:{st.st_size}",
+                         "url": f"file://{f}",
+                         "version": f"{st.st_mtime_ns}:{st.st_size}",
                          "content_hash": "",
-                         "warnings": [f"file too large ({st.st_size} bytes) — skipped"]},
-                        [])
+                         "warnings": [
+                             f"file too large ({st.st_size} bytes) — skipped"]},
+                        b"", "")
             data = f.read_bytes()
         except OSError as e:
             raise SetupError(f"{self._rel(f)}: unreadable — {e}") from e
-        chunks, warns = extract_file_chunks(f.name, data,
-                                            **self._chunk_kwargs())
-        content_hash = hashlib.sha256(data).hexdigest()
+        h = hashlib.sha256(data).hexdigest()
         return ({"page_id": self._rel(f), "title": f.name,
                  "url": f"file://{f}",
                  "version": f"{st.st_mtime_ns}:{st.st_size}",
-                 "content_hash": content_hash,
-                 "warnings": warns},
-                chunks)
+                 "content_hash": h, "warnings": []},
+                data, h)
 
     def _checkpoint(self, job_id, queue, errors, seen, levels, warns,
                     keep=()) -> None:
@@ -172,81 +182,162 @@ class LocalCrawler:
         processed = 0
         # throttled checkpoints — full state used to be rewritten per item
         last_ckpt, last_ckpt_n = time.monotonic(), 0
-        while queue:
-            if len(seen) >= MAX_FILES:
-                errors.append(f"file cap reached ({MAX_FILES}) — remaining skipped")
-                queue.clear()
-                break
-            if processed and (time.monotonic() - last_ckpt >= 5.0
-                              or processed - last_ckpt_n >= 50):
-                self._checkpoint(job_id, list(queue), errors, seen, levels,
-                                 warns, keep_failed)
-                last_ckpt, last_ckpt_n = time.monotonic(), processed
-            entry = queue.popleft()
-            # entries are "dir:<path>" / "file:<path>" — split on the PREFIX,
-            # not ':' (Windows paths contain their own drive colon)
-            is_dir_entry = entry.startswith("dir:")
-            path_s = entry[4:] if is_dir_entry else entry[5:]
-            path = Path(path_s)
-            if path_s in seen:
-                continue
-            processed += 1
-            if is_dir_entry:
-                real = str(path.resolve())
-                if real in visited_dirs:
-                    continue  # symlink/loop — directories aren't pages
-                visited_dirs.add(real)
-                kids, warns2 = self._children(path)
-                warns.extend(warns2)
-                if not kids and warns2:
-                    # enumeration produced nothing but warnings — the listing
-                    # may be incomplete (unreadable dir). Partial enumeration
-                    # is not proof of absence: keep previously indexed files
-                    # under this directory rather than deleting them.
-                    rel = self._rel(path)
-                    keep_failed.update(
-                        p for p in self.index.active_pages()
-                        if p == rel or p.startswith(rel + "/"))
-                queue.extend(k for k in kids
-                             if (k[4:] if k.startswith("dir:") else k[5:]) not in seen)
-                continue
-            try:
-                page, chunks = self._page(path)
-            except SetupError as e:
-                errors.append(str(e))
-                keep_failed.add(self._rel(path))
-                continue
-            rel = page["page_id"]
-            if rel in seen:
-                continue
-            for c in chunks:
-                c.chunk_id = f"{rel}:{page['content_hash'][:8]}:{c.ordinal}"
-            vecs, sparse_vecs = None, None
-            if self.embedder is not None and chunks:
-                texts = [f"{page['title']}\n{c.heading_path}\n{c.text}"
-                         for c in chunks]
-                vecs = self.embedder.embed(texts)
-                if self.sparse is not None:
-                    sparse_vecs = self.sparse.embed(texts)
-            try:
-                self.index.upsert_page({
-                    "page_id": rel, "parent_id": None, "title": page["title"],
-                    "url": page["url"],
-                    "level": levels.get(rel, path_s.count("/")),
-                    "version": page["version"],
-                    "content_hash": page["content_hash"],
-                    "warnings": page["warnings"]}, chunks, vecs, sparse_vecs,
-                    job_id=job_id)
-            except StaleJobError:
-                return {"job_id": job_id, "state": "abandoned",
-                        "remaining": len(queue), "pages_seen": len(seen),
-                        "errors": errors, "warnings": warns}
-            seen.add(rel)
+        # bounded fetch pipeline — KNOWLEDGE_FETCH_CONCURRENCY workers read
+        # files/dirs ahead while the main thread extracts+embeds+stages;
+        # unchanged files (same content_hash) reuse their live rows
+        conc = limits().fetch_concurrency
+        inflight: dict = {}             # future -> entry string
+        pending: list = []              # (rel, meta, chunks, hash, lvl)
+        visited_submit: set[str] = set()
+
+        def _flush_pending() -> bool:
+            """Stage buffered pages; False on StaleJobError. `seen` updates
+            only after rows land — buffered-but-unstaged files must be
+            re-crawled on resume."""
+            nonlocal pending
+            if not pending:
+                return True
+            buf, pending = pending, []
+            vecs = sp = None
+            if self.embedder is not None:
+                texts = [f"{m['title']}\n{c.heading_path}\n{c.text}"
+                         for _, m, chunks, *_ in buf for c in chunks]
+                if texts:
+                    vecs = self.embedder.embed(texts)
+                    if self.sparse is not None:
+                        sp = self.sparse.embed(texts)
+            off = 0
+            for rel, meta, chunks, h, lvl in buf:
+                n = len(chunks)
+                try:
+                    self.index.upsert_page({
+                        "page_id": rel, "parent_id": None,
+                        "title": meta["title"], "url": meta["url"],
+                        "level": lvl,
+                        "version": meta["version"], "content_hash": h,
+                        "warnings": meta["warnings"]}, chunks,
+                        vecs[off:off + n] if vecs is not None else None,
+                        sp[off:off + n] if sp is not None else None,
+                        job_id=job_id)
+                except StaleJobError:
+                    return False
+                off += n
+            seen.update(rel for rel, *_ in buf)
+            return True
+
+        with ThreadPoolExecutor(max_workers=conc,
+                                thread_name_prefix="crawl-fetch") as pool:
+            while queue or inflight:
+                if len(seen) >= MAX_FILES:
+                    errors.append(
+                        f"file cap reached ({MAX_FILES}) — remaining skipped")
+                    queue.clear()
+                    inflight.clear()
+                    break
+                if processed and (time.monotonic() - last_ckpt >= 5.0
+                                  or processed - last_ckpt_n >= 50):
+                    self._checkpoint(
+                        job_id, list(queue) + sorted(inflight.values()),
+                        errors, seen, levels, warns, keep_failed)
+                    last_ckpt, last_ckpt_n = time.monotonic(), processed
+                while queue and len(inflight) < conc:
+                    entry = queue.popleft()
+                    # "dir:<path>" / "file:<path>" — split on the PREFIX,
+                    # not ':' (Windows paths carry their own drive colon)
+                    is_dir = entry.startswith("dir:")
+                    path_s = entry[4:] if is_dir else entry[5:]
+                    if path_s in visited_submit or path_s in seen:
+                        continue
+                    visited_submit.add(path_s)
+                    path = Path(path_s)
+                    if is_dir:
+                        real = str(path.resolve())
+                        if real in visited_dirs:
+                            continue  # symlink/loop — dirs aren't pages
+                        visited_dirs.add(real)
+                        inflight[pool.submit(self._children, path)] = entry
+                    else:
+                        inflight[pool.submit(self._read, path)] = entry
+                if not inflight:
+                    break
+                done, _ = wait(tuple(inflight),
+                               return_when=FIRST_COMPLETED)
+                for fut in done:
+                    entry = inflight.pop(fut)
+                    processed += 1
+                    is_dir = entry.startswith("dir:")
+                    path_s = entry[4:] if is_dir else entry[5:]
+                    try:
+                        result = fut.result()
+                    except SetupError as e:
+                        errors.append(str(e))
+                        if not is_dir:
+                            keep_failed.add(self._rel(Path(path_s)))
+                        continue
+                    except Exception as e:  # noqa: BLE001 — transient I/O
+                        errors.append(f"{path_s}: {type(e).__name__}: {e}")
+                        if not is_dir:
+                            keep_failed.add(self._rel(Path(path_s)))
+                        continue
+                    if is_dir:
+                        kids, warns2 = result
+                        warns.extend(warns2)
+                        if not kids and warns2:
+                            # listing may be incomplete (unreadable dir) —
+                            # not proof of absence: keep prior files under it
+                            rel = self._rel(Path(path_s))
+                            keep_failed.update(
+                                p for p in self.index.active_pages()
+                                if p == rel or p.startswith(rel + "/"))
+                        queue.extend(
+                            k for k in kids
+                            if (k[4:] if k.startswith("dir:")
+                                else k[5:]) not in seen)
+                        continue
+                    meta, data, content_hash = result
+                    rel = meta["page_id"]
+                    if rel in seen:
+                        continue
+                    # unchanged file: reuse its live rows instead of
+                    # re-extracting + re-embedding identical bytes
+                    if (self.index.live_page_hash(rel) == content_hash
+                            and self.index.copy_live_to_stage(rel, job_id)):
+                        seen.add(rel)
+                        continue
+                    if data:
+                        chunks, warns2 = extract_file_chunks(
+                            Path(path_s).name, data, **self._chunk_kwargs())
+                        meta["warnings"] = warns2
+                        for c in chunks:
+                            c.chunk_id = (f"{rel}:{content_hash[:8]}:"
+                                          f"{c.ordinal}")
+                    else:
+                        chunks = []   # oversized — warnings already set
+                    pending.append((rel, meta, chunks, content_hash,
+                                    levels.get(rel, path_s.count("/"))))
+                    if (sum(len(c) for _, _, c, _, _ in pending) >= 64
+                            and not _flush_pending()):
+                        return {"job_id": job_id, "state": "abandoned",
+                                "remaining": len(queue),
+                                "pages_seen": len(seen),
+                                "errors": errors, "warnings": warns}
+            for fut, entry in inflight.items():
+                try:
+                    fut.result()
+                except Exception as e:  # noqa: BLE001 — unprocessed anyway
+                    errors.append(
+                        f"prefetch {entry}: "
+                        f"{type(e).__name__} (refetches on resume)")
+        if not _flush_pending():
+            return {"job_id": job_id, "state": "abandoned",
+                    "remaining": len(queue), "pages_seen": len(seen),
+                    "errors": errors, "warnings": warns}
 
         # persist final seen/levels/warns — the throttled in-loop
         # checkpoint may be several items behind the last processed one
-        self._checkpoint(job_id, list(queue), errors, seen, levels, warns,
-                         keep_failed)
+        self._checkpoint(job_id,
+                         list(queue) + sorted(inflight.values()),
+                         errors, seen, levels, warns, keep_failed)
         # fence: an abandoned/superseded job must never publish or resurrect
         current = self.index.job(job_id)
         if current is None or current["state"] != "running":

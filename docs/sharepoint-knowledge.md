@@ -88,6 +88,13 @@ an idle server uses ~0.2 GB RSS, an active one ~1.9 GB. Every IDE window
 runs its own server; `doctor`'s `resources` flag warns when more than 4
 are running. Inference is micro-batched and threads/priority are capped
 so the laptop stays responsive while indexing.
+
+Page listings, item metadata, and downloads run on
+`KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6) — a large site
+or document library crawls several times faster than sequential. Re-crawls
+skip work aggressively: an item whose `lastModifiedDateTime` is unchanged
+is not even downloaded, and any page whose content is unchanged reuses
+its live rows instead of re-embedding.
 | `SP_KNOWLEDGE_AUTH_BASE` | Entra authority override (e2e fake) |
 
 ## Roadmap

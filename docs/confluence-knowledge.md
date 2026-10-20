@@ -221,6 +221,12 @@ The server is designed to stay out of the way on a developer laptop:
   `KNOWLEDGE_NO_NICE=1` opts out.
 - `KNOWLEDGE_IDLE_UNLOAD_S` sets the idle timeout in seconds
   (0 disables unloading).
+- **Parallel fetching**: page bodies and child listings run on
+  `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6, max 16) while
+  embedding/staging stays on the crawl thread — a wide subtree crawls
+  several times faster than sequential. Re-crawls skip re-embedding any
+  page whose content is unchanged (`content_hash` match) — unchanged
+  pages cost one GET and no model time.
 
 ## Troubleshooting
 

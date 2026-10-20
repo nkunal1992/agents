@@ -467,6 +467,86 @@ class Index:
                         "FROM chunks WHERE page_id=? AND active=1 "
                         "ORDER BY ordinal", (page_id,))]
 
+    def live_page_hash(self, page_id: str) -> str | None:
+        """content_hash of the page's live row — a re-crawl with the same
+        hash can reuse the page's rows instead of re-embedding."""
+        with self.lock:
+            r = self.db.execute(
+                "SELECT content_hash FROM pages WHERE page_id=? AND active=1",
+                (page_id,)).fetchone()
+        return r[0] if r else None
+
+    def live_page_version(self, page_id: str) -> str | None:
+        """version string of the page's live row — SharePoint items skip
+        the download entirely when lastModifiedDateTime is unchanged."""
+        with self.lock:
+            r = self.db.execute(
+                "SELECT version FROM pages WHERE page_id=? AND active=1",
+                (page_id,)).fetchone()
+        return r[0] if r else None
+
+    def copy_live_to_stage(self, page_id: str, job_id: str) -> bool:
+        """Copy the page's live chunk/vector/sparse/FTS rows into this
+        job's staging — for re-crawls where content_hash matched (the
+        page is byte-identical, so its embeddings still hold). Clears any
+        same-job staged rows first. False when no live page exists."""
+        with self.lock, self.db:
+            page = self.db.execute(
+                "SELECT page_id,parent_id,title,url,level,version,"
+                "fetched_at,content_hash,warnings FROM pages "
+                "WHERE page_id=? AND active=1", (page_id,)).fetchone()
+            if page is None:
+                return False
+            # refresh fetched_at so staleness warnings don't accuse an
+            # unchanged page — content_hash stays the live (verified) value
+            self.db.execute(
+                "INSERT OR REPLACE INTO pages_stage "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (job_id, page[0], page[1], page[2], page[3], page[4],
+                 page[5], time.time(), page[7], page[8]))
+            old = [r[0] for r in self.db.execute(
+                "SELECT chunk_id FROM chunks_stage "
+                "WHERE job_id=? AND page_id=?", (job_id, page_id))]
+            for cid in old:
+                self.db.execute(
+                    "DELETE FROM chunks_fts_stage "
+                    "WHERE job_id=? AND chunk_id=?", (job_id, cid))
+                self.db.execute(
+                    "DELETE FROM vectors_stage "
+                    "WHERE job_id=? AND chunk_id=?", (job_id, cid))
+                self.db.execute(
+                    "DELETE FROM sparse_vectors_stage "
+                    "WHERE job_id=? AND chunk_id=?", (job_id, cid))
+            self.db.execute(
+                "DELETE FROM chunks_stage WHERE job_id=? AND page_id=?",
+                (job_id, page_id))
+            rows = self.db.execute(
+                "SELECT chunk_id,heading,kind,ordinal,text FROM chunks "
+                "WHERE page_id=? AND active=1 ORDER BY ordinal",
+                (page_id,)).fetchall()
+            for cid, heading, kind, ordinal, text in rows:
+                self.db.execute(
+                    "INSERT INTO chunks_stage VALUES (?,?,?,?,?,?,?)",
+                    (job_id, cid, page_id, heading, kind, ordinal, text))
+                self.db.execute(
+                    "INSERT INTO chunks_fts_stage VALUES (?,?,?)",
+                    (job_id, cid, text))
+                v = self.db.execute(
+                    "SELECT vec FROM vectors WHERE chunk_id=?",
+                    (cid,)).fetchone()
+                if v:
+                    self.db.execute(
+                        "INSERT INTO vectors_stage VALUES (?,?,?)",
+                        (job_id, cid, v[0]))
+                s = self.db.execute(
+                    "SELECT payload FROM sparse_vectors WHERE chunk_id=?",
+                    (cid,)).fetchone()
+                if s:
+                    self.db.execute(
+                        "INSERT INTO sparse_vectors_stage VALUES (?,?,?)",
+                        (job_id, cid, s[0]))
+            return True
+
     def search_cache(self) -> _SearchCache:
         """Retrieval structures for the current snapshot, rebuilt only
         when the epoch advanced. Held under self.lock: build cost is a
