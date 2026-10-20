@@ -315,6 +315,54 @@ it writes `judge_verdicts.json`, merge with
 judge_verdicts.json`. Standalone mode: the prompt can drive the whole
 benchmark itself.
 
+## Stress testing (work-laptop profile)
+
+`scripts/stress_confluence.py` measures the real MCP server against a
+realistic — and optionally hostile — fake Confluence Data Center, exactly
+the way Copilot drives it (connect → start_crawl → wait_for_crawl →
+search). Nothing touches a real Confluence, so it is safe to run on any
+laptop including the work machine.
+
+```bash
+# full scenario matrix on a 200-page tree, simulated 16 GB / 8-core laptop
+python mcp/confluence-knowledge/scripts/stress_confluence.py \
+    --pages 200 --scenarios all --profile worklaptop \
+    --models <models-home> --out /tmp/ck-stress
+
+# scaling check: 1000-page tree, the three crawl scenarios
+python mcp/confluence-knowledge/scripts/stress_confluence.py \
+    --pages 1000 --scenarios scale --profile worklaptop \
+    --models <models-home> --out /tmp/ck-stress-1k
+```
+
+- The fake DC (`scripts/_fake_dc_work.py`) generates a deterministic
+  seeded tree — a 250-child root branch (forces `start`/`limit`
+  pagination), a ~12-level deep chain, mixed body kinds including huge
+  table/macro pages, plus embedded canary facts used to verify the crawl
+  really indexed. `--hostile` adds lognormal latency, 429 bursts with
+  `Retry-After`, intermittent 5xx, requests that hang past the 20 s
+  client timeout, and a few 403 pages.
+- Profiles: `worklaptop` caps the server at the 8-core/16 GB budget
+  (`KNOWLEDGE_THREADS=2`); `native` runs uncapped.
+- Instruments: a 1 s `status`/`crawl_step` prober (any call > 2 s is a
+  freeze event), an agent-style `wait_for_crawl` loop, a separate
+  laptop-stall probe (50 ms wake-ups; > 250 ms overshoot = the machine
+  itself stalled), a psutil RSS/CPU sampler, and a progress auditor.
+- Scenarios S1–S12: clean/hostile first crawl, unchanged and mutated
+  refresh, search storm during crawl, two IDE windows on one job,
+  cancel, kill −9 + resume, memory-pressure pause/resume, idle unload,
+  battery saver.
+- Output: `<out>/<scenario>/result.json` (raw series), `dc-requests.jsonl`
+  (per-request DC log) and `<out>/report.md` — one row per scenario with
+  pass/fail per threshold.
+- `KNOWLEDGE_FORCE_BATTERY=1` is a test-only env hook that simulates
+  battery power for machines without a battery sensor.
+
+Thresholds live at the top of `stress_confluence.py` — strict defaults:
+tool call ≤ 2 s during a crawl, `status`/`crawl_step` p95 < 300 ms, stall
+≤ 250 ms, RSS < 3 GB, CPU ≤ ~50 % of the core budget, cancel < 5 s,
+unchanged refresh ≈ fetch-only time, 10/10 canary hits.
+
 ## Maintainers: publishing (gated)
 
 Every release goes through `.github/workflows/publish-pypi.yml`:

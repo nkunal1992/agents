@@ -48,8 +48,12 @@ class Limits:
             return True
 
     def on_battery(self) -> bool:
+        # KNOWLEDGE_FORCE_BATTERY=1 is a test/stress-harness hook for
+        # machines with no battery sensor or a plugged-in laptop.
         if not self.battery_saver or _psutil is None:
             return False
+        if os.environ.get("KNOWLEDGE_FORCE_BATTERY") == "1":
+            return True
         try:
             b = _psutil.sensors_battery()
             return b is not None and b.power_plugged is False
