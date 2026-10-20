@@ -234,9 +234,12 @@ wheel path for the install step — everything else is identical.
    Then drive progress with `wait_for_crawl` — it blocks ≤ `wait_s`
    (default 50s, cap 120) and returns early whenever the phase or page
    count moves. Call it in a loop and relay one concise line per change:
-   `phase` · `pages_done` · `rate_ppm` · `eta_s` (e.g. "fetching —
-   410 pages, ~6/min, ~2 min left"). Use `crawl_step` only for an instant
-   snapshot between waits.
+   `phase` · `pages_done` (of `pages_seen` fetched when they differ) ·
+   `rate_ppm` · `eta_s` (e.g. "embedding — 410 pages, ~6/min, ~2 min
+   left"). During a `fetching`/`starting` phase, `pages_done` may lag —
+   relay `pages_seen` so the crawl never looks stuck. Mention `errors_n`
+   when it moves. Use `crawl_step` only for an instant snapshot between
+   waits.
    - `note: loading local models` or `phase: starting` → the crawl is
      queued while models warm — keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — the crawl

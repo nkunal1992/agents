@@ -402,6 +402,8 @@ class SPCrawler:
                     self.control.check()
                     self.control.progress.remaining = \
                         len(queue) + len(inflight)
+                    self.control.progress.pages_seen = len(seen)
+                    self.control.progress.errors_n = len(errors)
                 if len(seen) >= MAX_FILES:
                     errors.append(
                         f"file cap reached ({MAX_FILES}) — remaining skipped")
@@ -461,6 +463,8 @@ class SPCrawler:
                             if self.index.copy_live_to_stage(result[1],
                                                              job_id):
                                 seen.add(result[1])
+                                if self.control is not None:
+                                    self.control.page_done(1)
                             continue
                         _, meta, data, h = result
                         pid = meta["page_id"]
@@ -470,6 +474,8 @@ class SPCrawler:
                                 and self.index.copy_live_to_stage(
                                     pid, job_id)):
                             seen.add(pid)
+                            if self.control is not None:
+                                self.control.page_done(1)
                             continue
                         chunks, w = extract_file_chunks(
                             meta["title"], data, **self._chunk_kwargs())
@@ -492,6 +498,8 @@ class SPCrawler:
                     if (self.index.live_page_hash(pid) == h
                             and self.index.copy_live_to_stage(pid, job_id)):
                         seen.add(pid)
+                        if self.control is not None:
+                            self.control.page_done(1)
                         continue
                     page, chunks, w = self._finish_list_item(page, canvas)
                     warns.extend(w)
@@ -526,6 +534,9 @@ class SPCrawler:
         if not queue:
             if self.control is not None:
                 self.control.phase("publishing")
+                self.control.progress.remaining = 0
+                self.control.progress.pages_seen = len(seen)
+                self.control.progress.errors_n = len(errors)
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",

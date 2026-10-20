@@ -17,6 +17,15 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from .client import AccessError, ConfluenceClient
+
+_PERMANENT_MARKERS = ("401", "403", "404", "permission", "not found")
+
+
+def _permanent(err: Exception) -> bool:
+    """4xx/permission errors are definitive — don't keep stale index rows
+    for content we were authoritatively denied. 5xx/timeouts are transient:
+    keep the last-known-good content."""
+    return any(m in str(err) for m in _PERMANENT_MARKERS)
 from .extract import extract_chunks
 from .index import Index, StaleJobError
 from .resources import limits
@@ -153,14 +162,21 @@ class Crawler:
         return page
 
     def _fetch_page(self, pid: str):
-        """Worker task: the page body and its child listing in one fetch —
-        the two network calls the pipeline parallelizes. A children-listing
-        failure is returned, not raised: the page body still stages."""
-        page = self._page(pid)
+        """Worker task: page body and child listing fetched independently —
+        a denied/failed body must not preclude listing children (#170: DC
+        permissions are per-page; the listing endpoint decides itself).
+        Raises only when both calls fail."""
         try:
-            return page, self._children(pid, is_folder=False)
+            page = self._page(pid)
         except AccessError as e:
-            return page, e
+            page = e
+        try:
+            kids = self._children(pid, is_folder=False)
+        except AccessError as e:
+            kids = e
+        if isinstance(page, AccessError) and isinstance(kids, AccessError):
+            raise AccessError(f"{page}; children: {kids}")
+        return page, kids
 
     def start(self, root_page: str) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -315,6 +331,8 @@ class Crawler:
                     self.control.check()     # cancel → heartbeat → mem guard
                     self.control.progress.remaining = \
                         len(queue) + len(inflight)
+                    self.control.progress.pages_seen = len(seen)
+                    self.control.progress.errors_n = len(errors)
                 if processed and (time.monotonic() - last_ckpt >= 5.0
                                   or processed - last_ckpt_n >= 50):
                     self._checkpoint(
@@ -352,14 +370,10 @@ class Crawler:
                             # the listing died — its whole subtree is now
                             # unreachable; keep all live rows rather than
                             # let publish delete pages we never saw
-                            if not any(m in str(e) for m in
-                                       ("401", "403", "404", "permission",
-                                        "not found")):
+                            if not _permanent(e):
                                 keep_failed.update(
                                     self.index.active_pages())
-                        elif not any(m in str(e) for m in
-                                     ("401", "403", "404", "permission",
-                                      "not found")):
+                        elif not _permanent(e):
                             keep_failed.add(pid)
                         continue
                     except Exception as e:  # noqa: BLE001
@@ -388,6 +402,19 @@ class Crawler:
                         errors.append(f"children of {pid}: {kids}")
                         keep_failed.update(self.index.active_pages())
                         kids = []
+                    if isinstance(page, AccessError):
+                        # body denied/failed — but a discovered child
+                        # listing still flows through; each child verifies
+                        # its own root ancestry when fetched
+                        errors.append(f"page {pid}: {page}")
+                        if not _permanent(page):
+                            keep_failed.add(pid)
+                        for cid, ctype in kids:
+                            if cid not in seen:
+                                levels.setdefault(cid,
+                                                  levels.get(pid, 0) + 1)
+                                queue.append(f"{ctype}:{cid}")
+                        continue
                     if pid != job["root_page"]:
                         anc = page.get("ancestors") or []
                         if anc and job["root_page"] not in anc:
@@ -403,6 +430,10 @@ class Crawler:
                             and self.index.copy_live_to_stage(pid,
                                                               job_id)):
                         seen.add(pid)
+                        if self.control is not None:
+                            # unchanged pages are "done" too — a refresh
+                            # must show progress, not sit at 0 (#171)
+                            self.control.page_done(1)
                     else:
                         chunks, warns = extract_chunks(
                             page["storage"], **self._chunk_kwargs())
@@ -452,6 +483,9 @@ class Crawler:
         else:
             if self.control is not None:
                 self.control.phase("publishing")
+                self.control.progress.remaining = 0
+                self.control.progress.pages_seen = len(seen)
+                self.control.progress.errors_n = len(errors)
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
             self.index.save_job(job_id, "done", [], errors)

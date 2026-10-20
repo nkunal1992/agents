@@ -255,6 +255,8 @@ class LocalCrawler:
                     self.control.check()
                     self.control.progress.remaining = \
                         len(queue) + len(inflight)
+                    self.control.progress.pages_seen = len(seen)
+                    self.control.progress.errors_n = len(errors)
                 if len(seen) >= MAX_FILES:
                     errors.append(
                         f"file cap reached ({MAX_FILES}) — remaining skipped")
@@ -330,6 +332,8 @@ class LocalCrawler:
                     if (self.index.live_page_hash(rel) == content_hash
                             and self.index.copy_live_to_stage(rel, job_id)):
                         seen.add(rel)
+                        if self.control is not None:
+                            self.control.page_done(1)
                         continue
                     if data:
                         chunks, warns2 = extract_file_chunks(
@@ -375,6 +379,9 @@ class LocalCrawler:
         if not queue:
             if self.control is not None:
                 self.control.phase("publishing")
+                self.control.progress.remaining = 0
+                self.control.progress.pages_seen = len(seen)
+                self.control.progress.errors_n = len(errors)
             self.index.publish(seen | keep_failed, job_id=job_id)
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",

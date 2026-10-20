@@ -39,6 +39,7 @@ class Progress:
 
     started_at: float = field(default_factory=time.time)
     pages_done: int = 0
+    pages_seen: int = 0     # discovered/processed — moves during fetching
     remaining: int = 0
     errors_n: int = 0
     phase: str = "starting"
@@ -67,7 +68,8 @@ class Progress:
         rate = self.rate_ppm
         eta = (int(self.remaining / (rate / 60))
                if rate and self.remaining else None)
-        return {"pages_done": self.pages_done, "remaining": self.remaining,
+        return {"pages_done": self.pages_done, "pages_seen": self.pages_seen,
+                "remaining": self.remaining,
                 "errors_n": self.errors_n, "phase": self.phase,
                 "rate_ppm": (None if not rate else round(rate, 1)),
                 "eta_s": eta,
@@ -84,6 +86,7 @@ class Progress:
             d = json.loads(blob)
             p = cls()
             p.pages_done = int(d.get("pages_done", 0))
+            p.pages_seen = int(d.get("pages_seen", 0))
             p.remaining = int(d.get("remaining", 0))
             p.errors_n = int(d.get("errors_n", 0))
             p.phase = str(d.get("phase", "running"))

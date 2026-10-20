@@ -1,0 +1,156 @@
+"""#171: errors_n mirrors errors, pages_seen tracks fetch progress,
+unchanged refresh counts as done, remaining zeroes at done, status caches
+the identity check."""
+
+
+import httpx
+import numpy as np
+import pytest
+
+from confluence_knowledge import server
+from confluence_knowledge.client import RULES_DC, ConfluenceClient
+from confluence_knowledge.crawl import Crawler
+from confluence_knowledge.index import Index
+from confluence_knowledge.jobs import Progress, crawl_control
+from confluence_knowledge.settings import SiteProfile
+
+
+def _client(handler):
+    return ConfluenceClient("https://dc", {}, RULES_DC,
+                            session=httpx.Client(
+                                transport=httpx.MockTransport(handler)))
+
+
+def _page(pid, ancestors=None):
+    return {"id": pid, "title": f"Page {pid}",
+            "body": {"storage": {"value": f"<p>content {pid}</p>"}},
+            "version": {"number": 1},
+            "ancestors": [{"id": a} for a in (ancestors or [])],
+            "_links": {"webui": f"/p/{pid}", "base": "https://dc"}}
+
+
+class _Embed:
+    def embed(self, texts):
+        return np.ones((len(texts), 4), dtype=np.float32)
+
+
+def _tree_with_denied():
+    """root 1 → kids 2..6; page 4's body is 403."""
+    pages = {"1": _page("1")}
+    children = {"1": [{"id": str(i)} for i in range(2, 7)]}
+    for i in range(2, 7):
+        pid = str(i)
+        pages[pid] = _page(pid, ["1"])
+        children[pid] = []
+
+    def h(req):
+        path = req.url.path
+        if "/child/page" in path:
+            pid = path.split("/content/")[1].split("/")[0]
+            return httpx.Response(200, json={
+                "results": children.get(pid, []),
+                "size": len(children.get(pid, [])), "limit": 200})
+        pid = path.split("/content/")[1].rstrip("/")
+        if pid == "4":
+            return httpx.Response(403)
+        return httpx.Response(200, json=pages[pid])
+
+    return _client(h)
+
+
+def _controlled(tmp_path, client, monkeypatch):
+    monkeypatch.setenv("CONF_KNOWLEDGE_FETCH_CONCURRENCY", "1")
+    idx = Index(tmp_path / "s.db")
+    prog = Progress()
+    owner = server._owner
+    c = Crawler(client, idx, "datacenter")
+    job = c.start("1")
+    idx.acquire_lease(job, owner.value, owner.pid)
+    ctl = crawl_control(idx, job, prog, cancel_flag=None,
+                        owner=owner, hb_s=60)
+    c.control = ctl
+    c._embedder = _Embed()
+    return c, job, prog
+
+
+def test_errors_n_remaining_and_pages_seen(tmp_path, monkeypatch):
+    c, job, prog = _controlled(tmp_path, _tree_with_denied(), monkeypatch)
+    r = c.step(job, batch=None)
+    assert r["state"] == "done"
+    assert prog.errors_n == len(r["errors"]) >= 1   # the 403 body error
+    assert prog.pages_seen == 5     # staged pages; the denied one errors
+    assert prog.remaining == 0
+    snap = prog.snapshot()
+    assert snap["errors_n"] == prog.errors_n
+    assert snap["pages_seen"] == 5
+
+
+def test_refresh_counts_reused_pages(tmp_path, monkeypatch):
+    c, job, _ = _controlled(tmp_path, _tree_with_denied(), monkeypatch)
+    assert c.step(job, batch=None)["state"] == "done"
+    # second crawl, unchanged tree — reused rows must still count as done
+    prog2 = Progress()
+    job2 = c.start("1")
+    idx = c.index
+    idx.acquire_lease(job2, server._owner.value, server._owner.pid)
+    c.control = crawl_control(idx, job2, prog2, cancel_flag=None,
+                              owner=server._owner, hb_s=60)
+    assert c.step(job2, batch=None)["state"] == "done"
+    assert prog2.pages_done == 5      # 5 indexed pages reused, not "0 done"
+    assert prog2.remaining == 0
+
+
+# ---------------- status identity TTL ----------------
+
+
+class _CountClient:
+    def __init__(self):
+        self.identity_calls = 0
+
+    def get(self, path, params=None):
+        if "user/current" in path:
+            self.identity_calls += 1
+            return _Resp({"username": "t"})
+        return _Resp({})
+
+
+class _Resp:
+    def __init__(self, d):
+        self._d = d
+
+    def json(self):
+        return self._d
+
+
+@pytest.fixture
+def wired_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path))
+    monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(tmp_path / "home"))
+    profile = SiteProfile("datacenter", "https://c", None, "ref")
+    monkeypatch.setattr(SiteProfile, "load",
+                        staticmethod(lambda home: profile))
+    client = _CountClient()
+    monkeypatch.setattr(server, "_client_for", lambda p: client)
+    monkeypatch.setattr(server, "_scopes", {})
+    monkeypatch.setattr(server, "_indexes", {})
+    monkeypatch.setattr(server, "_CREDS_CACHE", {})
+    return client
+
+
+def test_status_caches_identity_check(wired_status):
+    client = wired_status
+    server.status()
+    server.status()
+    server.status()
+    assert client.identity_calls == 1   # TTL keeps the identity hit cheap
+
+
+def test_connect_forces_revalidation(wired_status):
+    client = wired_status
+    server.status()
+    server.status()
+    # a connect (possible token rotation) must not serve a stale verdict
+    c = server.connect("1")
+    assert c["scope_handle"]
+    server.status()
+    assert client.identity_calls >= 2

@@ -47,6 +47,8 @@ mcp = FastMCP("confluence-knowledge")
 # in-process caches (per server lifetime) — tools run on worker threads
 # now (mcp_async), so these are guarded by one lock
 _state_lock = threading.RLock()
+_CREDS_CACHE: dict[str, tuple[float, bool, str]] = {}
+_CREDS_TTL_S = float(os.environ.get("CONF_KNOWLEDGE_CREDS_TTL_S", "120"))
 _scopes: dict[str, dict] = {}
 _evidence_sets: dict[str, dict] = {}  # set_id → {scope, ev}
 _indexes: dict[str, Index] = {}  # one connection per DB for the server lifetime
@@ -215,15 +217,24 @@ def status() -> dict:
                            index_root=idx_root)
     if "error" not in cfg:
         # cheap liveness: a 401 here means the saved token died — point at
-        # setup, not at the docs
-        try:
-            client = _client_for(profile)
-            ep = ("wiki/rest/api/user/current" if profile.env == "cloud"
-                  else "rest/api/user/current")
-            client.get(ep)
-            ok, detail = True, "token valid"
-        except (AccessError, SetupError) as e:
-            ok, detail = False, str(e)
+        # setup, not at the docs. Cached ~2min: status is polled during
+        # crawls and must not turn into a /user/current DDOS (#171).
+        ref = profile.credential_ref
+        with _state_lock:
+            cached = _CREDS_CACHE.get(ref)
+        if cached and time.time() - cached[0] < _CREDS_TTL_S:
+            ok, detail = cached[1], cached[2]
+        else:
+            try:
+                client = _client_for(profile)
+                ep = ("wiki/rest/api/user/current" if profile.env == "cloud"
+                      else "rest/api/user/current")
+                client.get(ep)
+                ok, detail = True, "token valid"
+            except (AccessError, SetupError) as e:
+                ok, detail = False, str(e)
+            with _state_lock:
+                _CREDS_CACHE[ref] = (time.time(), ok, detail)
         checks.append({"flag": "creds_valid", "ok": ok, "detail": detail,
                        "remediation": None if ok else
                        "confluence-knowledge setup (rotate the token)"})
@@ -255,6 +266,8 @@ def connect(root: str) -> dict:
     profile = SiteProfile.load(_home())
     root_id = extract_page_id(root)
     _clients.pop(profile.credential_ref, None)  # re-read the token: setup may have rotated it
+    with _state_lock:
+        _CREDS_CACHE.pop(profile.credential_ref, None)  # force re-validate
     client = _client_for(profile)
     who = client.get("wiki/rest/api/user/current" if profile.env == "cloud"
                      else "rest/api/user/current").json()
