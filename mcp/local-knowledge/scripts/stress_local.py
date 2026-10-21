@@ -1007,7 +1007,12 @@ def main() -> int:
         if name == "MEMPAUSE":
             import psutil
             free_mb = int(psutil.virtual_memory().available / 1048576)
-            env_extra["KNOWLEDGE_MIN_FREE_MB"] = str(free_mb - 384)
+            # floor = prep-free − 384, capped at 4 GB — on a machine with
+            # ~8+ GB ambient free, prep−384 sits just under ambient, so
+            # the guard never releases after the ballast exits (the
+            # wedge this run exposed). The cap guarantees the floor is
+            # meaningfully below post-release free.
+            env_extra["KNOWLEDGE_MIN_FREE_MB"] =                 str(max(512, min(free_mb - 384, 4096)))
         if name == "BATTERY":
             env_extra["KNOWLEDGE_FORCE_BATTERY"] = "1"
         if name == "IDEKILL":
