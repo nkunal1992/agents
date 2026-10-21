@@ -10,8 +10,6 @@ import threading
 import time
 import uuid
 
-from mcp.server.fastmcp import FastMCP
-
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
 from confluence_knowledge.index import Index
@@ -33,6 +31,7 @@ from confluence_knowledge.retrieval import (
     retrieve,
 )
 from confluence_knowledge.settings import SetupError
+from mcp.server.fastmcp import FastMCP
 
 from .auth_sp import acquire_token
 from .client_sp import download_file, make_client
