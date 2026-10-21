@@ -232,7 +232,7 @@ wheel path for the install step — everything else is identical.
    and posts a desktop notification when it finishes. Say what started:
    "Indexing the subtree in the background — I'll keep you posted."
    Then drive progress with `wait_for_crawl` — it blocks ≤ `wait_s`
-   (default 50s, cap 120) and returns early whenever the phase or page
+   (default 25s, cap 120) and returns early whenever the phase or page
    count moves. Call it in a loop and relay one concise line per change:
    `phase` · `pages_done` (of `pages_seen` fetched when they differ) ·
    `rate_ppm` · `eta_s` (e.g. "embedding — 410 pages, ~6/min, ~2 min
@@ -253,6 +253,13 @@ wheel path for the install step — everything else is identical.
      deliberately — normal.
    - `worker: another IDE window` → a different window owns the crawl —
      keep waiting on the same `job_id`, never start a duplicate.
+   `wait_for_crawl` sends MCP progress notifications every ~2 s — a
+   keep-alive that resets the client's request timeout, so the wait
+   can't trip IDE-side timeouts. `worker: another IDE window` means
+   another **server process** owns the crawl — often this same
+   window's service from before an MCP reconnect; the job is shared
+   and its progress is still real — keep waiting on the same job_id.
+
    - `state: done` → report pages indexed + any `errors` (inaccessible
      pages are disclosed, never hidden).
    - `state: abandoned` → this job can never finish — superseded by a

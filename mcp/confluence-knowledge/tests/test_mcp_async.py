@@ -31,7 +31,9 @@ def test_wrapper_schema_matches_signature():
     tm = srv.mcp._tool_manager._tools
     for name, t in tm.items():
         src = inspect.signature(getattr(srv, name))
-        ours = set(src.parameters)
+        # ctx is FastMCP's injected request context — never part of the
+        # client-facing schema by design
+        ours = set(src.parameters) - {"ctx"}
         schema = t.parameters.get("properties", {})
         assert ours == set(schema), \
             f"{name}: schema {sorted(schema)} != signature {sorted(ours)}"

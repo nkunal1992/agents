@@ -10,8 +10,12 @@ sync function, so existing tests keep calling it directly.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
+import logging
+import queue
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -24,6 +28,25 @@ from mcp.server.fastmcp import FastMCP
 # limiter so a blocked search never stalls crawl_step/status/etc.
 HEAVY = anyio.CapacityLimiter(1)
 LIGHT = anyio.CapacityLimiter(8)
+
+# Sync tools run on a worker thread but may still emit MCP progress
+# notifications — the spec-correct keep-alive that resets the client's
+# request timeout on long polls (wait_for_crawl). The worker pushes into
+# a plain Queue; an async pump on the runner drains it via
+# ctx.report_progress. No client progressToken → report_progress is a
+# no-op, so heartbeat emission is always safe.
+_hb_local = threading.local()
+_HB_DRAIN_S = 0.4
+
+
+def heartbeat(progress: float, total: float | None = None,
+              message: str | None = None) -> None:
+    """Emit a progress notification from inside a sync tool. No-op when
+    the caller isn't a heartbeat-aware wrapper (tests call tools
+    directly)."""
+    q = getattr(_hb_local, "queue", None)
+    if q is not None:
+        q.put((progress, total, message))
 
 
 def tool(mcp: FastMCP, *, heavy: bool = False) -> Callable:
@@ -39,7 +62,39 @@ def tool(mcp: FastMCP, *, heavy: bool = False) -> Callable:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
             call = functools.partial(fn, *bound.args, **bound.kwargs)
-            return await anyio.to_thread.run_sync(call, limiter=limiter)
+            ctx = bound.arguments.get("ctx")
+            if ctx is None:
+                return await anyio.to_thread.run_sync(call, limiter=limiter)
+            q: queue.Queue = queue.Queue()
+            done = asyncio.Event()
+
+            def _call() -> Any:
+                _hb_local.queue = q
+                try:
+                    return call()
+                finally:
+                    _hb_local.queue = None
+
+            async def _pump() -> None:
+                while not done.is_set() or not q.empty():
+                    try:
+                        p, t, m = q.get_nowait()
+                    except queue.Empty:
+                        await asyncio.sleep(_HB_DRAIN_S)
+                        continue
+                    try:
+                        await ctx.report_progress(p, t, m)
+                    except Exception:
+                        logging.getLogger(__name__).debug(
+                            "heartbeat dropped", exc_info=True)
+
+            task = asyncio.create_task(_pump())
+            try:
+                return await anyio.to_thread.run_sync(
+                    _call, limiter=limiter)
+            finally:
+                done.set()
+                await task
 
         functools.update_wrapper(runner, fn)
         runner.__signature__ = sig

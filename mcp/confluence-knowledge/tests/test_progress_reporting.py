@@ -3,6 +3,8 @@ unchanged refresh counts as done, remaining zeroes at done, status caches
 the identity check."""
 
 
+import json
+
 import httpx
 import numpy as np
 import pytest
@@ -217,3 +219,105 @@ def test_fingerprint_covers_persisted_models():
     # reranker deliberately absent — query-time only, must not force a
     # rebuild on upgrade
     assert RERANK_REPO not in MODEL_MARKER
+
+
+def test_cross_window_progress_uses_durable_blob(tmp_path, monkeypatch):
+    """#186: a non-owning process's zeroed Progress must not clobber the
+    owner's checkpointed progress — pages_done stays real."""
+
+    monkeypatch.setattr(server, "_progress", {})
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j", "1")
+    idx.save_job("j", "running", ["a", "b"], [])
+    # owner process checkpoints its live progress into the blob
+    own = Progress()
+    own.pages_done = 41
+    own.pages_seen = 41
+    own.set_phase("embedding")
+    idx.meta_set("progress:j", json.dumps(own.snapshot()))
+    # this process holds an empty Progress marked 'another IDE window'
+    foreign = Progress()
+    foreign.worker = "another IDE window"
+    server._progress["j"] = foreign
+
+    p = server._progress_for(idx, "j")
+    assert p["pages_done"] == 41                      # not clobbered by 0
+    assert p["worker"] == "another IDE window"        # ownership disclosed
+
+
+def test_heartbeat_noop_without_wrapper():
+    """heartbeat() is safe to call from sync context — no queue → no-op."""
+    from confluence_knowledge.mcp_async import heartbeat
+    heartbeat(1)  # must not raise
+
+
+def test_heartbeat_emits_through_queue(tmp_path, monkeypatch):
+    """Inside the wrapper the worker thread's heartbeat() lands in the
+    queue the async pump drains — verify via the thread-local sink."""
+    import queue
+
+    from confluence_knowledge import mcp_async
+    q = queue.Queue()
+    mcp_async._hb_local.queue = q
+    try:
+        mcp_async.heartbeat(5, total=10, message="mid")
+        assert q.get_nowait() == (5, 10, "mid")
+    finally:
+        mcp_async._hb_local.queue = None
+
+
+def test_wait_for_crawl_default_fits_ide_timeout():
+    """#186: the 50 s default blew past IDE client timeouts — the new
+    default must sit under ~30 s."""
+    import inspect
+    sig = inspect.signature(server.wait_for_crawl)
+    assert sig.parameters["wait_s"].default <= 30
+
+
+# ---- #187 three-tier reporting ----
+
+
+def test_pulse_line_format():
+    from confluence_knowledge.reporting import pulse
+    p = {"phase": "fetching", "pages_done": 120, "pages_seen": 130,
+         "remaining": 40, "rate_ppm": 245.5, "errors_n": 2}
+    s = pulse(p, rss_mb=1656.4)
+    assert "fetching" in s and "120/~170" in s and "245.5 ppm" in s \
+        and "1656 MB RSS" in s and "2 errors" in s
+
+
+def test_stages_math():
+    from confluence_knowledge.reporting import stages
+    p = {"pages_seen": 80, "pages_done": 60, "remaining": 20,
+         "eta_s": 300}
+    st = stages(p)
+    assert st["fetch"]["pages"] == 80 and st["embed"]["pages"] == 60
+    assert st["pct_complete"] == 60.0 and st["eta_s"] == 300
+
+
+def test_audit_groups_errors_by_cause(tmp_path):
+    from confluence_knowledge.reporting import audit
+    idx = Index(tmp_path / "a.db")
+    idx.create_job("j", "1")
+    errs = ["page 4: HTTP 403 denied", "page 9: HTTP 502 bad gateway",
+            "page 7: HTTP 403 denied", "page 3: timeout after 30s"]
+    idx.save_job("j", "done", [], errs)
+    a = audit(idx, "j")
+    assert a["errors_by_cause"]["access denied (HTTP 403)"] == 2
+    assert a["errors_by_cause"]["server error (HTTP 502)"] == 1
+    assert a["errors_by_cause"]["timeout"] == 1
+    assert a["errors_total"] == 4
+    assert "index_size_mb" in a
+
+
+def test_progress_for_exposes_pulse_and_stages(tmp_path, monkeypatch):
+    """Running jobs carry tier-1/2 fields; terminal jobs carry audit."""
+    monkeypatch.setattr(server, "_progress", {})
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j", "1")
+    idx.save_job("j", "running", ["a"], [])
+    p = server._progress_for(idx, "j")
+    assert "pulse" in p and "stages" in p
+    idx.save_job("j", "done", [], [])
+    p2 = server._progress_for(idx, "j")
+    assert "summary" in p2 and p2["summary"]["state"] == "done"
