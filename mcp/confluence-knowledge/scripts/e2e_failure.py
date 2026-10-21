@@ -65,6 +65,7 @@ def main() -> None:
         "install")
 
     cache = os.environ.get("CK_MODEL_CACHE")
+    cache = os.path.expanduser(cache) if cache else None
     if cache and (Path(cache) / "bge-m3").exists():
         shutil.copytree(cache, home / "models", dirs_exist_ok=True)
         print("PASS models seeded from cache")

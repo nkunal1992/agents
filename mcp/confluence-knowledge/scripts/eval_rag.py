@@ -32,8 +32,9 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 import os
 
-os.environ.setdefault("CONF_KNOWLEDGE_HOME",
-                      os.environ.get("CK_MODEL_HOME", ""))
+os.environ.setdefault(
+    "CONF_KNOWLEDGE_HOME",
+    os.path.expanduser(os.environ.get("CK_MODEL_HOME", "")))
 
 from confluence_knowledge import retrieval
 from confluence_knowledge.extract import extract_chunks
@@ -124,7 +125,7 @@ def main() -> int:
         return 0
 
     pairs = json.loads(golden.read_text())["pairs"]
-    home = Path(os.environ["CONF_KNOWLEDGE_HOME"])
+    home = Path(os.path.expanduser(os.environ["CONF_KNOWLEDGE_HOME"]))
     emb = retrieval.LocalEmbedder(home)
     rr = retrieval.LocalReranker(home)
     sp = retrieval.LocalSparseEmbedder(home)
