@@ -203,12 +203,12 @@ class RpcDb:
 
 
 def daemon_enabled(service_env: str) -> bool:
-    """Proxy mode gate: the service env opt-in (e.g.
-    LOCAL_KNOWLEDGE_DAEMON=1) — and the daemon itself never re-proxies
-    (it sets KNOWLEDGE_DAEMON_ROLE=1 in its own environment)."""
+    """Proxy mode gate (#189/#196): ON by default — the service env opt-out
+    (e.g. LOCAL_KNOWLEDGE_DAEMON=0) is the only off switch. The daemon
+    itself never re-proxies (KNOWLEDGE_DAEMON_ROLE=1 in its env)."""
     if os.environ.get("KNOWLEDGE_DAEMON_ROLE"):
         return False
-    return os.environ.get(service_env) == "1"
+    return os.environ.get(service_env, "1") != "0"
 
 
 def daemon_owner() -> str:
