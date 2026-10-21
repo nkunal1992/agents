@@ -643,9 +643,11 @@ async def s_life(ctx: Ctx) -> dict:
 
 
 async def s_storm(ctx: Ctx) -> dict:
-    """STORM: search every 2 s mid-crawl — heavy/light contention."""
+    """STORM: search every 2 s while the fresh crawl runs — heavy/light
+    contention (the refresh path finishes too fast to overlap)."""
     await ctx.connect_and_crawl()
     stop = False
+    searches: list[float] = []
 
     async def storm() -> None:
         while not stop:
@@ -653,21 +655,18 @@ async def s_storm(ctx: Ctx) -> dict:
                            {"scope_handle": ctx.handle,
                             "question": "deployment codename?"},
                            timeout=60)
+            searches.append(ctx.calls[-1]["s"])
             await asyncio.sleep(2)
 
-    res = await ctx.run_crawl()
     storm_t = asyncio.create_task(storm())
-    res2 = await ctx.call("start_crawl",
-                          {"scope_handle": ctx.handle, "refresh": True},
-                          timeout=30)
-    ctx.job = res2.get("job_id")
-    r2 = await ctx.run_crawl()
+    res = await ctx.run_crawl()
     stop = True
     storm_t.cancel()
-    ctx.extra["wall_s"] = res["wall_s"] + r2["wall_s"]
-    return {"searches responsive under crawl":
-            v(all(c["s"] < FREEZE_S * 3 for c in ctx.calls
-                  if c["tool"] == "search"))}
+    ctx.extra["wall_s"] = res["wall_s"]
+    ctx.extra["storm_searches"] = len(searches)
+    return {"searches landed mid-crawl": v(len(searches) >= 5),
+            "searches responsive under crawl":
+            v(all(s < FREEZE_S * 3 for s in searches))}
 
 
 async def s_cancel(ctx: Ctx) -> dict:
