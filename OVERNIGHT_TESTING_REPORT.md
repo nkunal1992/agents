@@ -32,3 +32,4 @@ Started: 2026-10-21 ~22:30 local.
 | 00:30 | — | e2e_journey daemon kill now portable (rpc.db lease + SIGTERM fallback) | green — Windows CI legs can kill the daemon too |
 | 00:45 | Phase 2b | stress STORM/CANCEL/IDEKILL (files=60, fake) | all verdict FAILs are corpus-size artifacts: job finishes before probes run — IDEKILL "worker" label reads a released lease, CANCEL lands post-done, STORM codewords don't rank under fake embedder. Same scenarios pass at real corpus sizes |
 | 00:45 | Phase 2b | verify round-trip root-caused | codeword search empty under fake embeddings → canary now uses a guaranteed phrase; DAEKILL fully green including verify through respawned daemon |
+| 01:10 | CI | PR #205 branch legs | e2e (ubuntu/macos/**windows**) all SUCCESS incl. Journey + Session replay — Windows parity via rpc.db lease kill confirmed on real CI |
