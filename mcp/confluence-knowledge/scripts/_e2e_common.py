@@ -11,6 +11,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 TOKEN = "e2e-secret-token-canary"
 PAGE_DELAY = 0.4  # simulated corporate-network latency per request
@@ -30,6 +31,24 @@ PAGES["200"] = ("Deploy Windows",
                  '<ac:structured-macro ac:name="info"><ac:rich-text-body>'
                  "<p>The maintenance freeze runs from December 20 to January 5."
                  "</p></ac:rich-text-body></ac:structured-macro>"))
+
+
+def _load_corpus() -> tuple[dict, dict, dict]:
+    """FAKE_DC_CORPUS=<fixture.json> swaps the baked corpus for harvested
+    real pages. Returns (PAGES, CHILDREN, PARENT_OF) — parent chains are
+    re-derived by inverting children (the fixture carries children only).
+    """
+    import os
+    path = os.environ.get("FAKE_DC_CORPUS")
+    if not path:
+        return PAGES, CHILDREN, {}
+    d = json.loads(Path(path).read_text())["pages"]
+    pages = {pid: (p.get("title", pid), p.get("body", ""))
+             for pid, p in d.items()}
+    children = {pid: p.get("children", []) for pid, p in d.items()}
+    parent_of = {k: pid for pid, p in d.items()
+                 for k in p.get("children", [])}
+    return pages, children, parent_of
 
 
 def make_handler(hits: list[str]):
@@ -60,23 +79,28 @@ def make_handler(hits: list[str]):
             if len(parts) >= 5 and parts[1:4] == ["rest", "api", "content"]:
                 pid = parts[4]
                 if path.endswith("/child/page"):
-                    kids = CHILDREN.get(pid, [])
+                    kids = CHILDREN_T.get(pid, [])
                     return self._json(200, {
                         "results": [{"id": k} for k in kids],
                         "size": len(kids), "limit": 200})
-                if pid in PAGES:
-                    title, body = PAGES[pid]
-                    anc = ([] if pid == "100"
-                           else (["100", "101"] if pid == "200" else ["100"]))
+                if pid in PAGES_T:
+                    title, body = PAGES_T[pid]
+                    anc = []
+                    cur = pid
+                    while cur in PARENT_OF:        # re-derive ancestors
+                        cur = PARENT_OF[cur]
+                        anc.append(cur)
                     return self._json(200, {
-                        "id": pid, "title": title, "version": {"number": 1},
+                        "id": pid, "title": title,
+                        "version": {"number": 1},
                         "body": {"storage": {"value": body}},
-                        "ancestors": [{"id": a} for a in anc],
+                        "ancestors": [{"id": a} for a in reversed(anc)],
                         "_links": {
                             "webui": f"/pages/viewpage.action?pageId={pid}",
                             "base": f"http://127.0.0.1:{self.server.server_port}"}})
             return self._json(404, {})
 
+    PAGES_T, CHILDREN_T, PARENT_OF = _load_corpus()
     return FakeDC
 
 

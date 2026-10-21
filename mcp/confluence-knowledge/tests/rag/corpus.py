@@ -53,7 +53,9 @@ CORPUS = [
           <tr><td>Rollback window</td><td>Release lead</td><td>2 hours</td></tr>
         </table>
         <p>Post-deploy verification runs the smoke suite against
-        /healthz on every pod.</p>""",
+        /healthz on every pod.</p>
+        <p>The canary stage always releases to 5% traffic for 30 minutes
+        before the rollout proceeds.</p>""",
         [
             ("how long is the rollback window", "2 hours"),
             ("what percentage is the canary", "5% traffic"),
@@ -132,6 +134,38 @@ CORPUS = [
         + "</table>",
         [
             ("what port does svc-0800 use", "tcp/10800"),
+        ],
+    ),
+    # confusable-domain pairs — the "NIO router" class: two pages sharing
+    # a vocabulary where naive retrieval ranks the wrong one (field case:
+    # 'nio router' pulled the NIO_TTE interface doc, not the router doc)
+    (
+        "TNL Router Administration",
+        """<h1>TNL Router</h1>
+        <p>The TNL router forwards packets between the ingress fabric and
+        the spine layer. It routes on destination address prefixes from
+        the shared forwarding table and enforces QoS classes on egress
+        queues. Reboot requires draining BGP sessions first.</p>
+        <h2>Management</h2>
+        <p>The router exposes an admin CLI on port 4099; configuration
+        changes need operator-level auth and write to flash.</p>""",
+        [
+            ("how does the router forward packets",
+             "destination address prefixes"),
+            ("which port is the router admin CLI on", "4099"),
+            ("what must happen before router reboot", "draining BGP"),
+        ],
+    ),
+    (
+        "TNL Interface Modelling",
+        """<h1>TNL Interface (NIO_TNL)</h1>
+        <p>NIO_TNL is a data interface — it moves blocks between the
+        sequencer and the message controller using TNL descriptors. It
+        does NOT route packets; it carries payload frames verbatim.
+        Modelling it describes the descriptor layout, not forwarding.</p>""",
+        [
+            ("does the nio_tnl interface route packets", "does NOT route"),
+            ("what does nio_tnl describe", "descriptor layout"),
         ],
     ),
 ]

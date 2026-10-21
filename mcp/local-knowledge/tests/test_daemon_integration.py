@@ -11,9 +11,11 @@ import sys
 import time
 
 import pytest
+from pathlib import Path
 
-PKG = "/Users/narayan/Projects/agents/mcp/confluence-knowledge/src"
-SELF = "/Users/narayan/Projects/agents/mcp/local-knowledge/src"
+PKG = str(Path(__file__).resolve().parents[2]
+          / "confluence-knowledge" / "src")
+SELF = str(Path(__file__).resolve().parents[1] / "src")
 
 
 def _daemon_proc(home, workdir):
