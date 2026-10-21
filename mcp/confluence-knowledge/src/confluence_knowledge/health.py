@@ -133,7 +133,14 @@ def _index_checks(index_root: Path) -> list[dict]:
             # corrupt here sent a field user recrawling a healthy index.
             # Structural damage ("not a database", "malformed") IS
             # corrupt regardless of how it surfaced.
-            msg = str(e).lower()
+            # walk the cause chain — Index() wraps sqlite errors in
+            # SetupError("index unreadable…"); the real reason lives in
+            # __cause__/__context__
+            msgs = [str(e)]
+            for linked in (e.__cause__, e.__context__):
+                if linked is not None:
+                    msgs.append(str(linked))
+            msg = " | ".join(msgs).lower()
             structural = ("not a database" in msg or "malformed" in msg
                           or "corrupt" in msg)
             ok, stale = False, False
