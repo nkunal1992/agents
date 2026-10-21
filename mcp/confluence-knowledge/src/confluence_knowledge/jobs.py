@@ -186,6 +186,9 @@ class CrawlControl:
         while not limits().memory_ok():
             if self._paused_since is None:
                 self._paused_since = time.time()
+                logging.getLogger(__name__).info(
+                    "memory guard paused job %s (floor=%d MB)",
+                    self.job_id, limits().min_free_mb)
             elif time.time() - self._paused_since >= _MEM_PAUSE_MAX_S:
                 # the floor is unreachable (baseline drift or a miscalibrated
                 # KNOWLEDGE_MIN_FREE_MB) — never deadlock: resume for a
@@ -204,6 +207,10 @@ class CrawlControl:
                 raise CrawlCancelled()
             self.sleep(2)
             self._heartbeat()
+        if self._paused_since is not None:
+            logging.getLogger(__name__).info(
+                "memory guard released job %s after %.1f s",
+                self.job_id, time.time() - self._paused_since)
         self._paused_since = None
 
     def _flush_progress(self) -> None:

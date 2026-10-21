@@ -68,6 +68,22 @@ except ImportError:  # pragma: no cover — dep is pinned, guard anyway
     _psutil = None
 
 
+def _min_free_mb() -> int:
+    """Memory floor for the crawl guard. `KNOWLEDGE_MIN_FREE_MB` accepts
+    an absolute MB ("1500") or a percent of total RAM ("10%") — the
+    percent form scales to the machine (kubelet/ES watermark style)."""
+    raw = os.environ.get("KNOWLEDGE_MIN_FREE_MB", "").strip()
+    if raw.endswith("%") and _psutil is not None:
+        try:
+            pct = float(raw[:-1])
+            if 0 < pct < 100:
+                return int(_psutil.virtual_memory().total
+                           * pct / 100 / 1048576)
+        except (ValueError, AttributeError):
+            pass
+    return _int_env("KNOWLEDGE_MIN_FREE_MB", 1500, 0, 1_000_000)
+
+
 def limits() -> Limits:
     """Current limits — read live so tests can monkeypatch env per call."""
     return Limits(
@@ -78,7 +94,7 @@ def limits() -> Limits:
         idle_unload_s=float(
             _int_env("KNOWLEDGE_IDLE_UNLOAD_S", 600, 0, 86_400)),
         fetch_concurrency=_int_env("KNOWLEDGE_FETCH_CONCURRENCY", 6, 1, 16),
-        min_free_mb=_int_env("KNOWLEDGE_MIN_FREE_MB", 1500, 0, 1_000_000),
+        min_free_mb=_min_free_mb(),
         battery_saver=os.environ.get("KNOWLEDGE_BATTERY_SAVER", "1") != "0",
     )
 

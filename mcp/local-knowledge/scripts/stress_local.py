@@ -65,22 +65,40 @@ while True:
     prev = now
 """
 
-_BALLAST_SQUEEZE_MB = 2500   # ballast squeezes `available` below this
-_BALLAST_CAP_MB = 10240        # hard cap — a huge-RAM box can't be drained
+# memory-guard test, % of total RAM — scales across machines:
+# ballast squeezes `available` under _SQUEEZE_PCT; the guard floor sits
+# at _FLOOR_PCT (between squeeze and ambient — both crossings guaranteed)
+_SQUEEZE_PCT = 0.15
+_FLOOR_PCT = 0.40
+_CAP_PCT = 0.70                # ballast hard cap — never drain the box
 
 _BALLAST_CODE = """
-import os, sys, time
+import os, sys, time, subprocess, re
 from pathlib import Path
-import psutil
 floor_target_mb, cap_mb, stop = \
     int(sys.argv[1]), int(sys.argv[2]), Path(sys.argv[3])
+
+def free_mb():
+    # sys.executable may resolve to the framework python (no psutil) —
+    # fall back to parsing vm_stat, which ships with macOS
+    try:
+        import psutil
+        return psutil.virtual_memory().available / 1048576
+    except ImportError:
+        pass
+    out = subprocess.check_output(["vm_stat"], text=True)
+    g = lambda k: int(re.search(
+        rf"Pages {k}:\\s+(\\d+)", out).group(1))
+    page = 16384
+    return (g("free") + g("inactive") + g("speculative")
+            + g("purgeable")) * page / 1048576
+
 chunks = []
 try:
     # squeeze until available drops under the target (or the cap hits) —
     # incompressible os.urandom pages; adaptive sizing beats macOS's
     # squishy `available` (reclaimables partially absorb fixed ballasts)
-    while (psutil.virtual_memory().available / 1048576
-           > floor_target_mb
+    while (free_mb() > floor_target_mb
            and sum(len(c) for c in chunks) / 1048576 < cap_mb):
         chunks.append(os.urandom(64 * 1024 * 1024))
         time.sleep(0.05)
@@ -784,9 +802,13 @@ async def s_mempause(ctx: Ctx) -> dict:
     await ctx.connect_and_crawl()
     await asyncio.sleep(10)
     stop = ctx.out_dir / "ballast-stop"
+    import psutil as _psu
+    total_mb = _psu.virtual_memory().total / 1048576
     ballast = await asyncio.to_thread(
         subprocess.Popen,
-        [sys.executable, "-c", _BALLAST_CODE, "3072", str(stop)],
+        [sys.executable, "-c", _BALLAST_CODE,
+         str(int(total_mb * _SQUEEZE_PCT)),
+         str(int(total_mb * _CAP_PCT)), str(stop)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     paused_seen = False
     t0 = time.monotonic()
@@ -1013,14 +1035,10 @@ def main() -> int:
         tree = build_tree(tree_root, n, seed=args.seed)
         env_extra = {}
         if name == "MEMPAUSE":
-            import psutil
-            free_mb = int(psutil.virtual_memory().available / 1048576)
-            # floor = prep-free − 384, capped at 4 GB — on a machine with
-            # ~8+ GB ambient free, prep−384 sits just under ambient, so
-            # the guard never releases after the ballast exits (the
-            # wedge this run exposed). The cap guarantees the floor is
-            # meaningfully below post-release free.
-            env_extra["KNOWLEDGE_MIN_FREE_MB"] =                 str(max(512, min(free_mb - 384, 4096)))
+            # percent-of-total floor — scales to any machine; the ballast
+            # squeezes free RAM under _SQUEEZE_PCT so the floor between
+            # squeeze and ambient is guaranteed to be crossed both ways
+            env_extra["KNOWLEDGE_MIN_FREE_MB"] = f"{int(_FLOOR_PCT*100)}%"
         if name == "BATTERY":
             env_extra["KNOWLEDGE_FORCE_BATTERY"] = "1"
         if name == "IDEKILL":
