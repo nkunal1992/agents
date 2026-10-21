@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from test_parallel_crawl import _fan_client
 
+import confluence_knowledge.jobs as jobs_mod
 from confluence_knowledge.crawl import Crawler
 from confluence_knowledge.index import Index
 from confluence_knowledge.jobs import CrawlCancelled, CrawlControl, Progress
@@ -55,6 +56,12 @@ def test_memory_guard_cancel_wins(tmp_path, monkeypatch):
 def test_battery_halves_fetch_concurrency(tmp_path, monkeypatch):
     idx = Index(tmp_path / "s.db")
     ctl = _ctl(idx)
+    # pin the CPU ladder to the neutral band — on a loaded CI runner
+    # cpu>=75 clamps cur to default//2, the same value the battery
+    # clamp produces, so the battery halves are indistinguishable
+    # without controlling the signal under test.
+    monkeypatch.setattr(jobs_mod, "_cpu_percent", lambda: 50.0)
+    ctl._cpu_checked = 0.0              # force re-sample → pinned 50
     monkeypatch.setattr(
         type(limits()), "on_battery", lambda self: True)
     assert ctl.fetch_concurrency(8) == 4
@@ -62,6 +69,7 @@ def test_battery_halves_fetch_concurrency(tmp_path, monkeypatch):
     monkeypatch.setattr(
         type(limits()), "on_battery", lambda self: False)
     ctl._battery_checked = 0.0          # force re-check
+    ctl._cpu_checked = 0.0              # CPU could re-sample mid-assert
     assert ctl.fetch_concurrency(8) == 8
     assert ctl.battery_saver() is False
 

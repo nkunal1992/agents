@@ -55,3 +55,4 @@ Started: 2026-10-21 ~22:30 local.
 | 04:55 | Phase 4 | PR #205 MERGED | work-laptop replica on main: 16 sessions, hostile corpus, contracts, coverage manifest, all field-found fixes, 0.10.2 bump |
 | 04:55 | Phase 4 | 0.10.2rc1 tagged | publish train started on merge commit |
 | 05:40 | Phase 4 | rc1 publish FAILED — golden gate env | `CK_MODEL_HOME: ~/.cache/...` never expanded in GitHub env → models not found. Fix: expanduser in eval_rag + e2e scripts → rc2 tagged |
+| 06:00 | Phase 4 | main-push confluence workflow | test_parallel_is_much_faster flaked at 1.6s vs 1.5s gate (congested runner) — widened to 2.0s, committed to main, rc3 tagged with the fix |
