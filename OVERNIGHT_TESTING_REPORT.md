@@ -38,3 +38,4 @@ Started: 2026-10-21 ~22:30 local.
 | 02:05 | Phase 4 | **confluence-knowledge 0.10.1 PUBLISHED** | wheel + sdist on PyPI (verified via simple index + JSON API). verify-published legs running installability checks |
 | 02:05 | Phase 1 | final suite count on rebased branch | confluence **351 passed** (new contract+manifest tests), ruff clean |
 | 02:00 | — | PR #205 | rebased onto post-#203 main → MERGEABLE; CI re-running on the new base |
+| 02:30 | Phase 4 | **0.10.1 verified on PyPI** | fresh venv `pip install confluence-knowledge==0.10.1` → import ok, register_token callable. Wheel+sdist on index |
