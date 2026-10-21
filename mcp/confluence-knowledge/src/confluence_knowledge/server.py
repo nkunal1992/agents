@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from .auth import get_credential
 from .client import AccessError, ConfluenceClient, SecurityException, make_client
@@ -22,9 +22,10 @@ from .crawl import Crawler
 from .feedback import FeedbackStore
 from .index import Index
 from .jobs import CrawlCancelled, LeaseOwner, Progress, crawl_control
-from .mcp_async import tool
+from .mcp_async import heartbeat, tool
 from .models import ModelPool
 from .notify import notify
+from .reporting import audit, current_rss_mb, pulse, stages
 from .resources import lower_priority
 from .retrieval import (
     MODEL_MARKER as EMBED_MODEL_ID,
@@ -459,16 +460,27 @@ def _progress_for(idx: Index, job_id: str) -> dict:
     blob another process checkpoints) — phase/rate/worker come along."""
     p = idx.job_progress(job_id)
     live = _progress.get(job_id)
-    if live is not None:
+    # a non-owning process's Progress() is all zeros — merging it would
+    # clobber the owner's durable checkpoint (#186): fall back to the
+    # persisted blob instead
+    if live is not None and live.worker == "self":
         p.update(live.snapshot())
     else:
         blob = idx.meta_get(f"progress:{job_id}")
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
             p.update(other.snapshot())
+    if live is not None and live.worker != "self":
+        p["worker"] = live.worker
     # errors_n derives from the durable error list — a snapshot written
     # just before the last appends can lag; len(errors) is always true
     p["errors_n"] = max(p.get("errors_n", 0), len(p.get("errors", [])))
+    # three-tier reporting (#187) — pulse + stages live, audit terminal
+    if p.get("state") == "running":
+        p["pulse"] = pulse(p, current_rss_mb())
+        p["stages"] = stages(p)
+    elif p.get("state") in ("done", "error", "cancelled", "abandoned"):
+        p["summary"] = audit(idx, job_id)
     return p
 
 
@@ -486,12 +498,21 @@ def _last_crawl(idx: Index) -> dict | None:
     live = _progress.get(job["job_id"])
     blob = idx.meta_get(f"progress:{job['job_id']}")
     other = Progress.from_blob(blob) if blob else None
-    snap = live.snapshot() if live is not None else \
-        (other.snapshot() if other is not None else None)
+    snap = (live.snapshot()
+            if live is not None and live.worker == "self"
+            else (other.snapshot() if other is not None else None))
     if snap:
         for k in ("pages_done", "phase", "rate_ppm", "eta_s", "worker"):
             if snap.get(k) is not None:
                 out[k] = snap[k]
+    # #187: pulse while running, audit summary on terminal jobs
+    if out["state"] == "running":
+        merged = dict(snap or {})
+        merged.update({"state": "running"})
+        out["pulse"] = pulse(merged, current_rss_mb())
+        out["stages"] = stages(merged)
+    elif out["state"] in ("done", "error", "cancelled", "abandoned"):
+        out["summary"] = audit(idx, job["job_id"])
     return out
 
 
@@ -541,11 +562,13 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
 
 @tool(mcp)
 def wait_for_crawl(scope_handle: str, job_id: str,
-                   wait_s: int = 50) -> dict:
+                   wait_s: int = 25, ctx: Context | None = None) -> dict:
     """Long-poll for a crawl change — returns as soon as the state or
-    progress changes, or after `wait_s` (capped at 120; default fits IDE
-    tool-call timeouts). The agent should prefer this over polling
-    crawl_step in a tight loop. `changed` tells whether anything moved."""
+    progress changes, or after `wait_s` (capped at 120). Each poll emits
+    an MCP progress notification — a keep-alive that resets the client's
+    request timeout without knowing its value; the 25 s default also
+    returns well under typical IDE tool timeouts. `changed` tells
+    whether anything moved."""
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     job = idx.job(job_id)
@@ -567,6 +590,12 @@ def wait_for_crawl(scope_handle: str, job_id: str,
         if moved:
             cur["changed"] = True
             return cur
+        # heartbeat — resets the client's request timeout regardless of
+        # its IDE-specific limit; the progressToken-less case no-ops
+        heartbeat(cur.get("pages_done") or 0,
+                  total=cur.get("total_pages"),
+                  message=f"{cur.get('phase') or cur.get('state')} "
+                          f"({cur.get('pages_done') or 0} pages)")
         prev = cur
     prev["changed"] = False
     return prev

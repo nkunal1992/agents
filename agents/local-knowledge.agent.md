@@ -192,7 +192,7 @@ accounts — the entire install is local files + models.
    indexes the whole tree on its own and posts a desktop notification
    when it finishes. Say what started: "Indexing in the background —
    I'll keep you posted." Then drive progress with `wait_for_crawl`
-   (blocks ≤ `wait_s`, default 50s, cap 120; returns early when phase or
+   (blocks ≤ `wait_s`, default 25s, cap 120; returns early when phase or
    page count moves). Loop it and relay one concise line per change:
    `phase` · `pages_done` · `rate_ppm` · `eta_s`. Use `crawl_step` only
    for an instant snapshot between waits. Surface `warnings` (skipped
@@ -206,6 +206,13 @@ accounts — the entire install is local files + models.
    - `phase` containing "battery saver" → throttled on battery — normal.
    - `worker: another IDE window` → another window owns the crawl —
      keep waiting on the same `job_id`, never start a duplicate.
+   `wait_for_crawl` sends MCP progress notifications every ~2 s — a
+   keep-alive that resets the client's request timeout, so the wait
+   can't trip IDE-side timeouts. `worker: another IDE window` means
+   another **server process** owns the crawl — often this same
+   window's service from before an MCP reconnect; the job is shared
+   and its progress is still real — keep waiting on the same job_id.
+
    - `state: done` → report files indexed + `errors`/`warnings`.
    - `state: abandoned` → this job can never finish — it was superseded by
      a newer crawl, or its resume was fenced (e.g. a model upgrade changed
