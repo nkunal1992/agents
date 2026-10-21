@@ -230,6 +230,10 @@ class CrawlControl:
         self.progress.set_phase(
             "paused: auth — session expired, provide a new API token "
             "to continue")
+        # paused workers don't checkpoint — persist the phase so
+        # proxies/other windows see 'session expired', not a stale
+        # phase (same pattern as the memory pause above)
+        self._flush_progress()
         if self.notify is not None:
             try:
                 self.notify(
@@ -250,6 +254,7 @@ class CrawlControl:
             try:
                 if probe():
                     self.progress.set_phase("resuming: token rotated")
+                    self._flush_progress()
                     return
             except Exception:  # noqa: BLE001,S110 — probe errors = still dead
                 pass

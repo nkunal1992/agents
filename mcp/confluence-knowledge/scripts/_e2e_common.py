@@ -8,13 +8,15 @@ e2e_bootstrap.py.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 TOKEN = "e2e-secret-token-canary"
-PAGE_DELAY = 0.4  # simulated corporate-network latency per request
+PAGE_DELAY = float(os.environ.get("FAKE_DC_DELAY", "0.4"))
+                        # simulated corporate-network latency per request
 
 # root 100 → 30 children (101..130) → grandchild 200 under 101
 PAGES = {"100": ("Release Handbook",
@@ -51,8 +53,37 @@ def _load_corpus() -> tuple[dict, dict, dict]:
     return pages, children, parent_of
 
 
+def _faults() -> list[tuple[str, str]]:
+    """FAKE_DC_FAULTS env — hostile-server replay for negative-path
+    e2e. Spec: comma-separated 'kind:match' rules; match is a path
+    substring ('content/115') or 'after=N' (fires once request count
+    reaches N, then keeps firing).
+
+      403:content/115   body denied — page lists but can't be fetched
+      500:content/120   server error on that page
+      429:after=30      rate-limit kicks in after 30 requests
+      drop:content/118  connection reset mid-response
+      delay:content/110  +5 s before answering that page
+      hang:content/125  never answers (tests client timeouts)
+      stale_token:after=40  auth revoked mid-crawl
+    """
+    import os as _os
+    spec = _os.environ.get("FAKE_DC_FAULTS", "")
+    out = []
+    for rule in spec.split(","):
+        rule = rule.strip()
+        if ":" in rule:
+            kind, match = rule.split(":", 1)
+            out.append((kind.strip(), match.strip()))
+    return out
+
+
+_FAULT_COUNT = [0]           # shared request counter for :after= rules
+
+
 def make_handler(hits: list[str]):
     """Request handler recording every path hit (for outbound-leak checks)."""
+    rules = _faults()
 
     class FakeDC(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -66,9 +97,36 @@ def make_handler(hits: list[str]):
             self.end_headers()
             self.wfile.write(data)
 
+        def _apply_faults(self) -> bool:
+            """True if a fault consumed the request (don't route it)."""
+            path = self.path.split("?")[0]
+            _FAULT_COUNT[0] += 1
+            for kind, match in rules:
+                hit = (path.endswith(match) if not match.startswith("after=")
+                       else _FAULT_COUNT[0] >= int(match[6:]))
+                if not hit:
+                    continue
+                if kind == "drop":
+                    self.close_connection = True
+                    return True               # socket closed, no response
+                if kind == "delay":
+                    time.sleep(5)
+                    continue
+                if kind == "hang":
+                    time.sleep(120)           # outlives any client timeout
+                    return True
+                if kind == "stale_token":
+                    return self._json(401, {})
+                if kind.isdigit():
+                    return self._json(int(kind), {})
+            return False
+
         def do_GET(self):
             hits.append(self.path)
-            time.sleep(PAGE_DELAY)
+            time.sleep(float(os.environ.get("FAKE_DC_DELAY",
+                                            str(PAGE_DELAY))))
+            if self._apply_faults():
+                return
             if self.headers.get("Authorization") != f"Bearer {TOKEN}":
                 return self._json(401, {})
             path = self.path.split("?")[0].rstrip("/")
@@ -79,10 +137,15 @@ def make_handler(hits: list[str]):
             if len(parts) >= 5 and parts[1:4] == ["rest", "api", "content"]:
                 pid = parts[4]
                 if path.endswith("/child/page"):
+                    from urllib.parse import parse_qs, urlparse
+                    q = parse_qs(urlparse(self.path).query)
+                    start = int(q.get("start", ["0"])[0])
+                    limit = int(q.get("limit", ["200"])[0])
                     kids = CHILDREN_T.get(pid, [])
+                    window = kids[start:start + limit]
                     return self._json(200, {
-                        "results": [{"id": k} for k in kids],
-                        "size": len(kids), "limit": 200})
+                        "results": [{"id": k} for k in window],
+                        "size": len(window), "limit": limit})
                 if pid in PAGES_T:
                     title, body = PAGES_T[pid]
                     anc = []
@@ -104,10 +167,12 @@ def make_handler(hits: list[str]):
     return FakeDC
 
 
-def serve() -> tuple[ThreadingHTTPServer, str, list[str]]:
-    """Start the fake DC on a random port. Returns (server, base_url, hits)."""
+def serve(port: int = 0) -> tuple[ThreadingHTTPServer, str, list[str]]:
+    """Start the fake DC. port=0 picks a free one; pass the same port to
+    rebind after kill_confluence (the server-flap scenario — the scope's
+    base_url is pinned to the port)."""
     hits: list[str] = []
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(hits))
+    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(hits))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, f"http://127.0.0.1:{srv.server_port}", hits
 

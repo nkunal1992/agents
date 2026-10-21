@@ -1,0 +1,17 @@
+{
+  "name": "battery-saver",
+  "steps": [
+    {"verb": "spawn_server"},
+    {"verb": "set_clipboard", "text": "{token}"},
+    {"verb": "call", "tool": "register_token",
+     "args": {"site": "{base}", "env": "datacenter"}, "timeout": 90,
+     "expect": {"configured": true}},
+    {"verb": "call", "tool": "connect",
+     "args": {"root": "{base}/pages/viewpage.action?pageId=100"},
+     "save": {"scope": "scope_handle"}},
+    {"verb": "call", "tool": "start_crawl",
+     "args": {"scope_handle": "{scope}"}, "save": {"job": "job_id"}},
+    {"verb": "wait_crawl", "scope": "{scope}", "job": "{job}",
+     "timeout_s": 300}
+  ]
+}

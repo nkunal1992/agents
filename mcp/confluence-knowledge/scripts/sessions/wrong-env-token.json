@@ -1,0 +1,14 @@
+{
+  "name": "wrong-env-token",
+  "steps": [
+    {"verb": "spawn_server"},
+    {"verb": "set_clipboard", "text": "{token}"},
+    {"verb": "call", "tool": "register_token",
+     "args": {"site": "{base}", "env": "cloud"}, "timeout": 90,
+     "expect": {"configured": false},
+     "note": "cloud env + non-atlassian URL → honest reject"},
+    {"verb": "call", "tool": "register_token",
+     "args": {"site": "{base}", "env": "datacenter"}, "timeout": 90,
+     "expect": {"configured": true}}
+  ]
+}
