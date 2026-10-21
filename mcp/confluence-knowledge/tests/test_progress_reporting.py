@@ -237,12 +237,12 @@ def test_cross_window_progress_uses_durable_blob(tmp_path, monkeypatch):
     idx.meta_set("progress:j", json.dumps(own.snapshot()))
     # this process holds an empty Progress marked 'another IDE window'
     foreign = Progress()
-    foreign.worker = "another IDE window"
+    foreign.worker = "another server process"
     server._progress["j"] = foreign
 
     p = server._progress_for(idx, "j")
     assert p["pages_done"] == 41                      # not clobbered by 0
-    assert p["worker"] == "another IDE window"        # ownership disclosed
+    assert p["worker"] == "another server process"   # ownership disclosed
 
 
 def test_heartbeat_noop_without_wrapper():

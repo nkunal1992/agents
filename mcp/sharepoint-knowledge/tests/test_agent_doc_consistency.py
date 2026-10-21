@@ -63,7 +63,7 @@ def test_agent_covers_crawl_awareness():
     and the user never learns anything."""
     doc = AGENT.read_text()
     for token in ("wait_for_crawl", "cancel_crawl", "cancelled",
-                  "last_crawl", "notification", "another IDE window",
+                  "last_crawl", "notification", "another server process", "the knowledge daemon",
                   "paused: low memory", "eta_s", "battery saver"):
         assert token in doc, f"agent missing crawl-awareness token: {token}"
 
