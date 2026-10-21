@@ -3,8 +3,6 @@
 
 import subprocess
 
-import pytest
-
 from confluence_knowledge.settings import ensure_gitignore
 
 
