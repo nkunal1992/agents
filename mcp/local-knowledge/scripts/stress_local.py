@@ -69,7 +69,6 @@ while True:
 # ballast squeezes `available` under _SQUEEZE_PCT; the guard floor sits
 # at _FLOOR_PCT (between squeeze and ambient — both crossings guaranteed)
 _SQUEEZE_PCT = 0.15
-_FLOOR_PCT = 0.40
 _CAP_PCT = 0.70                # ballast hard cap — never drain the box
 
 _BALLAST_CODE = """
@@ -1035,10 +1034,17 @@ def main() -> int:
         tree = build_tree(tree_root, n, seed=args.seed)
         env_extra = {}
         if name == "MEMPAUSE":
-            # percent-of-total floor — scales to any machine; the ballast
-            # squeezes free RAM under _SQUEEZE_PCT so the floor between
-            # squeeze and ambient is guaranteed to be crossed both ways
-            env_extra["KNOWLEDGE_MIN_FREE_MB"] = f"{int(_FLOOR_PCT*100)}%"
+            # floor = midpoint between this machine's ambient-free % and
+            # the ballast's squeeze % — a fixed % floor breaks on boxes
+            # whose ambient is already below it (24 GB laptop: ambient
+            # ~38%, a 40% floor never releases). Percent-of-total keeps
+            # every machine honest the same way.
+            import psutil as _psm
+            vm = _psm.virtual_memory()
+            ambient_pct = vm.available / vm.total
+            floor_pct = (ambient_pct + _SQUEEZE_PCT) / 2
+            env_extra["KNOWLEDGE_MIN_FREE_MB"] = \
+                f"{floor_pct*100:.0f}%"
         if name == "BATTERY":
             env_extra["KNOWLEDGE_FORCE_BATTERY"] = "1"
         if name == "IDEKILL":
