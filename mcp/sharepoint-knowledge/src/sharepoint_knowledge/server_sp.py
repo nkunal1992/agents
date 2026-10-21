@@ -483,7 +483,12 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         blob = idx.meta_get(f"progress:{job_id}")
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
+            # the owner's blob can lag durable meta — take max so a
+            # stale/early snapshot never lowers the visible truth
+            seen_raw = idx.meta_get(f"seen:{job_id}")
+            seen_n = len(json.loads(seen_raw)) if seen_raw else 0
             p.update(other.snapshot())
+            p["pages_seen"] = max(p.get("pages_seen", 0), seen_n)
             # name the real lease holder — 'the knowledge daemon' when
             # the brain owns it (#186/#189), not a generic label
             p["worker"] = _owner_label(idx, job_id)
