@@ -13,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .settings import SetupError
+from .settings import SetupError, ensure_gitignore
 
 SERVER_ID = "confluence-knowledge"
 SERVER_MODULE = "confluence_knowledge.server"
@@ -122,7 +122,18 @@ def register(ide: str = "auto", workspace: Path | None = None,
         raise SetupError("no IDE config locations found — no Copilot/JetBrains "
                          "or VS Code profile detected")
     entry = None if remove else _server_entry(workdir, module, env_var)
-    return [(f, _merge(f, entry, server_id)) for f in files]
+    out = []
+    for f in files:
+        # a workspace-scoped mcp.json lands inside the user's repo — guard
+        # it from `git add .` via .gitignore + .git/info/exclude (#192).
+        # Config isn't secret-bearing, so no tracked-file assert — just
+        # keep it out of `git status`.
+        if (f.name == "mcp.json" and f.parent.name == ".vscode"
+                and not remove):
+            ensure_gitignore(f.parent.parent, [".vscode/mcp.json"],
+                             protected=())
+        out.append((f, _merge(f, entry, server_id)))
+    return out
 
 
 def registered_paths(server_id: str = SERVER_ID,
