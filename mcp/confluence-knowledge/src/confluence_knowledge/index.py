@@ -163,10 +163,14 @@ class Index:
             uri = f"file:{self._path}?mode=ro"
             self._rdb = sqlite3.connect(uri, uri=True, timeout=5,
                                         check_same_thread=False)
-        mode = self.db.execute("PRAGMA journal_mode").fetchone()[0]
-        if mode != "wal":
-            # read/write deadlock risk — WAL is load-bearing (#188)
-            raise SetupError(f"index journal_mode is {mode!r}, expected wal")
+            # assert once, on the READ conn — touching self.db here would
+            # corrupt an in-flight write transaction (readers race it)
+            mode = self._rdb.execute("PRAGMA journal_mode").fetchone()[0]
+            if mode != "wal":
+                # read/write deadlock risk — WAL is load-bearing (#188)
+                from .settings import SetupError
+                raise SetupError(
+                    f"index journal_mode is {mode!r}, expected wal")
         return self._rdb
 
     # ---- jobs ----
