@@ -186,9 +186,6 @@ class CrawlControl:
         while not limits().memory_ok():
             if self._paused_since is None:
                 self._paused_since = time.time()
-                # paused workers don't checkpoint — persist the phase so
-                # proxies/other windows see 'paused', not a stale phase
-                self._flush_progress()
             elif time.time() - self._paused_since >= _MEM_PAUSE_MAX_S:
                 # the floor is unreachable (baseline drift or a miscalibrated
                 # KNOWLEDGE_MIN_FREE_MB) — never deadlock: resume for a
@@ -200,6 +197,9 @@ class CrawlControl:
                     time.time() + _MEM_PAUSE_COOLDOWN_S
                 return
             self.progress.set_phase("paused: low memory")
+            # paused workers don't checkpoint — persist the phase so
+            # proxies/other windows see 'paused', not a stale phase
+            self._flush_progress()
             if self.cancel_flag is not None and self.cancel_flag.is_set():
                 raise CrawlCancelled()
             self.sleep(2)

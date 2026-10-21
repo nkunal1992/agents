@@ -405,7 +405,7 @@ class Ctx:
                                               "state", "phase", "pages_done",
                                               "remaining", "rate_ppm",
                                               "eta_s", "pages_seen",
-                                              "errors_n")}})
+                                              "errors_n", "battery")}})
             await asyncio.sleep(period)
 
     async def agent_loop(self) -> None:
