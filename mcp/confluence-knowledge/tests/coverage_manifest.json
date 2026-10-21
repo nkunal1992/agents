@@ -1,0 +1,116 @@
+{
+  "purpose": "Every session script must be manifested here or CI fails \u2014 the verify_citations hole happened because coverage was assumed, not asserted.",
+  "tools": [
+    "status",
+    "register_token",
+    "connect",
+    "start_crawl",
+    "crawl_step",
+    "wait_for_crawl",
+    "cancel_crawl",
+    "search",
+    "get_evidence",
+    "verify_citations",
+    "submit_feedback",
+    "feedback_report",
+    "refresh_crawl",
+    "configure",
+    "check_health"
+  ],
+  "sessions": {
+    "fresh-onboarding": [
+      "status",
+      "register_token",
+      "connect",
+      "start_crawl",
+      "crawl_step",
+      "search",
+      "verify_citations",
+      "submit_feedback",
+      "feedback_report"
+    ],
+    "wrong-env-token": [
+      "register_token"
+    ],
+    "corrupt-index": [
+      "status"
+    ],
+    "auth-expiry-midcrawl": [
+      "crawl_step"
+    ],
+    "server-flap": [
+      "crawl_step"
+    ],
+    "two-windows": [
+      "connect",
+      "start_crawl",
+      "search"
+    ],
+    "server-kill-midcall": [
+      "crawl_step"
+    ],
+    "cancel-refresh": [
+      "cancel_crawl",
+      "start_crawl"
+    ],
+    "latency-floor": [
+      "status",
+      "crawl_step"
+    ],
+    "hostile-crawl": [
+      "crawl_step",
+      "search"
+    ],
+    "e2e_journey.py": [
+      "status",
+      "register_token",
+      "connect",
+      "start_crawl",
+      "crawl_step",
+      "search",
+      "get_evidence",
+      "verify_citations",
+      "submit_feedback",
+      "feedback_report"
+    ],
+    "test_daemon_roundtrip.py": [
+      "connect",
+      "start_crawl",
+      "crawl_step",
+      "search",
+      "verify_citations",
+      "submit_feedback"
+    ],
+    "public-corpus": [
+      "connect",
+      "start_crawl",
+      "crawl_step",
+      "search"
+    ],
+    "wrong-answer-feedback": [
+      "search",
+      "submit_feedback",
+      "feedback_report"
+    ],
+    "battery-saver": [
+      "connect",
+      "start_crawl",
+      "crawl_step"
+    ],
+    "refresh-crawl": [
+      "refresh_crawl",
+      "crawl_step",
+      "search"
+    ]
+  },
+  "stress_scenarios": [
+    "STORM",
+    "CANCEL",
+    "KILL",
+    "MEMPAUSE",
+    "BATTERY",
+    "WINDOWS",
+    "IDEKILL",
+    "DAEKILL"
+  ]
+}

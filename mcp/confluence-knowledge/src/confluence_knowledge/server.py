@@ -298,8 +298,10 @@ def status() -> dict:
         "configured": "error" not in cfg,
         "profile": cfg,
         "checks": checks,
-        "models_loaded": _models_ready.is_set() and
-        (_EMBEDDER is not None or _pool.is_loaded()),
+        "models_loaded": ((_daemon_call("daemon_models_ready", {}, 10)
+                          or {}).get("ready", False) if _daemon_on()
+                          else _models_ready.is_set()
+                          and (_EMBEDDER is not None or _pool.is_loaded())),
         "index_root": str(idx_root),
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
@@ -472,6 +474,12 @@ _RPC: RpcDb | None = None
 def index_root() -> Path:
     """Daemon-facing alias — the control db lives beside the scope dbs."""
     return workspace_index_root(_workdir())
+
+
+def daemon_models_ready() -> dict:
+    """RPC-only callable — _daemon_call routes here; the daemon answers
+    its own warmup state. Not an MCP tool (no @tool)."""
+    return {"ready": _models_ready.is_set()}
 
 
 def _daemon_on() -> bool:
@@ -716,7 +724,7 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
     if job is None:
         raise AccessError(f"unknown job {job_id}")
     if job["state"] == "running":
-        if not _models_ready.is_set():
+        if not _daemon_on() and not _models_ready.is_set():
             _start_warmup()
             note = LOADING_NOTE
         else:
@@ -747,7 +755,7 @@ def wait_for_crawl(scope_handle: str, job_id: str,
     if job is None:
         raise AccessError(f"unknown job {job_id}")
     if job["state"] == "running":
-        if not _models_ready.is_set():
+        if not _daemon_on() and not _models_ready.is_set():
             _start_warmup()
         _resume_worker(s, job_id)   # resume after a server restart too
     wait_s = max(1, min(int(wait_s), 120))
