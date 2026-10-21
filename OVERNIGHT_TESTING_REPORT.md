@@ -52,3 +52,5 @@ Started: 2026-10-21 ~22:30 local.
 - **Suite**: 351+59+36 pass; ruff clean
 - **RAG eval**: 100% recall/fact/honesty (real ONNX)
 - **Wheel**: twine PASSED, fresh-venv install + journey green against artifact
+| 04:55 | Phase 4 | PR #205 MERGED | work-laptop replica on main: 16 sessions, hostile corpus, contracts, coverage manifest, all field-found fixes, 0.10.2 bump |
+| 04:55 | Phase 4 | 0.10.2rc1 tagged | publish train started on merge commit |
