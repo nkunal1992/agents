@@ -128,10 +128,21 @@ pausing between them; the user sees each command anyway.
      Create token (read access is enough). `id.atlassian.com` doesn't apply
      to corporate sites — the token is created inside Confluence itself.
    Keep the token and your site URL handy."
-   Then tell them to run, **in their own terminal** (input is hidden, goes
-   to the OS keyring): `confluence-knowledge setup` — the wizard asks Cloud
-   vs Data Center, repeats these steps, and heartbeats the connection.
-   Never ask them to paste a token into chat. If heartbeat fails with
+   Then offer two paths for the token itself:
+   - **Seamless (clipboard)** — the token never enters chat: ask them to
+     copy it, then run for them:
+     `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge" setup
+       --site <their site URL> --email <their email> --env cloud
+       --from-clipboard`
+     It reads the OS clipboard, validates the token against the API FIRST,
+     persists to the OS keyring only on success, and replies with a masked
+     confirmation (`abcd…wxyz`). Use `--env datacenter` (no --email) for
+     corporate sites.
+   - **Privacy-first (their terminal)** — the resolved absolute command —
+     tell them to run: `confluence-knowledge setup` (getpass wizard —
+     input hidden, same heartbeat-then-persist order).
+   **Never ask them to paste a token into chat** — it would transit the
+   model and persist in chat history. If heartbeat fails with
    `SSL: CERTIFICATE_VERIFY_FAILED`, the fix is
    `$VENV/bin/python -m pip install pip-system-certs` (bundled in ≥0.1.5 —
    only needed for older installs).
