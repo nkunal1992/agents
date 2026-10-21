@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import uuid
+
+from mcp.server.fastmcp import FastMCP
 
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
@@ -30,7 +33,6 @@ from confluence_knowledge.retrieval import (
     retrieve,
 )
 from confluence_knowledge.settings import SetupError
-from mcp.server.fastmcp import FastMCP
 
 from .auth_sp import acquire_token
 from .client_sp import download_file, make_client
@@ -260,6 +262,7 @@ def connect(root: str) -> dict:
                            "site_web": site_web, "client": cli}
     _start_warmup()
     stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
+    auto = _maybe_auto_reindex(_scopes[handle], idx) if stale else None
     return {
         "scope_handle": handle,
         "root": root_entry,
@@ -268,9 +271,12 @@ def connect(root: str) -> dict:
         "cached_pages": st["pages"],
         "cached_as_of": st["as_of"],
         "stale_model": stale,
+        "auto_reindex": auto,
         "last_crawl": _last_crawl(idx),
-        "note": ("index was built with an older model — run start_crawl once "
-                 "to rebuild it with the current models" if stale else None),
+        "note": ("index was built with an older model — "
+                 + (f"re-index started automatically ({auto})"
+                    if auto else "run start_crawl once to rebuild it "
+                    "with the current models") if stale else None),
     }
 
 
@@ -334,6 +340,25 @@ def _worker_loop(s: dict, job_id: str) -> None:
         _notify_terminal(idx, job_id)
 
 
+def _maybe_auto_reindex(s: dict, idx: Index) -> str | None:
+    """#184 (parity #178): a stale-model index self-heals — notify once +
+    start the rebuild crawl automatically unless a job is in flight."""
+    latest = idx.latest_job()
+    if latest and latest["state"] in ("running", "queued"):
+        return None                               # already rebuilding
+    if f"model:{s['key']}" not in _notified:
+        _notified.add(f"model:{s['key']}")
+        notify("sharepoint-knowledge",
+               "index was built with an older embedding model — "
+               "re-indexing so search stays compatible")
+    if os.environ.get("SP_KNOWLEDGE_AUTO_REINDEX", "1") == "0":
+        return None
+    job_id = SPCrawler(s["client"], idx).start(s["root_entry"])
+    _cancel_flags.pop(job_id, None)
+    _progress[job_id] = Progress()
+    return "started" if _ensure_worker(s, job_id) else "queued"
+
+
 def _ensure_worker(s: dict, job_id: str) -> bool:
     """Start the worker unless another process holds the job's lease —
     exactly one worker per job across IDE windows."""
@@ -369,6 +394,9 @@ def _progress_for(idx: Index, job_id: str) -> dict:
     warns = idx.meta_get(f"warns:{job_id}")
     if warns:
         p["warnings"] = json.loads(warns)
+    # errors_n derives from the durable error list — a snapshot written
+    # just before the last appends can lag; len(errors) is always true
+    p["errors_n"] = max(p.get("errors_n", 0), len(p.get("errors", [])))
     return p
 
 

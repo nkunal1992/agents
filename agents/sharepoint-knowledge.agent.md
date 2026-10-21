@@ -176,9 +176,11 @@ python3 -m venv ~/.sharepoint-knowledge/venv
    Callable but sign-in expired → user re-runs `setup` (device code, once).
 2. **Connect.** Ask for the URL — a site (`https://tenant.sharepoint.com/
    sites/name` → pages + all libraries) or a library/folder path inside it.
-   Call `connect`; report the cache status. If `stale_model` is true, tell
-   the user the index needs one rebuild after a model upgrade and run
-   `start_crawl` — search refuses on stale indexes.
+   Call `connect`; report the cache status. If `stale_model` is true,
+   the service re-indexes itself when `auto_reindex: started` comes back —
+   relay "your index was built with an older model, so I started a
+   rebuild" and keep waiting. If `auto_reindex` is absent, run
+   `start_crawl` once — search refuses on stale indexes.
    The scope is bound to the signed-in **Entra account + tenant + site** —
    a security boundary, not a cache bug: a different sign-in sees
    `cached: false` and re-crawls, because per-account indexes prevent one
@@ -201,6 +203,8 @@ python3 -m venv ~/.sharepoint-knowledge/venv
      keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — waits
      safely, resumes itself; tell the user once, keep waiting.
+   - `phase` starting `resuming:` → the memory floor stayed unreachable —
+     the crawl is working again anyway (bounded override); normal.
    - `phase` containing "battery saver" → throttled on battery — normal.
    - `worker: another IDE window` → another window owns the crawl —
      keep waiting on the same `job_id`, never start a duplicate.

@@ -179,8 +179,11 @@ accounts — the entire install is local files + models.
    Callable but models missing → run `prepare-models` (or tell the user to).
 2. **Connect.** Ask for the path if not supplied — a file OR a folder, either
    works. Call `connect`. Report the cache status it returns. If
-   `stale_model` is true, tell the user the index needs one rebuild after a
-   model upgrade and run `start_crawl` — search refuses on stale indexes.
+   `stale_model` is true, the service re-indexes itself when
+   `auto_reindex: started` comes back — relay "your index was built with an
+   older model, so I started a rebuild" and keep waiting. If
+   `auto_reindex` is absent, run `start_crawl` once — search refuses on
+   stale indexes.
 3. **Freshness nudge.** If `cached` is true:
    "I found a previously cached index of this path from `<cached_as_of>`.
    I will use this to answer your question. Would you like me to refresh it
@@ -198,6 +201,8 @@ accounts — the entire install is local files + models.
      keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — waits
      safely, resumes itself; tell the user once, keep waiting.
+   - `phase` starting `resuming:` → the memory floor stayed unreachable —
+     the crawl is working again anyway (bounded override); normal.
    - `phase` containing "battery saver" → throttled on battery — normal.
    - `worker: another IDE window` → another window owns the crawl —
      keep waiting on the same `job_id`, never start a duplicate.
