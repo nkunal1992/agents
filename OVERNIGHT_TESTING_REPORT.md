@@ -39,3 +39,5 @@ Started: 2026-10-21 ~22:30 local.
 | 02:05 | Phase 1 | final suite count on rebased branch | confluence **351 passed** (new contract+manifest tests), ruff clean |
 | 02:00 | — | PR #205 | rebased onto post-#203 main → MERGEABLE; CI re-running on the new base |
 | 02:30 | Phase 4 | **0.10.1 verified on PyPI** | fresh venv `pip install confluence-knowledge==0.10.1` → import ok, register_token callable. Wheel+sdist on index |
+| 02:55 | Phase 2 | full 15-session sweep on final tree | **15/15 green** — onboarding, bad clipboard, wrong-env, corrupt/busy index, auth expiry, server flap, two windows, server kill, cancel/refresh, latency, public corpus (246 real pages), hostile corpus (223 pages), feedback loop, concurrent burst |
+| 02:55 | Phase 2 | journey e2e on final tree | green — full navigation incl. daemon kill/resume |
