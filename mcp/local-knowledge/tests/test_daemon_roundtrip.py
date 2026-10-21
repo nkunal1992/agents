@@ -17,17 +17,20 @@ SELF = str(Path(__file__).resolve().parents[1] / "src")
 PKG = str(MCP_ROOT / "confluence-knowledge" / "src")
 
 
-def _daemon(home, work, idx_root):
+def _daemon(home, work, idx_root, log):
+    """stderr goes to a file, not DEVNULL — a failed daemon's traceback
+    is the only way to see WHY a CI leg died."""
     env = {**os.environ,
            "PYTHONPATH": f"{SELF}{os.pathsep}{PKG}",
            "LOCAL_KNOWLEDGE_HOME": str(home),
            "LOCAL_KNOWLEDGE_WORKDIR": str(work),
            "KNOWLEDGE_DAEMON_ROLE": "1",
            "KNOWLEDGE_FAKE_EMBEDDINGS": "1"}
+    fh = open(log, "wb")                                  # noqa: SIM115
     return subprocess.Popen(
         [sys.executable, "-m", "confluence_knowledge.daemon",
          "local_knowledge.server_local", str(idx_root)],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        env=env, stdout=subprocess.DEVNULL, stderr=fh)
 
 
 @pytest.fixture()
@@ -53,13 +56,17 @@ def rig(tmp_path, monkeypatch):
     import local_knowledge.server_local as srv
     importlib.reload(srv)          # pick up fresh env/global state
     rpc = RpcDb(idx_root / "rpc.db")
-    proc = _daemon(home, work, idx_root)
+    proc = _daemon(home, work, idx_root, home / "daemon-stderr.log")
     deadline = time.monotonic() + 20
     while not rpc.daemon_alive() and time.monotonic() < deadline:
         time.sleep(0.2)
     assert rpc.daemon_alive(), "daemon never claimed the lease"
     yield srv, tree, proc
     proc.terminate(); proc.wait(timeout=10)
+    log = home / "daemon-stderr.log"
+    if log.exists() and log.stat().st_size:
+        print("---- daemon stderr ----")            # pytest captures
+        print(log.read_text(errors="replace")[-4000:])  # this on fail
 
 
 def test_full_rag_tail_through_daemon(rig):
@@ -70,7 +77,7 @@ def test_full_rag_tail_through_daemon(rig):
     assert c.get("scope_handle"), c
     j = srv.start_crawl(c["scope_handle"])
     final = srv.wait_for_crawl(c["scope_handle"], j["job_id"], wait_s=60)
-    assert final["state"] == "done", final.get("phase")
+    assert final["state"] == "done",         f"phase={final.get('phase')} errors={final.get('errors')}"
     res = srv.search(c["scope_handle"], "codeword alpha3")
     assert res["evidence"], "hash-embedder retrieval returned nothing"
     ok = srv.verify_citations(c["scope_handle"], res["evidence_set"], [
