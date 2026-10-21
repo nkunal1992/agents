@@ -15,7 +15,7 @@ SELF = str(SP_ROOT / "src")
 PKG = str(SP_ROOT.parent / "confluence-knowledge" / "src")
 sys.path.insert(0, str(SP_ROOT / "scripts"))
 
-from _fake_graph_server import TOKEN, serve   # noqa: E402
+from _fake_graph_server import TOKEN, serve
 
 
 def _daemon(home, work, idx_root, graph_base):
@@ -47,15 +47,17 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setenv("SP_KNOWLEDGE_TOKEN", TOKEN)
     monkeypatch.setenv("KNOWLEDGE_FAKE_EMBEDDINGS", "1")
 
-    from sharepoint_knowledge.settings_sp import SPProfile
     from urllib.parse import urlparse
+
+    from sharepoint_knowledge.settings_sp import SPProfile
     site_url = (f"http://127.0.0.1:{urlparse(graph_base).port}"
                 "/sites/team")
     SPProfile("tenant", "client", site_url, "e2e").save()
 
-    from confluence_knowledge.rpc import RpcDb
-    import sharepoint_knowledge.server_sp as sp
     import importlib
+
+    import sharepoint_knowledge.server_sp as sp
+    from confluence_knowledge.rpc import RpcDb
     importlib.reload(sp)
     rpc = RpcDb(idx_root / "rpc.db")
     proc = _daemon(home, work, idx_root, graph_base)

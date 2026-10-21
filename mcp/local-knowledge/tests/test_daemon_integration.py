@@ -9,9 +9,9 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 PKG = str(Path(__file__).resolve().parents[2]
           / "confluence-knowledge" / "src")

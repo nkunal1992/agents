@@ -84,5 +84,5 @@ def test_every_tool_satisfies_the_routing_contract():
 def test_local_safe_is_still_justified():
     """Allowlist entries must keep explaining themselves — a bare name
     with no reason means the drift-control comment rotted."""
-    for name in LOCAL_SAFE:
-        assert LOCAL_SAFE[name].strip(), f"{name} lost its justification"
+    for name, why in LOCAL_SAFE.items():
+        assert why.strip(), f"{name} lost its justification"

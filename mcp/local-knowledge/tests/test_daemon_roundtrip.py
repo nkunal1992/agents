@@ -4,7 +4,6 @@ daemon). This is the coverage that catches process-local split-brain:
 the verify_citations bug passed every unit suite because no test had a
 daemon holding the registry while a proxy called."""
 
-import json
 import os
 import subprocess
 import sys
@@ -47,9 +46,11 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "1")
     monkeypatch.setenv("KNOWLEDGE_FAKE_EMBEDDINGS", "1")
 
-    from confluence_knowledge.rpc import RpcDb
-    import local_knowledge.server_local as srv
     import importlib
+
+    from confluence_knowledge.rpc import RpcDb
+
+    import local_knowledge.server_local as srv
     importlib.reload(srv)          # pick up fresh env/global state
     rpc = RpcDb(idx_root / "rpc.db")
     proc = _daemon(home, work, idx_root)

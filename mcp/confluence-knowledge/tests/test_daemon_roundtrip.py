@@ -3,7 +3,6 @@ fake-DC HTTP server + fake embeddings, driven through the proxy path.
 Catches the process-local split-brain class (verify_citations, progress)
 that unit tests structurally cannot see."""
 
-import json
 import os
 import subprocess
 import sys
@@ -17,7 +16,7 @@ PKG = str(TESTS.parent / "src")
 SCRIPTS = str(TESTS.parent / "scripts")
 sys.path.insert(0, SCRIPTS)
 
-from _e2e_common import TOKEN, serve   # noqa: E402 — fake DC on localhost
+from _e2e_common import TOKEN, serve
 
 
 def _daemon(home, work, idx_root, base):
@@ -52,9 +51,10 @@ def rig(tmp_path, monkeypatch):
     from confluence_knowledge.settings import SiteProfile
     SiteProfile("datacenter", base, None, "e2e").save(home)
 
-    from confluence_knowledge.rpc import RpcDb
-    import confluence_knowledge.server as csrv
     import importlib
+
+    import confluence_knowledge.server as csrv
+    from confluence_knowledge.rpc import RpcDb
     importlib.reload(csrv)
     rpc = RpcDb(idx_root / "rpc.db")
     proc = _daemon(home, work, idx_root, base)
