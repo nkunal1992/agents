@@ -269,6 +269,13 @@ def connect(root: str) -> dict:
                               "site_web": out.get("site"),
                               "client": None}
         return out
+    if _daemon_on():
+        # writes may never bypass the daemon (#189 safeguard 2) — a
+        # transient spawn/claim gap is a retryable error, never a local
+        # crawl on the read-only index
+        return {"_error": "daemon unavailable — retry in a few seconds",
+                "daemon": "starting"}
+
     profile = SPProfile.load()
     cli = _client_for(profile.site_url)
     if root.startswith(("site:", "item:", "drive:", "list:", "page:")):
@@ -545,6 +552,13 @@ def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
                                        "refresh": refresh}, 60)
     if out is not None:
         return out
+    if _daemon_on():
+        # writes may never bypass the daemon (#189 safeguard 2) — a
+        # transient spawn/claim gap is a retryable error, never a local
+        # crawl on the read-only index
+        return {"_error": "daemon unavailable — retry in a few seconds",
+                "daemon": "starting"}
+
 
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
@@ -635,6 +649,13 @@ def cancel_crawl(scope_handle: str, job_id: str) -> dict:
                                         "job_id": job_id}, 30)
     if out is not None:
         return out
+    if _daemon_on():
+        # writes may never bypass the daemon (#189 safeguard 2) — a
+        # transient spawn/claim gap is a retryable error, never a local
+        # crawl on the read-only index
+        return {"_error": "daemon unavailable — retry in a few seconds",
+                "daemon": "starting"}
+
 
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
@@ -764,6 +785,13 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
                         "correction": correction, "note": note}, 30)
     if out is not None:
         return out
+    if _daemon_on():
+        # writes may never bypass the daemon (#189 safeguard 2) — a
+        # transient spawn/claim gap is a retryable error, never a local
+        # crawl on the read-only index
+        return {"_error": "daemon unavailable — retry in a few seconds",
+                "daemon": "starting"}
+
 
     s = _scope(scope_handle)
     if not _models_loaded(0):

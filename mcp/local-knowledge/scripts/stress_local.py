@@ -204,21 +204,49 @@ def mutate_tree(root: Path, files: int, seed: int = 99) -> dict:
 
 
 class Sampler:
-    def __init__(self, pid: int):
+    def __init__(self, pid: int, daemon_rpc: Path | None = None):
         import psutil
         self.proc = psutil.Process(pid)
         self.samples: list[dict] = []
         self._stop = threading.Event()
+        self._daemon_rpc = daemon_rpc   # rpc.db path — daemon pid lookup
+        self._daemon_proc = None
+
+    def _daemon(self):
+        """The daemon's psutil handle — resolved lazily from the lease
+        so a mid-run spawn/takeover is picked up."""
+        import psutil
+        if not self._daemon_rpc or not self._daemon_rpc.exists():
+            return None
+        try:
+            import sqlite3
+            row = sqlite3.connect(str(self._daemon_rpc)).execute(
+                "SELECT pid FROM daemon_lease").fetchone()
+            if row and (self._daemon_proc is None or
+                        self._daemon_proc.pid != row[0]):
+                try:
+                    self._daemon_proc = psutil.Process(row[0])
+                except psutil.NoSuchProcess:
+                    self._daemon_proc = None
+        except Exception:                       # noqa: BLE001 — lease
+            return self._daemon_proc            # db locked mid-read —
+        return self._daemon_proc                # keep last good handle
 
     def _loop(self) -> None:
         import psutil
         while not self._stop.wait(0.5):
             try:
                 mi = self.proc.memory_info()
+                daemon = self._daemon()
+                d_rss = (daemon.memory_info().rss / 1048576
+                         if daemon is not None else 0)
+                d_cpu = (daemon.cpu_percent()
+                         if daemon is not None else 0)
                 self.samples.append({
                     "t": time.time(),
                     "rss_mb": round(mi.rss / 1048576, 1),
-                    "cpu_pct": round(self.proc.cpu_percent(), 1),
+                    "daemon_rss_mb": round(d_rss, 1),
+                    "cpu_pct": round(self.proc.cpu_percent() + d_cpu, 1),
                     "threads": self.proc.num_threads(),
                     "sys_free_mb": round(
                         psutil.virtual_memory().available / 1048576),
@@ -232,7 +260,8 @@ class Sampler:
 
     def stop(self) -> dict:
         self._stop.set()
-        rss = [s["rss_mb"] for s in self.samples] or [0]
+        rss = [s["rss_mb"] + s.get("daemon_rss_mb", 0)
+               for s in self.samples] or [0]
         cpu = [s["cpu_pct"] for s in self.samples] or [0]
         return {"peak_rss_mb": max(rss),
                 "cpu_pct_p50": _pct(cpu, 50), "cpu_pct_p95": _pct(cpu, 95),
@@ -502,7 +531,9 @@ async def scenario_ctx(name: str, tree_root: Path, profile: str,
             await session.initialize()
             ctx.session = session
             ctx.stall = stall
-            ctx.sampler = Sampler(find_server_pid(cwd))
+            ctx.sampler = Sampler(
+                find_server_pid(cwd),
+                daemon_rpc=work / ".local_knowledge_index" / "rpc.db")
             ctx.sampler.start()
             yield ctx
     finally:
