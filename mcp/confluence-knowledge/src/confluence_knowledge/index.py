@@ -101,8 +101,9 @@ def _batches(ids: list[str], size: int = 5000):
 
 
 class Index:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, readonly: bool = False):
         self._path = path
+        self._readonly = readonly
         # read-only shadow connection: WAL lets a second reader see the
         # last-committed snapshot without touching the writer's
         # transaction — light tools (status/crawl_step/evidence) must
@@ -115,7 +116,16 @@ class Index:
         # crawl worker and tool-call threads share this one connection —
         # `self.lock` serializes every access so writes never interleave
         try:
-            self.db = sqlite3.connect(path, timeout=30, check_same_thread=False)
+            if readonly:
+                # proxy mode (#189): every write attempt on this connection
+                # raises OperationalError — read-only is enforced by SQLite,
+                # not by convention
+                self.db = sqlite3.connect(
+                    f"file:{path}?mode=ro", uri=True, timeout=30,
+                    check_same_thread=False)
+            else:
+                self.db = sqlite3.connect(path, timeout=30,
+                                          check_same_thread=False)
             self.db.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
         except sqlite3.DatabaseError as e:
             # close before raising — Windows keeps the file locked otherwise
@@ -128,6 +138,9 @@ class Index:
                 "(or run `clean` to drop every index)") from e
         self.lock = threading.RLock()
         self._cache: _SearchCache | None = None
+        if readonly:
+            self._rdb = self.db        # the main conn already is ro
+            return
         with self.lock:
             self.db.executescript(SCHEMA)
             self.db.execute(
@@ -275,6 +288,15 @@ class Index:
                 "INSERT OR REPLACE INTO job_lease VALUES (?,?,?,?)",
                 (job_id, owner, pid, now))
             return True
+
+    def lease_owner(self, job_id: str) -> str | None:
+        """Who holds the job's worker lease — feeds the 'the daemon /
+        another process' label in progress payloads (#186/#189)."""
+        with self._rlock:
+            row = self._read().execute(
+                "SELECT owner FROM job_lease WHERE job_id=?",
+                (job_id,)).fetchone()
+        return row[0] if row else None
 
     def heartbeat(self, job_id: str, owner: str) -> str | None:
         """Refresh our lease; returns the job's current state so the worker

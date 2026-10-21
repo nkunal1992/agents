@@ -34,6 +34,7 @@ from .retrieval import (
     check_citations,
     retrieve,
 )
+from .rpc import DaemonUnavailable, RpcDb, daemon_enabled, ensure_daemon
 from .settings import (
     SetupError,
     SiteProfile,
@@ -128,14 +129,19 @@ def _client_for(profile: SiteProfile):
     return c
 
 
-def _index_for(scope_key: str) -> Index:
-    idx = _indexes.get(scope_key)
+def _index_for(scope_key: str, *, for_write: bool = False) -> Index:
+    """In proxy mode the index opens read-only — writes are physically
+    impossible from the proxy process (#189 safeguard)."""
+    ro = _daemon_on() and not for_write
+    cache_key = (scope_key, ro)
+    idx = _indexes.get(cache_key)
     if idx is None:
         with _state_lock:
-            idx = _indexes.get(scope_key)
+            idx = _indexes.get(cache_key)
             if idx is None:
-                idx = _indexes[scope_key] = Index(
-                    workspace_index_root(_workdir()) / f"{scope_key}.db")
+                idx = _indexes[cache_key] = Index(
+                    workspace_index_root(_workdir()) / f"{scope_key}.db",
+                    readonly=ro)
     return idx
 
 
@@ -294,6 +300,17 @@ def status() -> dict:
 @tool(mcp)
 def connect(root: str) -> dict:
     """Validate credentials + root readability; bind a scope handle."""
+    out = _daemon_call("connect", {"root": root}, 120)
+    if out is not None:
+        h = out.get("scope_handle")
+        if h and h.startswith("scope:"):
+            parts = h.split(":")
+            key = parts[1]
+            with _state_lock:
+                _scopes[h] = {"key": key, "root": parts[2],
+                              "client": None, "profile": None}
+        return out
+
     profile = SiteProfile.load(_home())
     root_id = extract_page_id(root)
     _clients.pop(profile.credential_ref, None)  # re-read the token: setup may have rotated it
@@ -307,7 +324,7 @@ def connect(root: str) -> dict:
             (time.time(), True, "token valid")   # connect just proved it
     principal = who.get("accountId") or who.get("userKey") or who.get("username") or "?"
     scope_key = profile.scope_key(principal, root_id)
-    idx = _index_for(scope_key)
+    idx = _index_for(scope_key, for_write=True)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root_id}"
     with _state_lock:
@@ -401,8 +418,73 @@ def _notify_terminal(idx: Index, job_id: str) -> None:
     notify(f"{label} — confluence-knowledge", body)
 
 
+_RPC: RpcDb | None = None
+
+
+def index_root() -> Path:
+    """Daemon-facing alias — the control db lives beside the scope dbs."""
+    return workspace_index_root(_workdir())
+
+
+def _daemon_on() -> bool:
+    """Proxy mode (#189): opt-in via CONF_KNOWLEDGE_DAEMON=1. The daemon itself sets
+    KNOWLEDGE_DAEMON_ROLE so its imported tools never re-proxy."""
+    return daemon_enabled("CONF_KNOWLEDGE_DAEMON")
+
+
+def _rpc() -> RpcDb:
+    global _RPC
+    if _RPC is None:
+        _RPC = RpcDb(workspace_index_root(_workdir()) / "rpc.db")
+    return _RPC
+
+
+def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
+    """Submit to the daemon and wait on the response row. None = the
+    daemon is unreachable — caller falls back to running locally."""
+    if not _daemon_on():
+        return None
+    try:
+        rpc = _rpc()
+        ensure_daemon(rpc, "confluence_knowledge.server",
+                  workspace_index_root(_workdir()))
+        rid = rpc.submit(name, args, timeout)
+        return rpc.wait(rid, timeout,
+                        on_tick=lambda: heartbeat(
+                            0, message=f"daemon {name}"))
+    except DaemonUnavailable:
+        return None
+    except RuntimeError as e:
+        return {"_error": str(e)}
+
+
+def _resume_job(scope_key: str, job_id: str) -> None:
+    """Daemon-side hook: rebuild a crawler for a job orphaned by a
+    daemon restart (#189)."""
+    profile = SiteProfile.load(_home())
+    if profile.scope_key() != scope_key:
+        return          # a different site's scope — can't rebuild it
+    _index_for(scope_key)          # ensure the index opens (schema lives)
+    client = _client_for(profile)
+    s = {"key": scope_key, "root": profile.root_page,
+         "client": client, "profile": profile}
+    t = threading.Thread(target=_worker_loop, args=(s, job_id),
+                         daemon=True, name=f"crawl-{job_id}")
+    _workers[job_id] = t
+    t.start()
+
+
+def _owner_label(idx, job_id: str) -> str:
+    """Lease-holder label — 'the knowledge daemon' or 'another server
+    process' (#186 wording; #189 marks daemon owners explicitly)."""
+    try:
+        from confluence_knowledge.rpc import lease_label
+        return lease_label(idx.lease_owner(job_id))
+    except Exception:                       # noqa: BLE001 — label is
+        return "another server process"     # cosmetic, never block
+
 def _worker_loop(s: dict, job_id: str) -> None:
-    idx = _index_for(s["key"])
+    idx = _index_for(s["key"], for_write=True)
     try:
         # models may still be warming (or were idle-unloaded); the worker
         # waits, not the tool call
@@ -441,10 +523,10 @@ def _ensure_worker(s: dict, job_id: str) -> bool:
         t = _workers.get(key)
         if t is not None and t.is_alive():
             return True
-        idx = _index_for(s["key"])
+        idx = _index_for(s["key"], for_write=True)
         if not idx.acquire_lease(job_id, _owner.value, _owner.pid):
             prog = _progress.setdefault(job_id, Progress())
-            prog.worker = "another IDE window"
+            prog.worker = _owner_label(_index_for(s["key"]), job_id)
             return False
         prog = _progress.setdefault(job_id, Progress())
         prog.worker = "self"
@@ -521,14 +603,18 @@ def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
     """Begin crawling the root page and all descendants in a background
     thread. The crawl runs to completion without further input — call
     crawl_step only to read progress."""
+    out = _daemon_call("start_crawl", {"scope_handle": scope_handle,
+                                       "refresh": refresh}, 60)
+    if out is not None:
+        return out
     s = _scope(scope_handle)
     job_id = _crawler(s).start(s["root"])
     _cancel_flags.pop(job_id, None)
     _progress[job_id] = Progress()
     if not _ensure_worker(s, job_id):
         return {"job_id": job_id, "state": "running",
-                "worker": "another IDE window",
-                "note": "crawl runs in another IDE window — crawl_step to poll"}
+                "worker": _owner_label(_index_for(s["key"]), job_id),
+                "note": "crawl runs under another process — crawl_step to poll"}
     return {"job_id": job_id, "state": "running",
             "note": "crawl runs in the background — call crawl_step to poll"}
 
@@ -606,8 +692,13 @@ def cancel_crawl(scope_handle: str, job_id: str) -> dict:
     """Stop a running crawl within seconds and mark the job cancelled — it
     never auto-resumes. The previously published snapshot is kept intact;
     start_crawl re-runs (unchanged pages are reused)."""
+    out = _daemon_call("cancel_crawl", {"scope_handle": scope_handle,
+                                        "job_id": job_id}, 30)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
-    idx = _index_for(s["key"])
+    idx = _index_for(s["key"], for_write=True)
     job = idx.job(job_id)
     if job is None:
         raise AccessError(f"unknown job {job_id}")
@@ -638,6 +729,11 @@ def _coverage(idx: Index) -> str:
 @tool(mcp, heavy=True)
 def search(scope_handle: str, question: str) -> dict:
     """Hybrid retrieve + local rerank; returns bounded, cited evidence."""
+    out = _daemon_call("search", {"scope_handle": scope_handle,
+                                  "question": question}, 90)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     st = idx.stats()
@@ -726,6 +822,12 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
     """Store a saved correction — disclosed alongside the docs on
     similar future questions (never overrides them)."""
+    out = _daemon_call("submit_feedback",
+                       {"scope_handle": scope_handle, "question": question,
+                        "correction": correction, "note": note}, 30)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     if not _models_loaded(0):
         return {"stored": False, "note": LOADING_NOTE}
@@ -739,6 +841,10 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
 def feedback_report(scope_handle: str) -> dict:
     """Aggregated corrections — the agent infers which doc keeps
     getting corrected and suggests it to the user."""
+    out = _daemon_call("feedback_report", {"scope_handle": scope_handle}, 30)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     return _feedback_for(s["key"]).report()
 

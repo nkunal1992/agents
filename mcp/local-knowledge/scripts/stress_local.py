@@ -816,6 +816,69 @@ async def s_windows(ctx: Ctx) -> dict:
             "crawl done": v(res["final"].get("state") == "done")}
 
 
+async def s_idekill(ctx: Ctx) -> dict:
+    """IDEKILL (#189): SIGKILL the MCP proxy mid-crawl — the daemon owns
+    the job and keeps crawling; a fresh proxy attaches to the SAME job."""
+    await ctx.connect_and_crawl()
+    await asyncio.sleep(30)                      # crawl underway
+    jid = ctx.job
+    # the daemon's pid lives in the rpc lease — the thing that must
+    # survive the proxy's death
+    import sqlite3
+    rpc_path = ctx.work / ".local_knowledge_index" / "rpc.db"
+    import psutil
+    for _ in range(100):
+        if rpc_path.exists():
+            try:
+                row = sqlite3.connect(str(rpc_path)).execute(
+                    "SELECT pid FROM daemon_lease").fetchone()
+            except Exception:                    # noqa: BLE001 —
+                row = None                       # lease row not yet
+            if row:
+                break
+        await asyncio.sleep(0.3)
+    assert row, "no daemon lease — proxy mode never engaged"
+    daemon_pid = row[0]
+    # kill the IDE-side process — the proxy that spawned us
+    os.kill(ctx.sampler.proc.pid, signal.SIGKILL)
+    ctx.dead_transport_ok = True
+    await asyncio.sleep(10)                      # daemon keeps crawling
+    survived = psutil.pid_exists(daemon_pid)
+    # fresh proxy — a new IDE session
+    cwd2 = ctx.out_dir / "srv-cwd2"
+    cwd2.mkdir(exist_ok=True)
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    env = server_env(ctx.profile, ctx.home, ctx.work,
+                     {"LOCAL_KNOWLEDGE_DAEMON": "1"})
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "local_knowledge.server_local"], env=env, cwd=str(cwd2))
+    async with stdio_client(params) as (r, w), ClientSession(r, w) as s2:
+        await s2.initialize()
+        ctx.session = s2
+        c = await ctx.call("connect", {"root": str(ctx.tree_root)},
+                           timeout=120)
+        ctx.handle = c.get("scope_handle")
+        mid = await ctx.call("crawl_step",
+                             {"scope_handle": ctx.handle, "job_id": jid},
+                             timeout=30)
+        ctx.notes.append(
+            f"post-IDE-kill crawl_step: state={mid.get('state')} "
+            f"pages_done={mid.get('pages_done')} worker={mid.get('worker')}")
+        res = await ctx.run_crawl(timeout=900, job_id=jid)
+        await ctx.canary_check(ctx.tree["canaries"])
+    ctx.extra["wall_s"] = res["wall_s"]
+    return {
+        "daemon survived proxy SIGKILL": v(survived),
+        "same job continued": v(jid == ctx.job and
+                              mid.get("state") in ("running", "done")),
+        "worker is the daemon": v("daemon" in str(mid.get("worker"))),
+        "crawl done": v(res["final"].get("state") == "done"),
+    }
+
+
+
 SCENARIOS = {
     "LIFE": ("fresh + refresh + mutated refresh (tombstones)", s_life),
     "STORM": ("search storm during crawl", s_storm),
@@ -824,9 +887,10 @@ SCENARIOS = {
     "MEMPAUSE": ("memory ballast pause/resume", s_mempause),
     "BATTERY": ("forced battery saver", s_battery),
     "WINDOWS": ("two IDE windows, one job", s_windows),
+    "IDEKILL": ("SIGKILL the proxy; daemon keeps the job", s_idekill),
 }
 FAST_SCENARIOS = ("STORM", "CANCEL", "KILL", "MEMPAUSE", "BATTERY",
-                  "WINDOWS")
+                  "WINDOWS", "IDEKILL")
 
 
 def _flatten_exc(e: BaseException) -> list[str]:
@@ -885,6 +949,8 @@ def main() -> int:
             env_extra["KNOWLEDGE_MIN_FREE_MB"] = str(free_mb - 512)
         if name == "BATTERY":
             env_extra["KNOWLEDGE_FORCE_BATTERY"] = "1"
+        if name == "IDEKILL":
+            env_extra["LOCAL_KNOWLEDGE_DAEMON"] = "1"
 
         print(f"\n=== {name} ({n} files) — {SCENARIOS[name][0]} ===",
               flush=True)
