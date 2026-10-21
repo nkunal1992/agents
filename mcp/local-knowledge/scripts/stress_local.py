@@ -590,7 +590,10 @@ def _monotonic(ctx: Ctx) -> bool:
 
 
 def index_db(work: Path) -> Path:
-    dbs = list((work / ".local_knowledge_index").glob("*.db"))
+    # rpc.db is the daemon control plane — not a scope index (#189);
+    # glob order is arbitrary so it must be filtered, not trusted
+    dbs = [d for d in (work / ".local_knowledge_index").glob("*.db")
+           if d.name != "rpc.db"]
     assert dbs, "no index db"
     return dbs[0]
 
@@ -775,7 +778,7 @@ async def s_mempause(ctx: Ctx) -> dict:
     stop = ctx.out_dir / "ballast-stop"
     ballast = await asyncio.to_thread(
         subprocess.Popen,
-        [sys.executable, "-c", _BALLAST_CODE, "1024", str(stop)],
+        [sys.executable, "-c", _BALLAST_CODE, "3072", str(stop)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     paused_seen = False
     t0 = time.monotonic()
@@ -1003,7 +1006,7 @@ def main() -> int:
         if name == "MEMPAUSE":
             import psutil
             free_mb = int(psutil.virtual_memory().available / 1048576)
-            env_extra["KNOWLEDGE_MIN_FREE_MB"] = str(free_mb - 512)
+            env_extra["KNOWLEDGE_MIN_FREE_MB"] = str(free_mb - 384)
         if name == "BATTERY":
             env_extra["KNOWLEDGE_FORCE_BATTERY"] = "1"
         if name == "IDEKILL":
