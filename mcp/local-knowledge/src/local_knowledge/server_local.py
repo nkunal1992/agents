@@ -405,7 +405,7 @@ def _ensure_worker(s: dict, job_id: str) -> bool:
         t = _workers.get(key)
         if t is not None and t.is_alive():
             return True
-        idx = _index_for(s["key"])
+        idx = _index_for(s["key"], for_write=True)
         if not idx.acquire_lease(job_id, _owner.value, _owner.pid):
             prog = _progress.setdefault(job_id, Progress())
             prog.worker = _owner_label(_index_for(s["key"]), job_id)
