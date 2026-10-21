@@ -204,11 +204,11 @@ accounts — the entire install is local files + models.
    - `phase` starting `resuming:` → the memory floor stayed unreachable —
      the crawl is working again anyway (bounded override); normal.
    - `phase` containing "battery saver" → throttled on battery — normal.
-   - `worker: another IDE window` → another window owns the crawl —
+   - `worker: another server process` / `the knowledge daemon` → another process/daemon owns the crawl —
      keep waiting on the same `job_id`, never start a duplicate.
    `wait_for_crawl` sends MCP progress notifications every ~2 s — a
    keep-alive that resets the client's request timeout, so the wait
-   can't trip IDE-side timeouts. `worker: another IDE window` means
+   can't trip IDE-side timeouts. `worker` values mean
    another **server process** owns the crawl — often this same
    window's service from before an MCP reconnect; the job is shared
    and its progress is still real — keep waiting on the same job_id.

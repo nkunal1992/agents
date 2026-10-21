@@ -251,11 +251,11 @@ wheel path for the install step — everything else is identical.
      and errors clearly if none arrives within ~30 min.
    - `phase` containing "battery saver" → on battery, throttled
      deliberately — normal.
-   - `worker: another IDE window` → a different window owns the crawl —
+   - `worker: another server process` (or `the knowledge daemon` → a different process owns the crawl —
      keep waiting on the same `job_id`, never start a duplicate.
    `wait_for_crawl` sends MCP progress notifications every ~2 s — a
    keep-alive that resets the client's request timeout, so the wait
-   can't trip IDE-side timeouts. `worker: another IDE window` means
+   can't trip IDE-side timeouts. `worker` values mean
    another **server process** owns the crawl — often this same
    window's service from before an MCP reconnect; the job is shared
    and its progress is still real — keep waiting on the same job_id.
