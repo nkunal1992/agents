@@ -90,3 +90,18 @@ def test_daemon_unreachable_falls_back(tmp_path, monkeypatch):
     out = srv.status()
     assert out.get("configured") is False or "error" in out.get("profile", {})
     assert out["daemon"] == "starting"
+
+
+def test_verify_citations_routes_to_daemon(monkeypatch):
+    """Evidence sets are process-local — under daemon mode `search`
+    populates the DAEMON's registry, so verify must route there first
+    (field bug: proxy's _evidence_sets is always empty → "unknown
+    evidence set" on every verify call)."""
+    import local_knowledge.server_local as srv
+    seen = {}
+    monkeypatch.setattr(
+        srv, "_daemon_call",
+        lambda name, args, timeout: (
+            seen.update(name=name) or {"ok": True}))
+    out = srv.verify_citations("scope:x", "set:1", [])
+    assert seen["name"] == "verify_citations" and out == {"ok": True}

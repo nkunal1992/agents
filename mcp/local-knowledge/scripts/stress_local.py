@@ -512,8 +512,32 @@ class Ctx:
             self.canary.append({"file": p.name, "codeword": word,
                                 "found": hit})
             ok += hit
+        # RAG tail round-trip: search → verify_citations end-to-end.
+        # Evidence sets are process-local — under daemon mode a proxy-side
+        # verify saw an empty registry ("unknown evidence set") while the
+        # daemon held it. One real call pins the routing.
+        verify_ok = False
+        try:
+            res = await self.call("search",
+                                  {"scope_handle": self.handle,
+                                   "question": word}, timeout=120)
+            ev = res.get("evidence") or []
+            if ev and res.get("evidence_set"):
+                v = await self.call(
+                    "verify_citations",
+                    {"scope_handle": self.handle,
+                     "evidence_set": res["evidence_set"],
+                     "mappings": [{"claim": "coverage",
+                                   "chunk_id": ev[0]["chunk_id"],
+                                   "quote": ev[0]["text"][:60]}]},
+                    timeout=60)
+                verify_ok = bool(v.get("ok"))
+        except Exception as e:  # noqa: BLE001 — verdict records it
+            self.notes.append(f"verify round-trip errored: {e}")
+        self.extra["verify_ok"] = verify_ok
         return {"canary_ok": ok, "canary_total": min(len(canaries),
-                                                    CANARY_N)}
+                                                    CANARY_N),
+                "verify_ok": verify_ok}
 
     def freeze_stats(self) -> dict:
         dc = [c for c in self.calls if c.get("during_crawl")]
@@ -601,6 +625,9 @@ def baseline_verdicts(ctx: Ctx, res: dict) -> dict:
         "CPU <= ~50% budget": v(rec[0].get("cpu_pct_p50", 9e9)
                                 <= cpu_budget_pct),
         "pages_done monotonic": v(_monotonic(ctx)),
+        **({"search→verify_citations round-trip":
+            v(ctx.extra.get("verify_ok") is True)}
+           if ctx.extra.get("verify_ok") is not None else {}),
     }
 
 
@@ -1055,7 +1082,7 @@ def main() -> int:
         try:
             res = asyncio.run(_run(name, tree_root, tree, args, out_dir,
                                    env_extra, n))
-        except Exception as e:  # noqa: BLE001 — record, continue matrix
+        except Exception as e:  # noqa: BLE001 — verdict records it  # noqa: BLE001 — record, continue matrix
             res = {"scenario": name, "verdicts": {"scenario ran": "FAIL"},
                    "notes": _flatten_exc(e)}
             (out_dir / "result.json").write_text(
