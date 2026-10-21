@@ -439,3 +439,16 @@ correction (embedded + similarity-matched).
 - `feedback_report(scope)` — aggregates corrections → the agent can
   suggest which pages look outdated/confusing.
 - Stored at `<index_root>/<scope>.feedback.db` (SQLite, WAL — survives concurrent writers); `clean` wipes it.
+
+
+### Three-tier reporting
+
+Running jobs surface live reporting fields (`status`, `crawl_step`,
+`wait_for_crawl`):
+
+- `pulse` — one-line status: `embedding | 7813/~9901 pages | 244 ppm |
+  1656 MB RSS`
+- `stages` — structured `fetch`/`embed` counts, `pct_complete`, `eta_s`
+- terminal jobs carry `summary` — `errors_by_cause` grouped (access
+  denied / server error / timeout / unreadable), `publish`
+  (staged/deleted/kept), `index_size_mb`, `pages_indexed`

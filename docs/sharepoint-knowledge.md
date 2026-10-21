@@ -87,6 +87,19 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
 
+### Three-tier reporting
+
+Running jobs surface live reporting fields (`status`, `crawl_step`,
+`wait_for_crawl`):
+
+- `pulse` — one-line status: `embedding | 7813/~9901 pages | 244 ppm |
+  1656 MB RSS`
+- `stages` — structured `fetch`/`embed` counts, `pct_complete`, `eta_s`
+- terminal jobs carry `summary` — `errors_by_cause` grouped (access
+  denied / server error / timeout / unreadable), `publish`
+  (staged/deleted/kept), `index_size_mb`, `pages_indexed`
+
+
 ## Resource usage
 
 Models load lazily on first `connect` and unload after ~10 idle minutes —

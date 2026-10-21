@@ -801,14 +801,19 @@ async def s_windows(ctx: Ctx) -> dict:
         j2 = await s2.call_tool("start_crawl",
                                 {"scope_handle": handle})
         j2r = json.loads(j2.content[0].text)
-    res = await ctx.run_crawl(timeout=900)   # battery-halved crawls can
-    ctx.extra["wall_s"] = res["wall_s"]      # run ~7 min on 800 files
+    # capture the join/defer verdict BEFORE following the surviving job
     worker = j2r.get("worker", "self")
     note = j2r.get("note", "")
-    return {"second window deferred or joined": v(
-        "another IDE window" in str(worker) + str(note)
-        or j2r.get("job_id") != ctx.job),
-        "crawl done": v(res["final"].get("state") == "done")}
+    joined = ("another IDE window" in str(worker) + str(note)
+              or j2r.get("job_id") != ctx.job)
+    # the second window's start_crawl supersedes (abandons the old job
+    # and owns a new one) — follow the job that actually survives
+    if j2r.get("job_id") and j2r["job_id"] != ctx.job:
+        ctx.job = j2r["job_id"]
+    res = await ctx.run_crawl(timeout=900)   # battery-halved crawls can
+    ctx.extra["wall_s"] = res["wall_s"]      # run ~7 min on 800 files
+    return {"second window deferred or joined": v(joined),
+            "crawl done": v(res["final"].get("state") == "done")}
 
 
 SCENARIOS = {
@@ -822,6 +827,15 @@ SCENARIOS = {
 }
 FAST_SCENARIOS = ("STORM", "CANCEL", "KILL", "MEMPAUSE", "BATTERY",
                   "WINDOWS")
+
+
+def _flatten_exc(e: BaseException) -> list[str]:
+    """ExceptionGroups hide the real cause inside sub-exceptions —
+    expand them so result.json shows the actual failure."""
+    out = [f"harness error: {type(e).__name__}: {e}"]
+    for sub in getattr(e, "exceptions", None) or []:
+        out.extend(_flatten_exc(sub))
+    return out
 
 
 def main() -> int:
@@ -879,7 +893,7 @@ def main() -> int:
                                    env_extra, n))
         except Exception as e:  # noqa: BLE001 — record, continue matrix
             res = {"scenario": name, "verdicts": {"scenario ran": "FAIL"},
-                   "notes": [f"harness error: {type(e).__name__}: {e}"]}
+                   "notes": _flatten_exc(e)}
             (out_dir / "result.json").write_text(
                 json.dumps(res, indent=2, default=str))
         rows.append(res)
