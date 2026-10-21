@@ -933,6 +933,26 @@ def _flatten_exc(e: BaseException) -> list[str]:
     return out
 
 
+def _take_run_lock(out_dir: Path):
+    """One matrix per --out dir: flock the lockfile; a second run fails
+    fast instead of silently sharing the tree. Returns the fd — holding
+    it open keeps the lock for the process's life."""
+    import os
+    lock = out_dir / ".run.lock"
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--files", type=int, default=10000,
@@ -951,6 +971,12 @@ def main() -> int:
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
+    lock_fd = _take_run_lock(args.out)
+    if lock_fd is None:
+        print(f"another stress run holds {args.out} — refuse to start "
+              "(delete .run.lock only if no stress_local process is "
+              "alive)", file=sys.stderr)
+        return 2
     wanted = (list(SCENARIOS) if args.scenarios == "all"
               else [s.strip().upper() for s in args.scenarios.split(",")])
     rows = []
