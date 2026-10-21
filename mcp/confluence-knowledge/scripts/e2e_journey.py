@@ -28,16 +28,17 @@ from _e2e_common import TOKEN, call, check, serve
 
 
 def _find_daemon(work: Path) -> int | None:
-    import subprocess as sp
-    try:
-        out = sp.run(["pgrep", "-fl", "confluence_knowledge.daemon"],
-                     check=False, capture_output=True, text=True, timeout=5).stdout
-    except FileNotFoundError:                     # windows — no pgrep
+    """Daemon pid from the rpc lease — portable (Windows has no pgrep)."""
+    import sqlite3
+    rpc = work / ".conf_knowledge_index" / "rpc.db"
+    if not rpc.exists():
         return None
-    for line in out.splitlines():
-        if str(work) in line:
-            return int(line.split()[0])
-    return None
+    try:
+        row = sqlite3.connect(str(rpc)).execute(
+            "SELECT pid FROM daemon_lease").fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
 
 
 async def main() -> int:
@@ -108,7 +109,7 @@ async def main() -> int:
                 break
             await asyncio.sleep(0.3)
         if dpid:
-            os.kill(dpid, signal.SIGKILL)
+            os.kill(dpid, getattr(signal, 'SIGKILL', signal.SIGTERM))
             check(True, f"daemon killed mid-crawl (pid {dpid})")
 
         final, waited = {"state": "running"}, 0.0
