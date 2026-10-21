@@ -58,3 +58,17 @@ Started: 2026-10-21 ~22:30 local.
 | 06:00 | Phase 4 | main-push confluence workflow | test_parallel_is_much_faster flaked at 1.6s vs 1.5s gate (congested runner) — widened to 2.0s, committed to main, rc3 tagged with the fix |
 | 07:10 | Phase 4 | **0.10.2rc4 PUBLISHED** | all legs green — validate/build/tests×6/e2e×3/downstream×6/publish/verify. rc1→rc3 casualties: ~ expansion bug + 2 congested-runner test flakes (all fixed: expanduser, perf gate 2.0s, CPU-pinned battery test) |
 | 07:10 | Phase 4 | 0.10.2 final tagged | on the rc4-verified commit — final publish queued |
+| 08:15 | Phase 4 | **confluence-knowledge 0.10.2 PUBLISHED** | final run all-green: validate → build → tests×6 → e2e×3 → downstream×6 → publish → verify-published×3. PyPI latest = 0.10.2 |
+
+## Overnight mission — final state
+| Deliverable | Status |
+|---|---|
+| sharepoint-knowledge 0.7.0 | **published** (verified 3 OS) |
+| confluence-knowledge 0.10.1 | **published** (verified 3 OS) |
+| confluence-knowledge 0.10.2 | **published** — work-laptop reliability batch |
+| PR #203 / #205 | **merged** |
+| Session replay | 16/16 green ×2 sweeps; journey green on 3 OS in CI |
+| Unit suites | 351+59+36 pass; ruff clean |
+| Real-model RAG | 100% recall@8, fact coverage, honesty (ONNX) |
+| Wheel quality | twine PASSED; fresh-venv install + journey on artifact green |
+| Field-found fixes | orphan-resume, start_crawl dedup, corrupt/busy tri-state, page-title indexing, auth-pause visibility, model-note masking, unflushed phases — all in 0.10.2 |
