@@ -784,6 +784,17 @@ class Index:
                     out[cid] = np.frombuffer(b, dtype=np.float32)
         return out
 
+    def quick_integrity(self) -> bool:
+        """PRAGMA quick_check — same corruption catch as integrity_check
+        but skips the expensive FK/index consistency walk. Suitable for
+        per-call health surfaces (status) where a full scan is too slow.
+        Read path — safe on the WAL read connection (#199)."""
+        try:
+            row = self._read().execute("PRAGMA quick_check").fetchone()
+            return bool(row and row[0] == "ok")
+        except sqlite3.DatabaseError:
+            return False
+
     def integrity(self) -> bool:
         """PRAGMA integrity_check — False means the DB file is damaged and
         should be deleted + rebuilt (never auto-repaired here)."""

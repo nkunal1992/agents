@@ -187,8 +187,7 @@ class CrawlControl:
             if self._paused_since is None:
                 self._paused_since = time.time()
                 logging.getLogger(__name__).info(
-                    "memory guard paused job %s (floor=%d MB)",
-                    self.job_id, limits().min_free_mb)
+                    "memory guard paused job %s", self.job_id)
             elif time.time() - self._paused_since >= _MEM_PAUSE_MAX_S:
                 # the floor is unreachable (baseline drift or a miscalibrated
                 # KNOWLEDGE_MIN_FREE_MB) — never deadlock: resume for a

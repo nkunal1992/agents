@@ -113,11 +113,17 @@ def _index_checks(index_root: Path) -> list[dict]:
         return []
     out = []
     for db in sorted(index_root.glob("*.db")):
+        if db.name == "rpc.db":
+            continue                    # daemon control plane, not a scope
         scope = db.stem[:24]
         idx = None
         try:
-            idx = Index(db)
-            ok = idx.integrity()
+            # read-only + quick_check: status must never take a write
+            # lock (a WAL publish by the daemon otherwise stalls this
+            # call for seconds — #199) and integrity_check is a full
+            # scan per call — quick_check catches real corruption
+            idx = Index(db, readonly=True)
+            ok = idx.quick_integrity()
             stale = idx.model_id() is not None and \
                 idx.model_id() != EMBED_MODEL_ID
         except Exception:  # noqa: BLE001 — unreadable = corrupt
