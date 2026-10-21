@@ -65,15 +65,23 @@ while True:
     prev = now
 """
 
+_BALLAST_SQUEEZE_MB = 2500   # ballast squeezes `available` below this
+_BALLAST_CAP_MB = 10240        # hard cap — a huge-RAM box can't be drained
+
 _BALLAST_CODE = """
 import os, sys, time
 from pathlib import Path
-target_mb, stop = int(sys.argv[1]), Path(sys.argv[2])
+import psutil
+floor_target_mb, cap_mb, stop = \
+    int(sys.argv[1]), int(sys.argv[2]), Path(sys.argv[3])
 chunks = []
 try:
-    # os.urandom — incompressible pages; zeroed bytearrays compress to
-    # nothing under macOS memory compression and apply no real pressure
-    for _ in range(target_mb // 64):
+    # squeeze until available drops under the target (or the cap hits) —
+    # incompressible os.urandom pages; adaptive sizing beats macOS's
+    # squishy `available` (reclaimables partially absorb fixed ballasts)
+    while (psutil.virtual_memory().available / 1048576
+           > floor_target_mb
+           and sum(len(c) for c in chunks) / 1048576 < cap_mb):
         chunks.append(os.urandom(64 * 1024 * 1024))
         time.sleep(0.05)
     while not stop.exists():
