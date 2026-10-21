@@ -372,6 +372,7 @@ def connect(root: str) -> dict:
     principal = who.get("accountId") or who.get("userKey") or who.get("username") or "?"
     scope_key = profile.scope_key(principal, root_id)
     idx = _index_for(scope_key, for_write=True)
+    idx.meta_set("root_page", root_id)     # daemon orphan resume (#189)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root_id}"
     with _state_lock:
@@ -507,13 +508,22 @@ def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
 
 def _resume_job(scope_key: str, job_id: str) -> None:
     """Daemon-side hook: rebuild a crawler for a job orphaned by a
-    daemon restart (#189)."""
+    daemon restart — the scope's root persists in index meta (#189).
+    (scope_key needs principal+root — both were previously called
+    wrong, so this path was dead until the journey e2e caught it.)"""
+    idx = _index_for(scope_key)
+    root = idx.meta_get("root_page")
+    if not root:
+        return
     profile = SiteProfile.load(_home())
-    if profile.scope_key() != scope_key:
-        return          # a different site's scope — can't rebuild it
-    _index_for(scope_key)          # ensure the index opens (schema lives)
     client = _client_for(profile)
-    s = {"key": scope_key, "root": profile.root_page,
+    who = client.get("wiki/rest/api/user/current" if profile.env == "cloud"
+                     else "rest/api/user/current").json()
+    principal = (who.get("accountId") or who.get("userKey")
+                 or who.get("username") or "?")
+    if profile.scope_key(principal, root) != scope_key:
+        return          # profile moved to another site — not ours
+    s = {"key": scope_key, "root": root,
          "client": client, "profile": profile}
     t = threading.Thread(target=_worker_loop, args=(s, job_id),
                          daemon=True, name=f"crawl-{job_id}")

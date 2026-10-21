@@ -170,7 +170,8 @@ class SPCrawler:
                                      for p in parts if isinstance(p, dict))
             except (json.JSONDecodeError, TypeError):
                 pass  # raw HTML already
-            chunks, warns = extract_chunks(html, **self._chunk_kwargs())
+            chunks, warns = extract_chunks(
+                html, page_title=page.get("title", ""), **self._chunk_kwargs())
         else:
             warns.append("no canvas content — page may be empty or classic")
         page["warnings"] = warns
@@ -219,6 +220,9 @@ class SPCrawler:
     # ---- the crawl ----
 
     def start(self, root_entry: str) -> str:
+        live = self.index.running_live_job()
+        if live:
+            return live                    # dedup — don't abandon in-flight
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
         stamped = self.index.model_id()

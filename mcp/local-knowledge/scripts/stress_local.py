@@ -970,6 +970,47 @@ async def s_idekill(ctx: Ctx) -> dict:
 
 
 
+async def s_daekill(ctx: Ctx) -> dict:
+    """DAEKILL: SIGKILL the DAEMON mid-crawl — the field case the
+    journey e2e proved broken (orphan resume was dead code). The next
+    proxy call respawns the daemon; its boot resume re-threads the
+    orphaned 'running' job and the crawl completes."""
+    await ctx.connect_and_crawl()
+    await asyncio.sleep(20)                      # crawl underway
+    jid = ctx.job
+    import sqlite3
+    rpc_path = ctx.work / ".local_knowledge_index" / "rpc.db"
+    row = None
+    for _ in range(100):
+        if rpc_path.exists():
+            try:
+                row = sqlite3.connect(str(rpc_path)).execute(
+                    "SELECT pid FROM daemon_lease").fetchone()
+            except Exception:                    # noqa: BLE001 —
+                row = None                       # lease not written yet
+            if row:
+                break
+        await asyncio.sleep(0.3)
+    assert row, "no daemon lease — proxy mode never engaged"
+    os.kill(row[0], signal.SIGKILL)
+    await asyncio.sleep(3)
+    # the next call must respawn the daemon — no user action
+    mid = await ctx.call("crawl_step",
+                         {"scope_handle": ctx.handle, "job_id": jid},
+                         timeout=60)
+    ctx.notes.append(f"post-daemon-kill crawl_step: state="
+                     f"{mid.get('state')} pages_done={mid.get('pages_done')}")
+    res = await ctx.run_crawl(timeout=900)
+    await ctx.canary_check(ctx.tree["canaries"])
+    ctx.extra["wall_s"] = res["wall_s"]
+    return {
+        "daemon respawned on demand": v(mid.get("state")
+                                        in ("running", "done")),
+        "orphan job resumed to done": v(res["final"].get("state")
+                                        == "done"),
+    }
+
+
 SCENARIOS = {
     "LIFE": ("fresh + refresh + mutated refresh (tombstones)", s_life),
     "STORM": ("search storm during crawl", s_storm),
@@ -979,9 +1020,10 @@ SCENARIOS = {
     "BATTERY": ("forced battery saver", s_battery),
     "WINDOWS": ("two IDE windows, one job", s_windows),
     "IDEKILL": ("SIGKILL the proxy; daemon keeps the job", s_idekill),
+    "DAEKILL": ("SIGKILL the daemon; orphan job resumes", s_daekill),
 }
 FAST_SCENARIOS = ("STORM", "CANCEL", "KILL", "MEMPAUSE", "BATTERY",
-                  "WINDOWS", "IDEKILL")
+                  "WINDOWS", "IDEKILL", "DAEKILL")
 
 
 def _flatten_exc(e: BaseException) -> list[str]:

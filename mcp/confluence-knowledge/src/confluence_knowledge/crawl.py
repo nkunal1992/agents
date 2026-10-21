@@ -214,6 +214,9 @@ class Crawler:
         return page, kids
 
     def start(self, root_page: str) -> str:
+        live = self.index.running_live_job()
+        if live:
+            return live                    # dedup — don't abandon in-flight
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
         # a fresh job on a stale-model index clears upfront — one
@@ -496,7 +499,8 @@ class Crawler:
                             self.control.page_done(1)
                     else:
                         chunks, warns = extract_chunks(
-                            page["storage"], **self._chunk_kwargs())
+                            page["storage"], page_title=page.get("title", ""),
+                            **self._chunk_kwargs())
                         for c in chunks:
                             c.chunk_id = \
                                 f"{pid}:{content_hash[:8]}:{c.ordinal}"

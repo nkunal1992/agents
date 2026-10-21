@@ -176,6 +176,12 @@ jobs:
               python mcp/sharepoint-knowledge/scripts/e2e_bootstrap_sp.py \
                 --spec "$WHEEL[models]" --engine-spec index ;;
           esac
+      - name: Golden-set RAG gate (confluence wheel)
+        if: needs.validate.outputs.pkg == 'confluence-knowledge'
+        shell: bash
+        env:
+          CK_MODEL_HOME: ~/.cache/ck-models
+        run: python mcp/confluence-knowledge/scripts/eval_rag.py
       - name: Failure e2e on the wheel
         shell: bash
         env:

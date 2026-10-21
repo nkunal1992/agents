@@ -82,7 +82,7 @@ def build_index(tmp_path: Path, corpus, embedder=None, sparse=None) -> Index:
     sp = sparse or ToySparse()
     for i, (title, html, _qa) in enumerate(corpus):
         pid = f"p{i}"
-        chunks, _warnings = extract_chunks(html)
+        chunks, _warnings = extract_chunks(html, page_title=title)
         for c in chunks:
             c.chunk_id = f"{pid}:h:{c.ordinal}"
         texts = [c.text for c in chunks]
