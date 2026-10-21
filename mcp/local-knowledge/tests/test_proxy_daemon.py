@@ -2,17 +2,14 @@
 read-only enforcement, daemon-mode dispatch."""
 
 import os
-import threading
 import time
 
 import pytest
-
 from confluence_knowledge.index import Index
 from confluence_knowledge.rpc import (
     DaemonUnavailable,
     RpcDb,
     daemon_enabled,
-    daemon_owner,
     lease_label,
 )
 
