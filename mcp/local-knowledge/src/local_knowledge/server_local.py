@@ -432,6 +432,9 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
             p.update(other.snapshot())
+            # name the real lease holder — 'the knowledge daemon' when
+            # the brain owns it (#186/#189), not a generic label
+            p["worker"] = _owner_label(idx, job_id)
     if live is not None and live.worker != "self":
         p["worker"] = live.worker
     warns = idx.meta_get(f"warns:{job_id}")

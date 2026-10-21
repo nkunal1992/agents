@@ -866,7 +866,7 @@ async def s_idekill(ctx: Ctx) -> dict:
         ctx.notes.append(
             f"post-IDE-kill crawl_step: state={mid.get('state')} "
             f"pages_done={mid.get('pages_done')} worker={mid.get('worker')}")
-        res = await ctx.run_crawl(timeout=900, job_id=jid)
+        res = await ctx.run_crawl(timeout=900)
         await ctx.canary_check(ctx.tree["canaries"])
     ctx.extra["wall_s"] = res["wall_s"]
     return {

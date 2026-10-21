@@ -279,7 +279,8 @@ def status() -> dict:
     try:
         # the freshest scope index carries the most recent job — enough
         # for the agent to answer "did my crawl finish?" without polling
-        cands = sorted(idx_root.glob("*.db"),
+        cands = sorted((x for x in idx_root.glob("*.db")
+                        if x.name != "rpc.db"),
                        key=lambda p: -p.stat().st_mtime)
         if cands:
             last = _last_crawl(_index_for(cands[0].stem))
@@ -292,6 +293,8 @@ def status() -> dict:
         "models_loaded": _models_ready.is_set() and
         (_EMBEDDER is not None or _pool.is_loaded()),
         "index_root": str(idx_root),
+        "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
+                   else "off" if not _daemon_on() else "starting"),
         "live_scopes": sorted(_scopes),
         "last_crawl": last,
     }
@@ -552,6 +555,9 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
             p.update(other.snapshot())
+            # name the real lease holder — 'the knowledge daemon' when
+            # the brain owns it (#186/#189), not a generic label
+            p["worker"] = _owner_label(idx, job_id)
     if live is not None and live.worker != "self":
         p["worker"] = live.worker
     # errors_n derives from the durable error list — a snapshot written

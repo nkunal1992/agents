@@ -234,7 +234,9 @@ def status() -> dict:
     root = index_root()
     last = None
     try:
-        cands = sorted(root.glob("*.db"), key=lambda p: -p.stat().st_mtime)
+        cands = sorted((x for x in root.glob("*.db")
+                        if x.name != "rpc.db"),
+                       key=lambda p: -p.stat().st_mtime)
         if cands:
             last = _last_crawl(_index_for(cands[0].stem))
     except Exception:  # noqa: BLE001 — status must never fail on this
@@ -246,6 +248,8 @@ def status() -> dict:
         "models_loaded": _models_ready.is_set() and
         (_EMBEDDER is not None or _pool.is_loaded()),
         "index_root": str(root),
+        "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
+                   else "off" if not _daemon_on() else "starting"),
         "live_scopes": sorted(_scopes),
         "last_crawl": last,
     }
@@ -480,6 +484,9 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
             p.update(other.snapshot())
+            # name the real lease holder — 'the knowledge daemon' when
+            # the brain owns it (#186/#189), not a generic label
+            p["worker"] = _owner_label(idx, job_id)
     if live is not None and live.worker != "self":
         p["worker"] = live.worker
     warns = idx.meta_get(f"warns:{job_id}")
