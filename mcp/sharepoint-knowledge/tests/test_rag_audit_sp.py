@@ -1,7 +1,6 @@
+from confluence_knowledge.index import Index
 from sharepoint_knowledge import server_sp
 from sharepoint_knowledge.settings_sp import SPProfile
-
-from confluence_knowledge.index import Index
 
 
 def test_account_change_must_not_reuse_scope(tmp_path, monkeypatch):

@@ -10,9 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _fake_graph import BLOBS, DRIVE_ID, LIST_ID, SITE_ID, FakeGraph, site_routes
-from sharepoint_knowledge.crawl_sp import SPCrawler
-
 from confluence_knowledge.index import Index
+from sharepoint_knowledge.crawl_sp import SPCrawler
 
 
 def run_all(c: SPCrawler, job_id: str) -> dict:
