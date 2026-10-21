@@ -40,6 +40,7 @@ from confluence_knowledge.retrieval import (
 )
 from confluence_knowledge.retrieval import (
     check_citations,
+    fake_models,
     retrieve,
 )
 from confluence_knowledge.rpc import (
@@ -125,21 +126,24 @@ _pool = ModelPool(home, APP_NAME, busy_fn=_any_worker_alive,
 def _embedder():
     global _EMBEDDER
     if _EMBEDDER is None:
-        _EMBEDDER = _pool.embedder()
+        fake = fake_models()
+        _EMBEDDER = fake[0] if fake else _pool.embedder()
     return _EMBEDDER
 
 
 def _reranker():
     global _RERANKER
     if _RERANKER is None:
-        _RERANKER = _pool.reranker()
+        fake = fake_models()
+        _RERANKER = fake[1] if fake else _pool.reranker()
     return _RERANKER
 
 
 def _sparse():
     global _SPARSE
     if _SPARSE is None:
-        _SPARSE = _pool.sparse()
+        fake = fake_models()
+        _SPARSE = fake[2] if fake else _pool.sparse()
     return _SPARSE
 
 

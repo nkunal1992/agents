@@ -2,101 +2,263 @@
   "name": "rag-test-corpus",
   "corpus": "tests/rag/corpus.py:CORPUS",
   "pairs": [
-    {"question": "when do new hires complete the security attestation",
-     "ideal_answer": "Within 72 hours of their start date.",
-     "required_pages": ["Onboarding Guide"],
-     "required_facts": ["72 hours"]},
-    {"question": "how do I get VPN access",
-     "ideal_answer": "File an ACCESS-42 request.",
-     "required_pages": ["Onboarding Guide"],
-     "required_facts": ["ACCESS-42"]},
-    {"question": "where do I pick up my laptop",
-     "ideal_answer": "IT desk on floor 3, 9 AM to 4 PM, first day.",
-     "required_pages": ["Onboarding Guide"],
-     "required_facts": ["floor 3"]},
-    {"question": "what is the minimum password length",
-     "ideal_answer": "14 characters.",
-     "required_pages": ["Password Policy"],
-     "required_facts": ["14 characters"]},
-    {"question": "how often do passwords expire",
-     "ideal_answer": "Every 90 days.",
-     "required_pages": ["Password Policy"],
-     "required_facts": ["90 days"]},
-    {"question": "reset forgotten password steps",
-     "ideal_answer": "Self-service portal, verify via registered phone.",
-     "required_pages": ["Password Policy"],
-     "required_facts": ["self-service portal"]},
-    {"question": "how long is the rollback window",
-     "ideal_answer": "2 hours.",
-     "required_pages": ["Deployment Checklist"],
-     "required_facts": ["2 hours"]},
-    {"question": "what percentage is the canary",
-     "ideal_answer": "5% of traffic for 30 minutes.",
-     "required_pages": ["Deployment Checklist"],
-     "required_facts": ["5% traffic"]},
-    {"question": "what endpoint does the smoke suite hit",
-     "ideal_answer": "/healthz on every pod.",
-     "required_pages": ["Deployment Checklist"],
-     "required_facts": ["/healthz"]},
-    {"question": "vpn drops every hour fix",
-     "ideal_answer": "Session timeout defaults to 3600s; raise it via IT.",
-     "required_pages": ["Troubleshooting VPN"],
-     "required_facts": ["3600s"]},
-    {"question": "dns works but traffic fails vpn",
-     "ideal_answer": "Check split-tunnel routes cover the corp subnets.",
-     "required_pages": ["Troubleshooting VPN"],
-     "required_facts": ["split-tunnel"]},
-    {"question": "auth rejected vpn",
-     "ideal_answer": "Re-enroll the token; expired MFA causes silent rejections.",
-     "required_pages": ["Troubleshooting VPN"],
-     "required_facts": ["re-enroll"]},
-    {"question": "when are v1 REST endpoints removed",
-     "ideal_answer": "In v3.0.",
-     "required_pages": ["Changelog 2025-Q3"],
-     "required_facts": ["v3.0"]},
-    {"question": "which version fixed the memory leak",
-     "ideal_answer": "v2.15.",
-     "required_pages": ["Changelog 2025-Q3"],
-     "required_facts": ["v2.15"]},
-    {"question": "database migration downtime limit",
-     "ideal_answer": "Maximum 5 minutes.",
-     "required_pages": ["深い階層のドキュメント"],
-     "required_facts": ["5分"]},
-    {"question": "meal receipt threshold",
-     "ideal_answer": "Meals over $75 require itemized receipts.",
-     "required_pages": ["Expense Reimbursement"],
-     "required_facts": ["$75"]},
-    {"question": "mileage reimbursement rate",
-     "ideal_answer": "$0.655 per mile for personal vehicles.",
-     "required_pages": ["Expense Reimbursement"],
-     "required_facts": ["$0.655"]},
-    {"question": "flight booking requirement",
-     "ideal_answer": "Flights must be booked through the corporate portal.",
-     "required_pages": ["Travel Expenses"],
-     "required_facts": ["corporate portal"]},
-    {"question": "travel receipt deadline",
-     "ideal_answer": "Within 45 days of travel completion.",
-     "required_pages": ["Travel Expenses"],
-     "required_facts": ["45 days"]},
-    {"question": "what port does svc-0800 use",
-     "ideal_answer": "svc-0800 listens on tcp/10800.",
-     "required_pages": ["Big Reference Table"],
-     "required_facts": ["tcp/10800"]},
-    {"question": "what is the wifi password for the guest network",
-     "ideal_answer": "not documented",
-     "required_pages": [], "required_facts": [],
-     "expect_no_answer": true},
-    {"question": "who won the office ping pong tournament",
-     "ideal_answer": "not documented",
-     "required_pages": [], "required_facts": [],
-     "expect_no_answer": true},
-    {"question": "meaning of life the universe and everything",
-     "ideal_answer": "not documented",
-     "required_pages": [], "required_facts": [],
-     "expect_no_answer": true},
-    {"question": "気象情報の更新頻度はどのくらいですか",
-     "ideal_answer": "not documented",
-     "required_pages": [], "required_facts": [],
-     "expect_no_answer": true}
+    {
+      "question": "when do new hires complete the security attestation",
+      "ideal_answer": "Within 72 hours of their start date.",
+      "required_pages": [
+        "Onboarding Guide"
+      ],
+      "required_facts": [
+        "72 hours"
+      ]
+    },
+    {
+      "question": "how do I get VPN access",
+      "ideal_answer": "File an ACCESS-42 request.",
+      "required_pages": [
+        "Onboarding Guide"
+      ],
+      "required_facts": [
+        "ACCESS-42"
+      ]
+    },
+    {
+      "question": "where do I pick up my laptop",
+      "ideal_answer": "IT desk on floor 3, 9 AM to 4 PM, first day.",
+      "required_pages": [
+        "Onboarding Guide"
+      ],
+      "required_facts": [
+        "floor 3"
+      ]
+    },
+    {
+      "question": "what is the minimum password length",
+      "ideal_answer": "14 characters.",
+      "required_pages": [
+        "Password Policy"
+      ],
+      "required_facts": [
+        "14 characters"
+      ]
+    },
+    {
+      "question": "how often do passwords expire",
+      "ideal_answer": "Every 90 days.",
+      "required_pages": [
+        "Password Policy"
+      ],
+      "required_facts": [
+        "90 days"
+      ]
+    },
+    {
+      "question": "reset forgotten password steps",
+      "ideal_answer": "Self-service portal, verify via registered phone.",
+      "required_pages": [
+        "Password Policy"
+      ],
+      "required_facts": [
+        "self-service portal"
+      ]
+    },
+    {
+      "question": "how long is the rollback window",
+      "ideal_answer": "2 hours.",
+      "required_pages": [
+        "Deployment Checklist"
+      ],
+      "required_facts": [
+        "2 hours"
+      ]
+    },
+    {
+      "question": "what percentage is the canary",
+      "ideal_answer": "5% of traffic for 30 minutes.",
+      "required_pages": [
+        "Deployment Checklist"
+      ],
+      "required_facts": [
+        "5% traffic"
+      ]
+    },
+    {
+      "question": "what endpoint does the smoke suite hit",
+      "ideal_answer": "/healthz on every pod.",
+      "required_pages": [
+        "Deployment Checklist"
+      ],
+      "required_facts": [
+        "/healthz"
+      ]
+    },
+    {
+      "question": "vpn drops every hour fix",
+      "ideal_answer": "Session timeout defaults to 3600s; raise it via IT.",
+      "required_pages": [
+        "Troubleshooting VPN"
+      ],
+      "required_facts": [
+        "3600s"
+      ]
+    },
+    {
+      "question": "dns works but traffic fails vpn",
+      "ideal_answer": "Check split-tunnel routes cover the corp subnets.",
+      "required_pages": [
+        "Troubleshooting VPN"
+      ],
+      "required_facts": [
+        "split-tunnel"
+      ]
+    },
+    {
+      "question": "auth rejected vpn",
+      "ideal_answer": "Re-enroll the token; expired MFA causes silent rejections.",
+      "required_pages": [
+        "Troubleshooting VPN"
+      ],
+      "required_facts": [
+        "re-enroll"
+      ]
+    },
+    {
+      "question": "when are v1 REST endpoints removed",
+      "ideal_answer": "In v3.0.",
+      "required_pages": [
+        "Changelog 2025-Q3"
+      ],
+      "required_facts": [
+        "v3.0"
+      ]
+    },
+    {
+      "question": "which version fixed the memory leak",
+      "ideal_answer": "v2.15.",
+      "required_pages": [
+        "Changelog 2025-Q3"
+      ],
+      "required_facts": [
+        "v2.15"
+      ]
+    },
+    {
+      "question": "database migration downtime limit",
+      "ideal_answer": "Maximum 5 minutes.",
+      "required_pages": [
+        "\u6df1\u3044\u968e\u5c64\u306e\u30c9\u30ad\u30e5\u30e1\u30f3\u30c8"
+      ],
+      "required_facts": [
+        "5\u5206"
+      ]
+    },
+    {
+      "question": "meal receipt threshold",
+      "ideal_answer": "Meals over $75 require itemized receipts.",
+      "required_pages": [
+        "Expense Reimbursement"
+      ],
+      "required_facts": [
+        "$75"
+      ]
+    },
+    {
+      "question": "mileage reimbursement rate",
+      "ideal_answer": "$0.655 per mile for personal vehicles.",
+      "required_pages": [
+        "Expense Reimbursement"
+      ],
+      "required_facts": [
+        "$0.655"
+      ]
+    },
+    {
+      "question": "flight booking requirement",
+      "ideal_answer": "Flights must be booked through the corporate portal.",
+      "required_pages": [
+        "Travel Expenses"
+      ],
+      "required_facts": [
+        "corporate portal"
+      ]
+    },
+    {
+      "question": "travel receipt deadline",
+      "ideal_answer": "Within 45 days of travel completion.",
+      "required_pages": [
+        "Travel Expenses"
+      ],
+      "required_facts": [
+        "45 days"
+      ]
+    },
+    {
+      "question": "what port does svc-0800 use",
+      "ideal_answer": "svc-0800 listens on tcp/10800.",
+      "required_pages": [
+        "Big Reference Table"
+      ],
+      "required_facts": [
+        "tcp/10800"
+      ]
+    },
+    {
+      "question": "what is the wifi password for the guest network",
+      "ideal_answer": "not documented",
+      "required_pages": [],
+      "required_facts": [],
+      "expect_no_answer": true
+    },
+    {
+      "question": "who won the office ping pong tournament",
+      "ideal_answer": "not documented",
+      "required_pages": [],
+      "required_facts": [],
+      "expect_no_answer": true
+    },
+    {
+      "question": "meaning of life the universe and everything",
+      "ideal_answer": "not documented",
+      "required_pages": [],
+      "required_facts": [],
+      "expect_no_answer": true
+    },
+    {
+      "question": "\u6c17\u8c61\u60c5\u5831\u306e\u66f4\u65b0\u983b\u5ea6\u306f\u3069\u306e\u304f\u3089\u3044\u3067\u3059\u304b",
+      "ideal_answer": "not documented",
+      "required_pages": [],
+      "required_facts": [],
+      "expect_no_answer": true
+    },
+    {
+      "question": "which port is the router admin cli on",
+      "ideal_answer": "Port 4099.",
+      "required_pages": [
+        "TNL Router"
+      ],
+      "required_facts": [
+        "4099"
+      ]
+    },
+    {
+      "question": "does nio_tnl route packets between fabrics",
+      "ideal_answer": "No \u2014 NIO_TNL is a data interface carrying frames verbatim.",
+      "required_pages": [
+        "TNL Interface"
+      ],
+      "required_facts": [
+        "does NOT route"
+      ]
+    },
+    {
+      "question": "what must happen before the tnl router reboots",
+      "ideal_answer": "Drain BGP sessions first.",
+      "required_pages": [
+        "TNL Router"
+      ],
+      "required_facts": [
+        "draining BGP"
+      ]
+    }
   ]
 }

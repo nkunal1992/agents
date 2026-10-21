@@ -342,6 +342,12 @@ def _license_ok_upstream(dest: Path, spec: dict, snapshot_download) -> None:
 def models_complete(home: Path) -> dict:
     """Per-model completeness vs the lock — a dir that exists but lacks a
     locked file is a partial download, not a prepared model."""
+    import os
+    if os.environ.get("KNOWLEDGE_FAKE_EMBEDDINGS") == "1":
+        # test-only mode — report ok with a label so status/doctor don't
+        # block on model files that will never be downloaded
+        return {k: {"ok": True, "missing": [], "mode": "fake-embeddings"}
+                for k in ("embed", "rerank", "rerank_light", "sparse")}
     lock = _load_lock()["models"]
     out = {}
     for key in ("embed", "rerank", "rerank_light"):
@@ -549,3 +555,91 @@ def _norm(s: str) -> str:
                  ("–", "-"), ("—", "-"), (" ", " "), ("−", "-")):
         s = s.replace(a, b)
     return " ".join(s.split())
+
+
+# ------------------------------------------------------------------
+# Test-only seam — KNOWLEDGE_FAKE_EMBEDDINGS=1 swaps every model for a
+# deterministic lexical stub. Lets a REAL daemon subprocess crawl and
+# answer tools in tests/CI without the 1.5 GB ONNX downloads — the
+# process-boundary coverage unit tests can't see (the verify_citations
+# class of bugs). Model quality is irrelevant for correctness tests;
+# retrieval semantics stay real.
+
+class HashEmbedder:
+    """Bag-of-words dense stub — shared terms land in shared dims, so
+    cosine similarity and the whole retrieve() path behave for real."""
+    dim = 384
+
+    def __init__(self, *_a, **_k):
+        pass
+
+    def count_tokens(self, text: str) -> int:
+        return max(1, len(text.split()))
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        import hashlib
+        out = np.zeros((len(texts), self.dim), dtype=np.float32)
+        for i, text in enumerate(texts):
+            for tok in text.lower().split():
+                h = int.from_bytes(
+                    hashlib.sha256(tok.encode()).digest()[:4], "big")
+                out[i, h % self.dim] += 1.0
+        n = np.linalg.norm(out, axis=1, keepdims=True)
+        return out / (n + 1e-9)
+
+
+class HashSparse:
+    """Lexical sparse stub — {term_id: tf} with hash-derived ids."""
+
+    def __init__(self, *_a, **_k):
+        pass
+
+    def embed(self, texts: list[str]) -> list[dict[int, float]]:
+        import hashlib
+        out = []
+        for text in texts:
+            vec: dict[int, float] = {}
+            for tok in text.lower().split():
+                tid = int.from_bytes(
+                    hashlib.sha256(tok.encode()).digest()[:4], "big")
+                vec[tid] = vec.get(tid, 0.0) + 1.0
+            out.append(vec)
+        return out
+
+
+class HashReranker:
+    """Lexical-overlap scorer — real ranking semantics (relevant docs
+    score high, junk near zero) without a neural session."""
+
+    def __init__(self, *_a, **_k):
+        pass
+
+    def score(self, query: str, docs: list[str]) -> np.ndarray:
+        q = set(query.lower().split())
+        out = np.zeros(len(docs), dtype=np.float32)
+        for i, d in enumerate(docs):
+            toks = set(d.lower().split())
+            if not toks:
+                continue
+            overlap = len(q & toks) / max(1, len(q))
+            out[i] = 0.05 + 0.9 * overlap if overlap else 0.0
+        return out
+
+
+_FAKE = None
+
+
+def fake_models() -> tuple[HashEmbedder, HashReranker, HashSparse] | None:
+    """(embedder, reranker, sparse) stubs, or None when the env flag is
+    unset. Callers hold the singleton — model lifecycle is a no-op."""
+    global _FAKE
+    import os
+    if os.environ.get("KNOWLEDGE_FAKE_EMBEDDINGS") != "1":
+        return None
+    if _FAKE is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "KNOWLEDGE_FAKE_EMBEDDINGS=1 — hash stubs replacing ONNX "
+            "models; test-only mode, answers are lexical")
+        _FAKE = (HashEmbedder(), HashReranker(), HashSparse())
+    return _FAKE
