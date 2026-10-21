@@ -67,8 +67,12 @@ either add trusted publishing (repo + `publish-pypi.yml`) or set a
 bootstraps itself: installs the pinned service package into a user venv,
 downloads the two Apache-2.0 models, writes the IDE MCP config itself
 (`register` — JetBrains user config + `.vscode/mcp.json`, no pasting into
-settings). The only manual bits: `setup` once in your own terminal for the
-token, and one IDE reload.
+settings). The only manual bits: the token handoff (one copy —
+the `register_token` MCP tool reads it straight from your clipboard and
+validates before storing; or `setup` in your own terminal if you prefer)
+and one IDE reload after `register` (IDEs read mcp.json at startup —
+everything after, including credentials, is picked up live by the
+daemon).
 
 Prefer to run it manually? Equivalent commands — note the `python -m pip`
 form: a bare `pip` is often not on PATH even when Python is:
@@ -82,11 +86,15 @@ python3.11+ -m venv ~/.confluence-knowledge/venv       # or: python / py
 ~/.confluence-knowledge/venv/bin/confluence-knowledge doctor     # must be green
 ```
 
-`setup` asks Cloud vs Data Center, shows you where to create the token
-(id.atlassian.com → Security → API tokens for Cloud; Profile → Settings →
-Personal Access Tokens for Data Center 7.9+), reads it with hidden input, and
-stores it in the OS credential store (`.conf_auth.json` chmod-600 fallback —
-gitignored before it is ever written).
+`setup` asks Cloud vs Data Center, shows you where to
+create the token (id.atlassian.com → Security → API tokens for Cloud;
+Profile → Settings → Personal Access Tokens for Data Center 7.9+), reads it
+with hidden input — or pass `--from-clipboard` to read the OS clipboard
+directly (copy once, never typed) — validates the token against the API
+BEFORE persisting, and stores it in the OS credential store
+(`.conf_auth.json` chmod-600 fallback — gitignored before it is ever
+written). In-IDE, the `register_token` tool wraps the same clipboard →
+validate → persist pipeline so the token never transits chat.
 
 Register the server — one command writes every config Copilot reads
 (JetBrains `github-copilot/intellij/mcp.json`, VS Code user + workspace):

@@ -99,3 +99,62 @@ def test_masked_confirm_in_output(monkeypatch, tmp_path, capsys):
     assert tok not in out                       # never echo the secret
     assert "secr…1234" in out                   # masked confirm present
     assert "connected as: N" in out
+
+
+def test_register_clipboard_credential_tool_path(monkeypatch, tmp_path):
+    """The MCP-tool twin: same heartbeat→persist ordering, returns data."""
+    monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path / "wd"))
+    monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(tmp_path / "home"))
+
+    calls = []
+    monkeypatch.setattr(cli, "_clipboard", lambda: "tok" + "y" * 30)
+    monkeypatch.setattr(cli, "store_credential",
+                        lambda *a, **k: calls.append("store") or "keyring")
+    monkeypatch.setattr(cli.SiteProfile, "save", lambda *a, **k: None)
+
+    class FakeClient:
+        def get(self, ep):
+            calls.append("heartbeat")
+            r = MagicMock(); r.json.return_value = {"displayName": "Narayan"}
+            return r
+    monkeypatch.setattr(cli, "make_client", lambda *a, **k: FakeClient())
+
+    out = cli.register_clipboard_credential(
+        "cloud", "https://x.atlassian.net", "a@b.c")
+    assert out["configured"] is True
+    assert out["connected_as"] == "Narayan"
+    assert out["token_received"].startswith("toky")
+    assert calls == ["heartbeat", "store"]
+
+
+def test_register_clipboard_credential_empty_clipboard(tmp_path,
+                                                     monkeypatch):
+    monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path / "wd"))
+    monkeypatch.setattr(cli, "_clipboard", lambda: "   ")
+    import pytest
+    from confluence_knowledge.settings import SetupError
+    with pytest.raises(SetupError, match="clipboard is empty"):
+        cli.register_clipboard_credential("cloud", "https://x.atlassian.net",
+                                        "a@b.c")
+
+
+def test_register_token_tool_never_persists_bad_token(tmp_path,
+                                                     monkeypatch):
+    monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path / "wd"))
+    monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(cli, "_clipboard", lambda: "tok" + "z" * 30)
+    stored = []
+    monkeypatch.setattr(cli, "store_credential",
+                        lambda *a, **k: stored.append(1))
+
+    class Boom:
+        def get(self, ep):
+            raise RuntimeError("401 Unauthorized")
+    monkeypatch.setattr(cli, "make_client", lambda *a, **k: Boom())
+    monkeypatch.setattr(cli.SiteProfile, "save", lambda *a, **k: None)
+
+    import pytest
+    with pytest.raises(Exception):
+        cli.register_clipboard_credential(
+            "cloud", "https://x.atlassian.net", "a@b.c")
+    assert stored == []

@@ -311,6 +311,29 @@ def status() -> dict:
 
 
 @tool(mcp)
+def register_token(site: str, env: str = "cloud", email: str = "") -> dict:
+    """Register the Confluence credential without exposing the token.
+
+    Reads the OS clipboard inside this process — the token is NEVER a
+    tool argument, so it cannot transit the chat model or land in chat
+    history. Validates the token against the Confluence API BEFORE
+    persisting, stores it in the OS keyring, returns a masked confirm.
+
+    Usage: ask the user to copy their PAT/API token, then call this.
+      cloud      — *.atlassian.net — email required
+      datacenter — corporate Confluence — email ignored
+    """
+    from .cli import register_clipboard_credential
+    try:
+        return register_clipboard_credential(env, site, email or None)
+    except SetupError as e:
+        return {"configured": False, "error": str(e)}
+    except Exception as e:  # noqa: BLE001 — auth/network/TLS → honest err
+        return {"configured": False,
+                "error": f"connection check failed — nothing stored: {e}"}
+
+
+@tool(mcp)
 def connect(root: str) -> dict:
     """Validate credentials + root readability; bind a scope handle."""
     out = _daemon_call("connect", {"root": root}, 120)

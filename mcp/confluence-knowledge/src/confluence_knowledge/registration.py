@@ -125,12 +125,14 @@ def register(ide: str = "auto", workspace: Path | None = None,
     out = []
     for f in files:
         # a workspace-scoped mcp.json lands inside the user's repo — guard
-        # it from `git add .` via .gitignore + .git/info/exclude (#192).
-        # Config isn't secret-bearing, so no tracked-file assert — just
-        # keep it out of `git status`.
-        if (f.name == "mcp.json" and f.parent.name == ".vscode"
-                and not remove):
-            ensure_gitignore(f.parent.parent, [".vscode/mcp.json"],
+        # it (and its backup/tmp siblings, which may carry OTHER servers'
+        # config or secrets) from `git add .` via .gitignore +
+        # .git/info/exclude (#192). Applies on remove too — _merge still
+        # writes a .bak of the previous file.
+        if f.name == "mcp.json" and f.parent.name == ".vscode":
+            ensure_gitignore(f.parent.parent,
+                             [".vscode/mcp.json", ".vscode/mcp.json.bak",
+                              ".vscode/mcp.json.tmp"],
                              protected=())
         out.append((f, _merge(f, entry, server_id)))
     return out

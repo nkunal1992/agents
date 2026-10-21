@@ -106,6 +106,37 @@ def _persist_and_report(env: str, base: str, email: str | None,
     return 0
 
 
+def register_clipboard_credential(env: str, site: str,
+                                email: str | None) -> dict:
+    """Clipboard → validate → persist → masked confirm, as data.
+
+    Same pipeline as `setup --from-clipboard` but returns a dict so the
+    MCP `register_token` tool can offer the zero-chat path without a
+    shell command (#191). The token is read from the OS clipboard inside
+    this process — it is never a tool argument (must not transit the
+    chat model or land in chat history)."""
+    base = SiteProfile.canonical_base(env, site)
+    token = _clipboard().strip()
+    if not token:
+        raise SetupError("clipboard is empty — copy the token first")
+    if not _looks_like_token(token):
+        raise SetupError("clipboard doesn't look like a token — nothing "
+                         "stored (copied the right thing?)")
+    workdir = resolve_workdir()
+    workdir.mkdir(parents=True, exist_ok=True)
+    home = default_home()
+    ensure_gitignore(workdir, [AUTH_FILE_NAME, INDEX_DIR_NAME])
+    ref = f"{env}:{base}:{email or '-'}"
+    who = _heartbeat(env, base, email, ref, token)   # raises — nothing stored
+    where = store_credential(workdir, home, ref, token)
+    SiteProfile(env, base, email, ref).save(home)
+    return {"configured": True, "connected_as": who,
+            "token_received": _mask(token), "stored": where,
+            "profile": str(home / "profile.json"),
+            "note": "credentials live — the daemon picks them up on the "
+                    "next call; no reload needed"}
+
+
 def _setup_noninteractive(args) -> int:
     """Clipboard / flag-driven setup — the chat-side seamless path (#191).
     The token arrives via clipboard or stdin only — never via a CLI arg

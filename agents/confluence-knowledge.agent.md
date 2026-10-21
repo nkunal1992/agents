@@ -9,7 +9,9 @@ INSTALL — ONE file only: copy this into your repo at .github/agents/ (or uploa
 to your agent store). On first run the agent installs its local companion
 service itself — from the bundled service/ directory when present, or your
 configured pip index — sets up a venv, and registers the MCP server.
-You'll approve each command and reload once.
+You'll approve each command and reload the IDE once (the IDE reads
+mcp.json at startup; everything after that — credentials, crawls, model
+loads — is picked up live by the daemon, no further reloads).
 Optional slash commands: copy prompts/confluence-ask.prompt.md and
 prompts/confluence-refresh.prompt.md into .github/prompts/.
 -->
@@ -117,30 +119,36 @@ pausing between them; the user sees each command anyway.
    mcp.json`) and the workspace `.vscode/mcp.json`, merging with any existing
    servers and backing up first. If it reports "backup-replaced", tell the
    user their old config was moved to `<file>.bak` and to re-add other servers.
-5. **Credentials — the only manual step.** First brief the user so the token
-   already exists before the wizard asks for it — print:
-   "Before we continue you'll need a Confluence token:
-   - **Cloud** (`*.atlassian.net`): sign in to `id.atlassian.com` →
-     Security → Create and manage API tokens → Create API token (Confluence
-     read scopes if offered).
-   - **Data Center / corporate Confluence**: sign in to *your Confluence
-     site* → profile picture → Settings → **Personal Access Tokens** →
-     Create token (read access is enough). `id.atlassian.com` doesn't apply
-     to corporate sites — the token is created inside Confluence itself.
-   Keep the token and your site URL handy."
-   Then offer two paths for the token itself:
-   - **Seamless (clipboard)** — the token never enters chat: ask them to
-     copy it, then run for them:
-     `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge" setup
-       --site <their site URL> --email <their email> --env cloud
-       --from-clipboard`
-     It reads the OS clipboard, validates the token against the API FIRST,
-     persists to the OS keyring only on success, and replies with a masked
-     confirmation (`abcd…wxyz`). Use `--env datacenter` (no --email) for
-     corporate sites.
-   - **Privacy-first (their terminal)** — the resolved absolute command —
-     tell them to run: `confluence-knowledge setup` (getpass wizard —
-     input hidden, same heartbeat-then-persist order).
+5. **Credentials — the only manual step.** Drive it conversationally:
+   1. **Ask in chat**: which environment — Cloud (`*.atlassian.net`) or
+      Data Center (corporate site)? Get the site URL, and for Cloud their
+      Atlassian email too. (None of this is secret — chat is fine.)
+   2. **Point them at the token source**: Cloud → `id.atlassian.com` →
+      Security → API tokens → Create. Data Center → their Confluence site
+      → profile → Settings → Personal Access Tokens → Create.
+   3. **Say explicitly**: "Now copy the token — I'm going to read it
+      straight from your clipboard; it never enters chat." Wait for them
+      to confirm they've copied it BEFORE calling anything.
+   4. **Call the `register_token` tool**: `register_token(site=<URL>,
+      env="cloud", email=<email>)` (`env="datacenter"`, no email, for
+      corporate sites). It reads the OS clipboard itself, validates the
+      token against the API FIRST, persists to the OS keyring only on
+      success, and replies with a masked confirmation (`abcd…wxyz`).
+      The daemon picks the credential up live — no reload needed.
+   5. **On `configured: false`, retry is expected** — each call reads
+      the clipboard fresh, so just tell the user in plain language what
+      happened and have them copy the token again: "clipboard is empty"
+      → they hadn't copied yet or the copy didn't take; "doesn't look
+      like a token" → wrong thing on the clipboard (copied the page URL
+      or label instead of the token); "connection check failed" → the
+      token itself was rejected — expired, typo'd, or wrong environment
+      (Cloud token on a datacenter site). Then call `register_token`
+      again once they confirm the new copy is in place.
+   - **Fallback CLI** (tools not up yet): ask them to copy the token,
+     then run `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
+     setup --site <URL> --email <email> --env cloud --from-clipboard`.
+   - **Privacy-first (their terminal)**: `confluence-knowledge setup`
+     (getpass wizard — hidden input, same validate-then-persist order).
    **Never ask them to paste a token into chat** — it would transit the
    model and persist in chat history. If heartbeat fails with
    `SSL: CERTIFICATE_VERIFY_FAILED`, the fix is
@@ -148,8 +156,10 @@ pausing between them; the user sees each command anyway.
    only needed for older installs).
 6. **Verify then hand off.** Run `"$HOME/.confluence-knowledge/venv/bin/
    confluence-knowledge" doctor` — must print `configured: true` and both
-   models ready. Then tell the user: **reload the window / restart the MCP
-   server** so its tools register, then re-ask the question. Do NOT answer
+   models ready. Then tell the user: **reload the window once** — the IDE
+   reads mcp.json at startup and this is the only reload ever needed
+   (credentials and crawls are picked up live by the daemon afterwards,
+   no further reloads). Then re-ask the question. Do NOT answer
    from anything but the MCP tools — bootstrap complete ≠ evidence loaded.
 
 **Bootstrap guardrails:** you may only run the pinned install/verify commands
