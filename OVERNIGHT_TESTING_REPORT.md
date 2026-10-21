@@ -33,3 +33,8 @@ Started: 2026-10-21 ~22:30 local.
 | 00:45 | Phase 2b | stress STORM/CANCEL/IDEKILL (files=60, fake) | all verdict FAILs are corpus-size artifacts: job finishes before probes run — IDEKILL "worker" label reads a released lease, CANCEL lands post-done, STORM codewords don't rank under fake embedder. Same scenarios pass at real corpus sizes |
 | 00:45 | Phase 2b | verify round-trip root-caused | codeword search empty under fake embeddings → canary now uses a guaranteed phrase; DAEKILL fully green including verify through respawned daemon |
 | 01:10 | CI | PR #205 branch legs | e2e (ubuntu/macos/**windows**) all SUCCESS incl. Journey + Session replay — Windows parity via rpc.db lease kill confirmed on real CI |
+| 01:45 | Phase 2 | concurrent-burst session | 6 parallel searches + 4 crawl_step mid-crawl — all clean; evidence-set citation reuse across the burst. New verbs: burst, tolerate, __evidence_first__ |
+| 01:45 | Phase 4 | 0.10.1 final publish re-run | cancelled downstream leg re-triggered — publish in progress |
+| 02:05 | Phase 4 | **confluence-knowledge 0.10.1 PUBLISHED** | wheel + sdist on PyPI (verified via simple index + JSON API). verify-published legs running installability checks |
+| 02:05 | Phase 1 | final suite count on rebased branch | confluence **351 passed** (new contract+manifest tests), ruff clean |
+| 02:00 | — | PR #205 | rebased onto post-#203 main → MERGEABLE; CI re-running on the new base |
