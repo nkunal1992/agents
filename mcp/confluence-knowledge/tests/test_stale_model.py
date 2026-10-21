@@ -56,6 +56,7 @@ def test_stale_index_refuses_search(tmp_path, monkeypatch):
     assert c2["stale_model"] is True
     r = server.search(c2["scope_handle"], "anything")
     # stale vectors are never served — either the explicit stale_model
-    # note or, with auto-reindex on (#178), a crawling state while the
-    # rebuild job runs
-    assert r["coverage"] in ("stale_model", "crawling")
+    # note, a crawling state while the rebuild job runs, or empty if the
+    # auto-reindex (#178) already wiped the stale scope and finished
+    # before the search landed
+    assert r["coverage"] in ("stale_model", "crawling", "empty")
