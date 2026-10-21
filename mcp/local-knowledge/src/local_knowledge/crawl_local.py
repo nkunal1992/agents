@@ -196,8 +196,11 @@ class LocalCrawler:
         # files/dirs ahead while the main thread extracts+embeds+stages;
         # unchanged files (same content_hash) reuse their live rows
         conc = limits().fetch_concurrency
-        if self.control is not None:
-            conc = self.control.fetch_concurrency(conc)
+        # the pool is sized at the adaptive ceiling once; the submission
+        # gate re-reads fetch_concurrency() each pass so the window
+        # breathes mid-step under pressure (#184, parity #179)
+        pool_n = (self.control.fetch_ceiling(conc)
+                  if self.control is not None else conc)
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (rel, meta, chunks, hash, lvl)
         visited_submit: set[str] = set()
@@ -251,7 +254,7 @@ class LocalCrawler:
                 self.control.phase("fetching")
             return True
 
-        with ThreadPoolExecutor(max_workers=conc,
+        with ThreadPoolExecutor(max_workers=pool_n,
                                 thread_name_prefix="crawl-fetch") as pool:
             while queue or inflight:
                 if self.control is not None:
@@ -263,6 +266,10 @@ class LocalCrawler:
                 if len(seen) >= MAX_FILES:
                     errors.append(
                         f"file cap reached ({MAX_FILES}) — remaining skipped")
+                    # a cap-stopped crawl is not proof of deletion —
+                    # keep every previously-indexed page we never visited
+                    keep_failed.update(
+                        set(self.index.active_pages()) - seen)
                     queue.clear()
                     inflight.clear()
                     break
@@ -272,7 +279,9 @@ class LocalCrawler:
                         job_id, list(queue) + sorted(inflight.values()),
                         errors, seen, levels, warns, keep_failed)
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
-                while queue and len(inflight) < conc:
+                cur = (self.control.fetch_concurrency(conc)
+                       if self.control is not None else conc)
+                while queue and len(inflight) < cur:
                     entry = queue.popleft()
                     # "dir:<path>" / "file:<path>" — split on the PREFIX,
                     # not ':' (Windows paths carry their own drive colon)
@@ -385,7 +394,10 @@ class LocalCrawler:
                 self.control.progress.remaining = 0
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
-            self.index.publish(seen | keep_failed, job_id=job_id)
+            pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            # auditable outcome: what the refresh added vs tombstoned vs
+            # carried forward — stored so status/last_crawl can report it
+            self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             list(queue), errors)

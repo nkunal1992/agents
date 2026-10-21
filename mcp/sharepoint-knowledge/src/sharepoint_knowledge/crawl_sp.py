@@ -290,8 +290,11 @@ class SPCrawler:
         # stages; unchanged items reuse their live rows (version check
         # skips the download entirely; content_hash skips re-embedding)
         conc = limits().fetch_concurrency
-        if self.control is not None:
-            conc = self.control.fetch_concurrency(conc)
+        # the pool is sized at the adaptive ceiling once; the submission
+        # gate re-reads fetch_concurrency() each pass so the window
+        # breathes mid-step under pressure (#184, parity #179)
+        pool_n = (self.control.fetch_ceiling(conc)
+                  if self.control is not None else conc)
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (pid, page, chunks, hash) to stage
         visited_submit: set[str] = set()
@@ -368,7 +371,11 @@ class SPCrawler:
                     if pid.startswith(prefix))
 
         def _submit(pool):
-            while queue and len(inflight) < conc:
+            # re-read the adaptive cap each fill — the window breathes
+            # mid-step under pressure (#184, parity #179)
+            cur = (self.control.fetch_concurrency(conc)
+                   if self.control is not None else conc)
+            while queue and len(inflight) < cur:
                 entry = queue.popleft()
                 if entry in visited_submit:
                     continue
@@ -398,7 +405,7 @@ class SPCrawler:
                 except Exception as e:  # noqa: BLE001 — malformed entry
                     errors.append(f"{entry}: {type(e).__name__}: {e}")
 
-        with ThreadPoolExecutor(max_workers=conc,
+        with ThreadPoolExecutor(max_workers=pool_n,
                                 thread_name_prefix="crawl-fetch") as pool:
             while queue or inflight:
                 if self.control is not None:
@@ -410,6 +417,10 @@ class SPCrawler:
                 if len(seen) >= MAX_FILES:
                     errors.append(
                         f"file cap reached ({MAX_FILES}) — remaining skipped")
+                    # a cap-stopped crawl is not proof of deletion —
+                    # keep every previously-indexed page we never visited
+                    keep_failed.update(
+                        set(self.index.active_pages()) - seen)
                     queue.clear()
                     inflight.clear()
                     break
@@ -540,7 +551,10 @@ class SPCrawler:
                 self.control.progress.remaining = 0
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
-            self.index.publish(seen | keep_failed, job_id=job_id)
+            pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            # auditable outcome: what the refresh added vs tombstoned vs
+            # carried forward — stored so status/last_crawl can report it
+            self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
         self.index.save_job(job_id, "done" if not queue else "running",
                             list(queue), errors)

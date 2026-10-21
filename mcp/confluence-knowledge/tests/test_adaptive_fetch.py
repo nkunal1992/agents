@@ -8,7 +8,11 @@ from confluence_knowledge.index import Index
 from confluence_knowledge.jobs import Progress, crawl_control
 
 
-def _ctl(tmp_path, monkeypatch):
+def _ctl(tmp_path, monkeypatch, battery=False):
+    # force AC by default — this laptop is genuinely on battery and the
+    # saver halves the cap independently of the CPU ladder; _battery is
+    # latched at ctor so the env must land BEFORE the factory call
+    monkeypatch.setenv("KNOWLEDGE_FORCE_BATTERY", "1" if battery else "0")
     idx = Index(tmp_path / "s.db")
     idx.create_job("j", "1")
     idx.save_job("j", "running", ["page:1"], [])
@@ -25,7 +29,6 @@ def _cpu(monkeypatch, pct):
 def test_default_is_inert(tmp_path, monkeypatch):
     _cpu(monkeypatch, 10.0)                    # idle CPU
     monkeypatch.delenv("KNOWLEDGE_FETCH_MAX", raising=False)
-    monkeypatch.delenv("KNOWLEDGE_FORCE_BATTERY", raising=False)
     ctl = _ctl(tmp_path, monkeypatch)
     assert ctl.fetch_concurrency(6) == 6       # cap = base → no scale-up
     assert ctl.fetch_ceiling(6) == 6
@@ -33,7 +36,6 @@ def test_default_is_inert(tmp_path, monkeypatch):
 
 def test_scales_down_under_pressure(tmp_path, monkeypatch):
     monkeypatch.delenv("KNOWLEDGE_FETCH_MAX", raising=False)
-    monkeypatch.delenv("KNOWLEDGE_FORCE_BATTERY", raising=False)
     ctl = _ctl(tmp_path, monkeypatch)
     _cpu(monkeypatch, 80.0)
     assert ctl.fetch_concurrency(6) == 3
@@ -45,7 +47,6 @@ def test_scales_down_under_pressure(tmp_path, monkeypatch):
 
 def test_scales_up_to_env_ceiling(tmp_path, monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_FETCH_MAX", "12")
-    monkeypatch.delenv("KNOWLEDGE_FORCE_BATTERY", raising=False)
     ctl = _ctl(tmp_path, monkeypatch)
     _cpu(monkeypatch, 15.0)
     assert ctl.fetch_concurrency(6) == 9       # 1.5x band, capped at 12
@@ -54,7 +55,6 @@ def test_scales_up_to_env_ceiling(tmp_path, monkeypatch):
 
 def test_battery_still_halves(tmp_path, monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_FETCH_MAX", "12")
-    monkeypatch.setenv("KNOWLEDGE_FORCE_BATTERY", "1")
-    ctl = _ctl(tmp_path, monkeypatch)
+    ctl = _ctl(tmp_path, monkeypatch, battery=True)
     _cpu(monkeypatch, 15.0)                    # idle CPU, but on battery
     assert ctl.fetch_concurrency(6) == 3       # battery floor wins

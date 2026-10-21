@@ -79,6 +79,9 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `KNOWLEDGE_IDLE_UNLOAD_S` | unload models after this idle time (600; 0 = never) |
 | `KNOWLEDGE_NO_NICE` | `1` disables the lowered OS scheduling priority |
 | `KNOWLEDGE_MIN_FREE_MB` | pause embedding while free memory < this floor (1500; 0 = off) |
+| `KNOWLEDGE_MEM_PAUSE_MAX_S` / `KNOWLEDGE_MEM_PAUSE_COOLDOWN_S` | low-memory pause ceiling — after 600 s paused the crawl resumes for 60 s of work before the guard may re-engage (phase shows `resuming: memory floor unreachable`); a miscalibrated floor can never deadlock |
+| `LOCAL_KNOWLEDGE_AUTO_REINDEX` | `0` disables the automatic rebuild a stale-model index triggers on `connect` (default on — user is notified once) |
+| `KNOWLEDGE_FETCH_CONCURRENCY` / `KNOWLEDGE_FETCH_MAX` | fetch workers (6) / adaptive ceiling — default 0 caps the window at the base; the window halves under CPU ≥75 % and bottoms at 1 over ≥90 % (`fetch_cap` in progress) |
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
 
