@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 import time
 import uuid
@@ -297,6 +298,12 @@ def status() -> dict:
                    else "off" if not _daemon_on() else "starting"),
         "live_scopes": sorted(_scopes),
         "last_crawl": last,
+        # the zero-terminal path (#191): one absolute copy-pasteable
+        # string for the privacy-first route; chat path is clipboard-based
+        "setup_cmd": f"{sys.executable} -m confluence_knowledge.cli setup",
+        "setup_cmd_clipboard": (
+            f"{sys.executable} -m confluence_knowledge.cli setup "
+            "--site <URL> --email <EMAIL> --env cloud --from-clipboard"),
     }
 
 

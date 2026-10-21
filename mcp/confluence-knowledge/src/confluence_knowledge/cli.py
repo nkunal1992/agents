@@ -27,6 +27,117 @@ from .settings import (
 )
 
 
+def _mask(token: str) -> str:
+    """Masked confirmation — never echo the full secret (#191)."""
+    t = token.strip()
+    return t[:4] + "…" + t[-4:] if len(t) > 10 else "…"
+
+
+def _looks_like_token(token: str) -> bool:
+    """Cheap shape check before touching the network — clipboard may hold
+    anything. Confluence PATs/API tokens are long, opaque, ASCII."""
+    t = token.strip()
+    return len(t) >= 16 and t.isprintable() and "\n" not in t and " " not in t
+
+
+def _clipboard() -> str:
+    """Read the OS clipboard — macOS/Linux/Windows. The token takes the
+    zero-chat path: copy once, run one command, never typed (#191)."""
+    import shutil
+    import subprocess
+    if shutil.which("pbpaste"):                    # macOS
+        return subprocess.run(["pbpaste"], check=False, capture_output=True,
+                              text=True, timeout=5).stdout
+    if shutil.which("wl-paste"):                   # wayland
+        return subprocess.run(["wl-paste", "-n"], check=False, capture_output=True,
+                              text=True, timeout=5).stdout
+    if shutil.which("xclip"):                      # x11
+        return subprocess.run(["xclip", "-o", "-selection", "clipboard"], check=False,
+                              capture_output=True, text=True,
+                              timeout=5).stdout
+    if shutil.which("powershell.exe") or shutil.which("pwsh"):  # windows
+        cmd = shutil.which("powershell.exe") or shutil.which("pwsh")
+        return subprocess.run([cmd, "-NoProfile", "-Command",
+                               "Get-Clipboard"],
+                              check=False, capture_output=True, text=True, timeout=8).stdout
+    raise SetupError("no clipboard tool found (pbpaste/wl-paste/xclip/"
+                     "powershell) — run `setup` without --from-clipboard "
+                     "for the hidden-prompt path")
+
+
+def _heartbeat(env: str, base: str, email: str | None, ref: str,
+               token: str) -> str:
+    """Validate the token against the API BEFORE persisting (#191 —
+    never store a credential that fails its first real call)."""
+    c = make_client(SiteProfile(env, base, email, ref), token)
+    ep = "wiki/rest/api/user/current" if env == "cloud" else "rest/api/user/current"
+    who = c.get(ep).json()
+    return who.get("displayName") or who.get("username") or "OK"
+
+
+def _persist_and_report(env: str, base: str, email: str | None,
+                        token: str) -> int:
+    """Validate → persist → masked confirm. Shared by both token paths."""
+    workdir = resolve_workdir()
+    workdir.mkdir(parents=True, exist_ok=True)
+    home = default_home()
+    try:
+        ensure_gitignore(workdir, [AUTH_FILE_NAME, ".conf_knowledge_index/"])
+    except SetupError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    ref = f"{env}:{base}:{email or '-'}"
+    try:
+        who = _heartbeat(env, base, email, ref, token)
+    except Exception as e:  # noqa: BLE001 — auth/network/TLS all mean no
+        print(f"connection check failed — nothing stored: {e}",
+              file=sys.stderr)
+        return 3
+    where = store_credential(workdir, home, ref, token)
+    SiteProfile(env, base, email, ref).save(home)
+    print(f"\nconnected as: {who}")
+    print(f"token received: {_mask(token)}  (stored: {where})")
+    print(f"profile: {home / 'profile.json'}")
+    print("\nNext: `confluence-knowledge prepare-models` to fetch the local "
+          "models (Apache-2.0), then point your IDE's MCP config at:\n"
+          f"  command: {sys.executable}\n"
+          f"  args:    [\"-m\", \"confluence_knowledge.server\"]\n"
+          f"  env:     CONF_KNOWLEDGE_WORKDIR={workdir}")
+    return 0
+
+
+def _setup_noninteractive(args) -> int:
+    """Clipboard / flag-driven setup — the chat-side seamless path (#191).
+    The token arrives via clipboard or stdin only — never via a CLI arg
+    or MCP tool argument (it must not transit the chat model)."""
+    env = args.env or "cloud"
+    try:
+        base = SiteProfile.canonical_base(env, args.site)
+    except SetupError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    email = args.email if env == "cloud" else None
+    if env == "cloud" and not email:
+        print("error: cloud sites need --email", file=sys.stderr)
+        return 2
+    if args.from_clipboard:
+        token = _clipboard().strip()
+    elif args.token_stdin:
+        token = sys.stdin.read().strip()
+    else:                                           # pragma: no cover
+        print("error: pass --from-clipboard or --token-stdin",
+              file=sys.stderr)
+        return 2
+    if not token:
+        print("error: empty token (clipboard empty?)", file=sys.stderr)
+        return 2
+    if not _looks_like_token(token):
+        print("error: clipboard doesn't look like a token — nothing "
+              "stored", file=sys.stderr)
+        return 2
+    return _persist_and_report(env, base, email, token)
+
+
 def _wizard() -> int:
     print("confluence-knowledge setup\n")
     env = ""
@@ -53,43 +164,12 @@ def _wizard() -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    workdir = resolve_workdir()
-    workdir.mkdir(parents=True, exist_ok=True)
-    home = default_home()
-    # gitignore protections BEFORE any secret/cache write
-    try:
-        ensure_gitignore(workdir, [AUTH_FILE_NAME, ".conf_knowledge_index/"])
-    except SetupError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
-
-    ref = f"{env}:{base}:{email or '-'}"
     token = getpass.getpass("Token (input hidden): ")
     if not token:
         print("error: empty token", file=sys.stderr)
         return 2
 
-    where = store_credential(workdir, home, ref, token)
-    SiteProfile(env, base, email, ref).save(home)
-
-    # heartbeat
-    try:
-        c = make_client(SiteProfile(env, base, email, ref), token)
-        ep = "wiki/rest/api/user/current" if env == "cloud" else "rest/api/user/current"
-        who = c.get(ep).json()
-        print(f"\nconnected as: {who.get('displayName') or who.get('username') or 'OK'}")
-    except Exception as e:  # noqa: BLE001 — any connect failure (auth/network/TLS) exits non-zero
-        print(f"\nconnection check failed: {e}", file=sys.stderr)
-        return 3
-
-    print(f"credential stored: {where}")
-    print(f"profile: {home / 'profile.json'}")
-    print("\nNext: `confluence-knowledge prepare-models` to fetch the local "
-          "models (Apache-2.0), then point your IDE's MCP config at:\n"
-          f"  command: {sys.executable}\n"
-          f"  args:    [\"-m\", \"confluence_knowledge.server\"]\n"
-          f"  env:     CONF_KNOWLEDGE_WORKDIR={workdir}")
-    return 0
+    return _persist_and_report(env, base, email, token)
 
 
 def _doctor() -> int:
@@ -149,7 +229,18 @@ def _doctor() -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(prog="confluence-knowledge")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("setup", help="guided credential + config setup")
+    st = sub.add_parser("setup", help="guided credential + config setup")
+    st.add_argument("--site", help="Confluence URL — skips the prompt")
+    st.add_argument("--email", help="Atlassian account email (cloud)")
+    st.add_argument("--env", choices=["cloud", "datacenter"],
+                    help="environment — skips the prompt")
+    st.add_argument("--from-clipboard", action="store_true",
+                    help="read the token from the OS clipboard — the "
+                         "zero-chat path (#191): the secret never transits "
+                         "the chat model or history")
+    st.add_argument("--token-stdin", action="store_true",
+                    help="read the token from stdin (pipe it — never a "
+                         "command-line arg)")
     sub.add_parser("doctor", help="verify config, credentials, models")
     sub.add_parser("prepare-models", help="download the pinned local models")
     u = sub.add_parser("update", help="safe upgrade — soaked release, "
@@ -179,6 +270,8 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.cmd == "setup":
+        if args.from_clipboard or args.token_stdin or args.site:
+            sys.exit(_setup_noninteractive(args))
         sys.exit(_wizard())
     if args.cmd == "doctor":
         sys.exit(_doctor())
