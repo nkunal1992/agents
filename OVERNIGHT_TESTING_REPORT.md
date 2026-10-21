@@ -27,3 +27,5 @@ Started: 2026-10-21 ~22:30 local.
 | 23:45 | Phase 2b | real-model RAG eval | **recall@8 100% (23/23), fact coverage 100%, honesty 100% (4/4 unanswerable), p50 6.4s** — ONNX models, golden set |
 | 23:45 | Phase 3 | wheel build + clean venv | 0.10.1 wheel built, twine PASSED, fresh-venv import ok, **fresh-onboarding session green against the wheel** (no source-tree deps) |
 | 23:40 | Phase 4 | PR #203 | **MERGED** — reliability batch on main |
+| 00:15 | Phase 2b | DAEKILL stress | **green** — daemon SIGKILL → respawn → orphan resume → done, verify round-trip through the respawned daemon PASS. Fixed canary: synthetic codewords don't rank under fake embeddings → verify now searches a guaranteed phrase |
+| 00:15 | Phase 4 | confluence-knowledge 0.10.1 final tag | re-pointed to main merge cadf21d — publish running |

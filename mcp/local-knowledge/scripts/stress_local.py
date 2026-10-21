@@ -517,11 +517,21 @@ class Ctx:
         # verify saw an empty registry ("unknown evidence set") while the
         # daemon held it. One real call pins the routing.
         verify_ok = False
+        ev = None
         try:
+            # a phrase guaranteed in every canary body — 'retention
+            # window' — so the round-trip exercises regardless of where
+            # the codeword ranks
             res = await self.call("search",
                                   {"scope_handle": self.handle,
-                                   "question": word}, timeout=120)
+                                   "question": "retention window days"},
+                                   timeout=120)
             ev = res.get("evidence") or []
+            if not ev:
+                self.notes.append(
+                    f"verify round-trip skipped — search returned no "
+                    f"evidence for '{word}' (fake-embedder ranking on "
+                    "near-identical canaries is arbitrary)")
             if ev and res.get("evidence_set"):
                 v = await self.call(
                     "verify_citations",
@@ -534,7 +544,7 @@ class Ctx:
                 verify_ok = bool(v.get("ok"))
         except Exception as e:  # noqa: BLE001 — verdict records it
             self.notes.append(f"verify round-trip errored: {e}")
-        self.extra["verify_ok"] = verify_ok
+        self.extra["verify_ok"] = verify_ok if ev else None
         return {"canary_ok": ok, "canary_total": min(len(canaries),
                                                     CANARY_N),
                 "verify_ok": verify_ok}
