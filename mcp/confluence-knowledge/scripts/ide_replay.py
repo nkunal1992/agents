@@ -86,6 +86,7 @@ class FakeIDE:
         self.session = None
         self.vars: dict[str, str] = {}
         self.transcript: list[dict] = []
+        self._last_evidence: dict | None = None
 
     async def spawn_server(self):
         params = StdioServerParameters(
@@ -111,19 +112,32 @@ class FakeIDE:
             await self.stack.__aexit__(None, None, None)
             self.stack = None
 
-    async def call(self, tool, args=None, timeout=60):
+    async def call(self, tool, args=None, timeout=60, tolerate=False):
         args = {k: self._sub(v) for k, v in (args or {}).items()}
+        # citation sugar — sessions can't hand-write chunk ids; pull a
+        # real chunk + quote from a saved evidence set
+        for m in args.get("mappings") or []:
+            if m.get("chunk_id") == "__evidence_first__":
+                ev = (self._last_evidence or {}).get(
+                    args.get("evidence_set", "")) or []
+                m["chunk_id"] = ev[0]["chunk_id"]
+                if not m.get("quote"):
+                    m["quote"] = ev[0]["text"][:60]
         from datetime import timedelta
         t = time.monotonic()
         r = await self.session.call_tool(
             tool, args, read_timeout_seconds=timedelta(seconds=timeout))
         dt = time.monotonic() - t
         text = r.content[0].text if r.content else ""
-        if r.isError:
+        if r.isError and not tolerate:
             raise AssertionError(f"{tool} errored after {dt:.1f}s: {text}")
-        out = json.loads(text)
+        out = json.loads(text) if text else {"error": text}
         self.transcript.append({"tool": tool, "args": args,
                                 "dt": round(dt, 2), "result": out})
+        if out.get("evidence_set") and out.get("evidence"):
+            if self._last_evidence is None:
+                self._last_evidence = {}
+            self._last_evidence[out["evidence_set"]] = out["evidence"]
         return out
 
     async def wait_crawl(self, scope, job, timeout_s=180,
@@ -175,7 +189,8 @@ class FakeIDE:
             await self.spawn_server()
         elif v == "call":
             out = await self.call(step["tool"], step.get("args"),
-                                  timeout=step.get("timeout", 60))
+                                  timeout=step.get("timeout", 60),
+                                  tolerate=bool(step.get("tolerate")))
             if "expect" in step:
                 for key, want in step["expect"].items():
                     check(out.get(key) == want,
@@ -239,6 +254,12 @@ class FakeIDE:
                      (await self.session.list_tools()).tools}
             want = set(step.get("must_contain", []))
             check(want <= tools, f"tools has {sorted(want)}", sorted(tools))
+        elif v == "burst":
+            import asyncio as _a
+            await _a.gather(*[self.call(step["tool"],
+                                        step.get("args"))
+                              for _ in range(step["n"])])
+            check(True, f"burst {step['tool']}×{step['n']} all clean")
         elif v == "spawn_window2":
             # a second IDE window — fresh server process, same
             # HOME/WORKDIR (the WINDOWS/IDEKILL field topology)
@@ -311,8 +332,9 @@ async def run_session(path: Path) -> int:
                 print(f"FAIL step {i} ({step['verb']}): {e}", flush=True)
                 rc = 1
                 break
-            except Exception as e:
-                import traceback
+            except Exception as e:   # noqa: BLE001 — an unexpected
+                import traceback  # error should show its real
+                 
                 print(f"DIED step {i} ({step['verb']}): "
                       f"{type(e).__name__}: {e}", flush=True)
                 traceback.print_exc()
