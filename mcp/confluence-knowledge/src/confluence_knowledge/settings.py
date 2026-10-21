@@ -71,6 +71,11 @@ def ensure_gitignore(path: Path, entries: list[str],
                                                  INDEX_DIR_NAME)) -> None:
     """Append ignore entries before any secret/cache write. Idempotent.
 
+    Two layers (#192): .gitignore documents intent for anyone cloning;
+    .git/info/exclude is the fail-safe — it lives inside .git/, never
+    appears in `git status`, and survives the user reverting .gitignore.
+    `git add .` cannot stage an excluded path.
+
     Raises SetupError if a protected path is already tracked by git.
     """
     gi = path / ".gitignore"
@@ -81,7 +86,48 @@ def ensure_gitignore(path: Path, entries: list[str],
             for e in missing:
                 f.write(("\n" if existing else "") + e + "\n")
             existing.update(missing)
+    _git_info_exclude(path, entries)
     _assert_not_tracked(path, protected)
+
+
+def _git_info_exclude(path: Path, entries: list[str]) -> None:
+    """Mirror ignore entries into .git/info/exclude — the fail-safe layer.
+
+    A no-op outside git repos, and resilient to worktrees (`.git` as a
+    file) via `git rev-parse`. Entries are repo-root-relative patterns —
+    a nested workdir's entries carry their path prefix.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--git-dir",
+             "--show-toplevel"],
+            check=False, capture_output=True, timeout=10, text=True)
+        if r.returncode != 0:
+            return
+        lines = r.stdout.splitlines()
+        git_dir, top = Path(lines[0]), Path(lines[1])
+        if not git_dir.is_absolute():
+            git_dir = (path / git_dir).resolve()
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+        return
+    try:
+        prefix = path.resolve().relative_to(top.resolve())
+    except ValueError:
+        return                      # path outside the worktree
+    rel = []                        # repo-root-relative patterns; git
+    for e in entries:               # wants '/' separators everywhere
+        pat = e if str(prefix) == "." else str(prefix / e)
+        rel.append(pat.replace("\\", "/"))
+    ex = git_dir / "info" / "exclude"
+    existing = set(ex.read_text().splitlines()) if ex.exists() else set()
+    missing = [e for e in rel if e not in existing]
+    if missing:
+        ex.parent.mkdir(parents=True, exist_ok=True)
+        with ex.open("a") as f:
+            for e in missing:
+                f.write(("\n" if existing else "") + e + "\n")
+                existing.add(e)
 
 
 def _assert_not_tracked(workdir: Path, protected: tuple[str, ...]) -> None:
