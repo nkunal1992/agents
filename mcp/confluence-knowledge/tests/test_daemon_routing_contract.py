@@ -84,8 +84,8 @@ def test_every_tool_satisfies_the_routing_contract():
 def test_local_safe_is_still_justified():
     """Allowlist entries must keep explaining themselves — a bare name
     with no reason means the drift-control comment rotted."""
-    for name in LOCAL_SAFE:
-        assert LOCAL_SAFE[name].strip(), f"{name} lost its justification"
+    for name, why in LOCAL_SAFE.items():
+        assert why.strip(), f"{name} lost its justification"
 
 
 def test_the_guard_itself_bites(tmp_path, monkeypatch):
@@ -93,7 +93,6 @@ def test_the_guard_itself_bites(tmp_path, monkeypatch):
     routing — otherwise it's decoration, not a guard. Strip the
     daemon call from verify_citations in a scratch copy and confirm."""
     import re
-    import textwrap
     src = Path(inspect.getfile(srv)).read_text()
     mutated = re.sub(
         r'out = _daemon_call\("verify_citations"',

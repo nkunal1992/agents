@@ -150,13 +150,10 @@ def test_index_unreadable_is_not_corrupt(tmp_path, monkeypatch):
     lock) must NOT report 'corrupt' — that verdict sent a user recrawling
     a healthy index. Unreadable → 'couldn't read' + no remediation."""
     from confluence_knowledge.health import _index_checks
-    import confluence_knowledge.health as health
     from confluence_knowledge.index import Index
     idx_root = tmp_path / "idx"; idx_root.mkdir()
     Index(idx_root / "scope.db").close()
-    monkeypatch.setattr(health, "_EMBED_MODEL_ID", None) if False else None
     # force the open to fail — the transient path
-    orig = health.Index if hasattr(health, "Index") else None
     import confluence_knowledge.index as idxmod
     def boom(*a, **k):
         raise OSError("database is locked")
