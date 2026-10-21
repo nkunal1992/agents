@@ -155,6 +155,9 @@ def _start_warmup() -> None:
     with _warm_lock:
         if _warm_started:
             return
+        if _daemon_on():
+            return      # models live in the daemon — proxy
+                        # warmup just doubles RSS (#196)
         _warm_started = True
     threading.Thread(target=_warm_models, name="model-warmup",
                      daemon=True).start()

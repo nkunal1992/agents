@@ -9,6 +9,7 @@ persisted at checkpoints so other processes can read it too.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import threading
@@ -51,6 +52,7 @@ class Progress:
     rate_ppm: float = 0.0          # EWMA of pages/minute
     worker: str = "self"           # or a lease-holder label
     fetch_cap: int = 0    # current adaptive submission cap (#179)
+    battery: bool = False  # durable flag — saver engaged this crawl
     updated_at: float = field(default_factory=time.time)
     _win_n: int = 0
     _win_t: float = field(default_factory=time.time)
@@ -81,6 +83,7 @@ class Progress:
                 "eta_s": eta,
                 "worker": self.worker,
                 "fetch_cap": self.fetch_cap,
+                "battery": self.battery,
                 "started_at": self.started_at,
                 "updated_at": self.updated_at,
                 "elapsed_s": max(0.0, round(
@@ -100,6 +103,7 @@ class Progress:
             p.rate_ppm = float(d.get("rate_ppm") or 0.0)
             p.worker = "another server process"
             p.fetch_cap = int(d.get("fetch_cap", 0))
+            p.battery = bool(d.get("battery", False))
             p.started_at = float(d.get("started_at", time.time()))
             p.updated_at = float(d.get("updated_at", time.time()))
             return p
@@ -182,6 +186,9 @@ class CrawlControl:
         while not limits().memory_ok():
             if self._paused_since is None:
                 self._paused_since = time.time()
+                # paused workers don't checkpoint — persist the phase so
+                # proxies/other windows see 'paused', not a stale phase
+                self._flush_progress()
             elif time.time() - self._paused_since >= _MEM_PAUSE_MAX_S:
                 # the floor is unreachable (baseline drift or a miscalibrated
                 # KNOWLEDGE_MIN_FREE_MB) — never deadlock: resume for a
@@ -198,6 +205,16 @@ class CrawlControl:
             self.sleep(2)
             self._heartbeat()
         self._paused_since = None
+
+    def _flush_progress(self) -> None:
+        """Persist the progress blob NOW (outside the checkpoint cadence)
+        — for states that must be visible cross-process immediately."""
+        try:
+            self.idx.meta_set(f"progress:{self.job_id}",
+                              json.dumps(self.progress.snapshot()))
+        except Exception as e:  # noqa: BLE001 — never crash a crawl on this
+            logging.getLogger(__name__).debug("progress flush failed: %s",
+                                              e)
 
     def pause_until_auth(self, probe) -> None:
         """Auth expiry is a job-class pause, not page errors (#177): the
@@ -280,6 +297,8 @@ class CrawlControl:
 
     def battery_saver(self) -> bool:
         self.fetch_concurrency(1)      # refresh the cached flag
+        if self._battery:
+            self.progress.battery = True    # durable flag for the blob
         return self._battery
 
 

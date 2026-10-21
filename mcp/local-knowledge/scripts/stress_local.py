@@ -808,11 +808,12 @@ async def s_battery(ctx: Ctx) -> dict:
     await ctx.connect_and_crawl()
     res = await ctx.run_crawl()
     ctx.extra["wall_s"] = res["wall_s"]
-    phases = {p.get("phase", "") for p in ctx.progress}
+    phases = {(p.get("phase") or "") for p in ctx.progress}
+    battery_seen = any(p.get("battery") for p in ctx.progress)
     ctx.extra["final"] = res["final"]
     await ctx.canary_check(ctx.tree["canaries"])
     return {"battery saver engaged": v(
-        any("battery" in p for p in phases)),
+        battery_seen or any("battery" in p for p in phases)),
         "crawl done on battery": v(res["final"].get("state") == "done")}
 
 
