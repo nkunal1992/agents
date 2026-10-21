@@ -68,6 +68,11 @@ jobs:
           PYTHONIOENCODING: utf-8
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: python mcp/confluence-knowledge/scripts/e2e_bootstrap.py --service ./mcp/confluence-knowledge
+      - name: Journey e2e — user navigation, register to daemon kill
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python mcp/confluence-knowledge/scripts/e2e_journey.py
       - name: Failure e2e — break the install, verify doctor flags + recovery
         shell: bash
         env:

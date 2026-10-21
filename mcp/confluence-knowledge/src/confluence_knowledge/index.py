@@ -205,6 +205,21 @@ class Index:
         return {"root_page": row[0], "state": row[1],
                 "queue": json.loads(row[2]), "errors": json.loads(row[3])}
 
+    def running_live_job(self, stale_s: float = 30.0) -> str | None:
+        """A running job whose lease heartbeat is fresh — its worker is
+        alive. start_crawl dedup: a second call on a running scope
+        returns this job instead of abandoning it (field case: agent
+        issued Start crawl twice → first job abandoned mid-flight).
+        Orphaned jobs (dead worker, stale lease) are NOT returned —
+        abandon + resume handles those."""
+        with self._rlock:
+            row = self._read().execute(
+                "SELECT j.job_id FROM jobs j "
+                "JOIN job_lease l ON l.job_id = j.job_id "
+                "WHERE j.state = 'running' AND l.heartbeat > ?",
+                (time.time() - stale_s,)).fetchone()
+        return row[0] if row else None
+
     def abandon_running_jobs(self) -> None:
         """A new crawl supersedes any unfinished one (e.g. an earlier failed
         attempt) so it can't leave coverage reported as partial forever."""

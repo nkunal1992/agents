@@ -45,6 +45,11 @@ def _clipboard() -> str:
     zero-chat path: copy once, run one command, never typed (#191)."""
     import shutil
     import subprocess
+    # test hook — e2e_journey can't pollute the developer's real
+    # clipboard; an env file stands in for the OS pasteboard
+    fake = os.environ.get("CONF_KNOWLEDGE_CLIPBOARD_FILE")
+    if fake:
+        return Path(fake).read_text() if Path(fake).exists() else ""
     if shutil.which("pbpaste"):                    # macOS
         return subprocess.run(["pbpaste"], check=False, capture_output=True,
                               text=True, timeout=5).stdout

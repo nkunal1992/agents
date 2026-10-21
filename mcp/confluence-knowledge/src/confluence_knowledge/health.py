@@ -117,6 +117,7 @@ def _index_checks(index_root: Path) -> list[dict]:
             continue                    # daemon control plane, not a scope
         scope = db.stem[:24]
         idx = None
+        unreadable = False
         try:
             # read-only + quick_check: status must never take a write
             # lock (a WAL publish by the daemon otherwise stalls this
@@ -126,18 +127,39 @@ def _index_checks(index_root: Path) -> list[dict]:
             ok = idx.quick_integrity()
             stale = idx.model_id() is not None and \
                 idx.model_id() != EMBED_MODEL_ID
-        except Exception:  # noqa: BLE001 — unreadable = corrupt
+        except Exception as e:  # noqa: BLE001 — triage the reason
+            # "can't read right now" is NOT corruption — a WAL write or
+            # Windows file lock fails the open transiently. Reporting
+            # corrupt here sent a field user recrawling a healthy index.
+            # Structural damage ("not a database", "malformed") IS
+            # corrupt regardless of how it surfaced.
+            msg = str(e).lower()
+            structural = ("not a database" in msg or "malformed" in msg
+                          or "corrupt" in msg)
             ok, stale = False, False
+            unreadable = not structural
+            if structural:
+                ok = False
         finally:
             if idx is not None:
                 idx.close()  # Windows locks the file while a conn is open
+        if unreadable:
+            detail = "couldn't read — index busy; retry in a moment"
+            remediation = None
+        elif not ok:
+            detail = "corrupt — delete the index and re-crawl"
+            remediation = "start_crawl (rebuilds the index)"
+        elif stale:
+            detail = "built with an older model — run start_crawl once"
+            remediation = "start_crawl (rebuilds the index)"
+        else:
+            detail = "ok"
+            remediation = None
         out.append({
-            "flag": f"index:{scope}", "ok": ok and not stale,
-            "detail": ("corrupt — delete the index and re-crawl" if not ok
-                       else ("built with an older model — run start_crawl once"
-                             if stale else "ok")),
-            "remediation": None if ok and not stale
-                           else "start_crawl (rebuilds the index)"})
+            "flag": f"index:{scope}",
+            "ok": ok and not stale and not unreadable,
+            "detail": detail,
+            "remediation": remediation})
     return out
 
 

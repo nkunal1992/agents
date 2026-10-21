@@ -113,3 +113,15 @@ def test_agent_update_targets_subcommand_not_pip():
     import re as _re
     assert not _re.search(r"pip install -U", doc), \
         "agent prescribes raw `pip install -U` — must route through update"
+
+
+def test_onboarding_contract_pinned():
+    """The zero-chat onboarding contract must not drift — the agent file
+    is what stops 'paste your token in chat' from coming back."""
+    doc = AGENT.read_text()
+    for token in ("register_token", "clipboard",
+                  "configured: false",        # retry loop
+                  "reload"):
+        assert token in doc, f"agent missing onboarding token: {token}"
+    # the privacy invariants stay in writing
+    assert "never" in doc.lower() and "chat" in doc.lower()

@@ -54,6 +54,9 @@ class LocalCrawler:
         return {"measure": measure, "budget": CHUNK_TOKENS} if measure else {}
 
     def start(self) -> str:
+        live = self.index.running_live_job()
+        if live:
+            return live                    # dedup — don't abandon in-flight
         job_id = uuid.uuid4().hex[:12]
         self.index.abandon_running_jobs()
         stamped = self.index.model_id()

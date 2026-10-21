@@ -143,7 +143,8 @@ def split_table_text(t: str, budget: int = MAX_WORDS,
 
 
 def extract_chunks(storage_html: str, measure=_word_count,
-                   budget: int = MAX_WORDS) -> tuple[list[Chunk], list[str]]:
+                   budget: int = MAX_WORDS,
+                   page_title: str = "") -> tuple[list[Chunk], list[str]]:
     """Return (chunks, extraction warnings). `measure`/`budget` bound chunk
     size — word count by default, model tokens when a tokenizer-backed
     measure is supplied (token-aware chunking, audit R16)."""
@@ -216,4 +217,12 @@ def extract_chunks(storage_html: str, measure=_word_count,
         else:
             buf.append(el.get_text(" ", strip=True))
     flush()
+    if page_title:
+        # every chunk carries the page title — retrieval matches
+        # title-bearing queries ("Deploy Windows") on any chunk, the way
+        # every RAG indexer treats title+body as one passage. NB the
+        # heading loop reuses `title` as a local — keep the page's own
+        # name distinct or it gets shadowed by the last heading seen.
+        for c in chunks:
+            c.text = f"## {page_title}\n{c.text}"
     return chunks, warnings

@@ -113,3 +113,20 @@ def test_search_cache_builds_off_writer_lock(tmp_path, monkeypatch):
 
     idx.search_cache()
     assert held_during_build and not any(held_during_build)
+
+
+def test_running_live_job_dedup(tmp_path):
+    """start_crawl on a scope with a live-leased running job returns that
+    job — a second Start crawl must not abandon in-flight work (field:
+    agent issued Start crawl twice → job 1 abandoned mid-flight)."""
+    from confluence_knowledge.index import Index
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j1", "page:1")
+    idx.save_job("j1", "running", ["page:1"], [])
+    assert idx.running_live_job() is None     # no lease yet — not 'live'
+    idx.acquire_lease("j1", "owner:x", pid=123)
+    assert idx.running_live_job() == "j1"
+    # stale lease → orphaned, must NOT be returned
+    idx.db.execute("UPDATE job_lease SET heartbeat=0 WHERE job_id='j1'")
+    idx.db.commit()
+    assert idx.running_live_job() is None
