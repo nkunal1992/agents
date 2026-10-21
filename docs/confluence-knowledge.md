@@ -388,6 +388,16 @@ tool call ≤ 2 s during a crawl, `status`/`crawl_step` p95 < 300 ms, stall
 ≤ 250 ms, RSS < 3 GB, CPU ≤ ~50 % of the core budget, cancel < 5 s,
 unchanged refresh ≈ fetch-only time, 10/10 canary hits.
 
+Latest verified results (v0.9.0, worklaptop profile, M-series 8-core):
+S1-200 clean ALL PASS (RSS **1675 MB**, 0 freezes, light p95 **83 ms**,
+`errors_n` live at 3, `remaining` → 0); S3-200 hostile ALL PASS
+(canary 10/10, zero 5xx subtree losses); S10-200 memory-pressure ALL
+PASS (guard paused, resumed, completed); S3-1000 hostile ALL PASS
+(2131 s wall for ~183 injected 429/5xx/403 faults, RSS **1656 MB**,
+canary **10/10**, 0 freeze events); S4-1000 refresh ALL PASS (refresh
+22 s ≈ fetch-only, RSS 2243 MB). Golden set with the real BGE-M3 +
+reranker + BM25 stack: **64/64** recall/grounding tests green.
+
 ## Maintainers: publishing (gated)
 
 Every release goes through `.github/workflows/publish-pypi.yml`:
