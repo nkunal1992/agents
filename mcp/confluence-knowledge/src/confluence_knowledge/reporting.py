@@ -27,16 +27,14 @@ def pulse(progress: dict[str, Any], rss_mb: float | None = None) -> str:
     seen = progress.get("pages_seen") or 0
     remaining = progress.get("remaining") or 0
     total = max(done, seen) + remaining
-    parts = [str(phase), f"{done}/~{total} pages"]
+    parts = [str(phase), f"{done} of ~{total} pages"]
     rate = progress.get("rate_ppm")
     if rate:
-        parts.append(f"{rate} ppm")
-    if rss_mb is not None:
-        parts.append(f"{int(rss_mb)} MB RSS")
+        parts.append(f"~{rate}/min")
     errs = progress.get("errors_n") or 0
     if errs:
-        parts.append(f"{errs} errors")
-    return " | ".join(parts)
+        parts.append(f"{errs} couldn't be read")
+    return " · ".join(parts)
 
 
 def stages(progress: dict[str, Any]) -> dict[str, Any]:

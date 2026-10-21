@@ -282,8 +282,11 @@ def test_pulse_line_format():
     p = {"phase": "fetching", "pages_done": 120, "pages_seen": 130,
          "remaining": 40, "rate_ppm": 245.5, "errors_n": 2}
     s = pulse(p, rss_mb=1656.4)
-    assert "fetching" in s and "120/~170" in s and "245.5 ppm" in s \
-        and "1656 MB RSS" in s and "2 errors" in s
+    # user-facing line stays jargon-free — ppm/RSS live in the dict for
+    # whoever asks, not in the string the agent relays
+    assert "fetching" in s and "120 of ~170" in s and "~245.5/min" in s \
+        and "RSS" not in s and "ppm" not in s \
+        and "2 couldn't be read" in s
 
 
 def test_stages_math():

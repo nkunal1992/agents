@@ -3,7 +3,10 @@ BEFORE persist, masked confirmation, no token in output."""
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from confluence_knowledge import cli
+from confluence_knowledge.settings import SetupError
 
 
 def test_mask_never_full():
@@ -131,8 +134,6 @@ def test_register_clipboard_credential_empty_clipboard(tmp_path,
                                                      monkeypatch):
     monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(tmp_path / "wd"))
     monkeypatch.setattr(cli, "_clipboard", lambda: "   ")
-    import pytest
-    from confluence_knowledge.settings import SetupError
     with pytest.raises(SetupError, match="clipboard is empty"):
         cli.register_clipboard_credential("cloud", "https://x.atlassian.net",
                                         "a@b.c")
@@ -153,8 +154,7 @@ def test_register_token_tool_never_persists_bad_token(tmp_path,
     monkeypatch.setattr(cli, "make_client", lambda *a, **k: Boom())
     monkeypatch.setattr(cli.SiteProfile, "save", lambda *a, **k: None)
 
-    import pytest
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         cli.register_clipboard_credential(
             "cloud", "https://x.atlassian.net", "a@b.c")
     assert stored == []
