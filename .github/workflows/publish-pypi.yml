@@ -247,21 +247,27 @@ jobs:
         run: |
           WHEEL="$(pwd -W 2>/dev/null || pwd)/dist/$(ls dist | grep '\.whl$')"
           SPEC=$(python - <<'PY'
-          import json, os, urllib.request
+          import json, os, re, urllib.request
           from packaging.specifiers import SpecifierSet
           from packaging.version import Version
           svc, eng = os.environ["SVC"], os.environ["ENGINE_VER"]
           d = json.load(urllib.request.urlopen(
               f"https://pypi.org/pypi/{svc}/json"))
           pub = d["info"]["version"]
-          req = next((r for r in (d["info"].get("requires_dist") or [])
-                      if r.startswith("confluence-knowledge")), "")
-          spec = req.split(";")[0].split("]")[-1][len("confluence-knowledge"):]
-          if SpecifierSet(spec or "").contains(Version(eng),
-                                               prereleases=True):
-              print(f"{svc}[models]=={pub}")
-          else:
-              print("")
+          reqs = [r for r in (d["info"].get("requires_dist") or [])
+                  if r.startswith("confluence-knowledge")]
+          # the e2e installs svc[models] — judge the models-extra pin (or
+          # the bare requirement when there is none)
+          req = next((r for r in reqs if 'extra == "models"' in r),
+                     reqs[0] if reqs else "")
+          m = re.match(r"confluence-knowledge(?:\[[^\]]*\])?\s*"
+                       r"([<>=!~][^;]*)", req.split(";")[0])
+          spec = m.group(1).strip() if m else ""
+          # no requirement → nothing to test; bare name (no spec) →
+          # admits everything; constrained → iff the pin admits the build
+          admits = bool(req) and (not spec or SpecifierSet(spec).contains(
+              Version(eng), prereleases=True))
+          print(f"{svc}[models]=={pub}" if admits else "")
           PY
           )
           if [ -z "$SPEC" ]; then
