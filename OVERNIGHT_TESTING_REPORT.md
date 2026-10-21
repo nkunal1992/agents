@@ -20,3 +20,5 @@ Started: 2026-10-21 ~22:30 local.
 | 22:50 | Phase 2 | sessions so far | green: fresh-onboarding, wrong-env-token, corrupt-index, auth-expiry, server-flap, two-windows, server-kill-midcall, cancel-refresh, latency-floor, hostile-crawl |
 | 22:52 | Phase 2c | tool-contract tests + coverage manifest | 9 contracts + 3 manifest gates pass; session scripts data-driven |
 | 22:30 | Phase 4 | sharepoint-knowledge 0.7.0 | **PUBLISHED** (PyPI verified) |
+| 23:00 | Phase 2 | remaining sessions | public-corpus (246 real Kafka pages green), wrong-answer-feedback, refresh-crawl — **14/14 session scripts green** |
+| 23:00 | Phase 2 | session fixes | kill_server exit-order (session.__aexit__ before stack) cured teardown noise; confluence_down server_close() freed the port; numeric root for public corpus |
