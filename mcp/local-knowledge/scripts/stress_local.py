@@ -66,13 +66,15 @@ while True:
 """
 
 _BALLAST_CODE = """
-import sys, time
+import os, sys, time
 from pathlib import Path
 target_mb, stop = int(sys.argv[1]), Path(sys.argv[2])
 chunks = []
 try:
+    # os.urandom — incompressible pages; zeroed bytearrays compress to
+    # nothing under macOS memory compression and apply no real pressure
     for _ in range(target_mb // 64):
-        chunks.append(bytearray(64 * 1024 * 1024))
+        chunks.append(os.urandom(64 * 1024 * 1024))
         time.sleep(0.05)
     while not stop.exists():
         time.sleep(0.2)
@@ -337,6 +339,13 @@ class Ctx:
                 name, args or {},
                 read_timeout_seconds=timedelta(seconds=timeout))
         except Exception as e:
+            # transport errors must still be logged — a silently dropped
+            # call is indistinguishable from a successful empty result
+            self.calls.append({"t": time.time(), "tool": name,
+                               "s": round(time.monotonic() - t, 3),
+                               "freeze": False,
+                               "during_crawl": self.crawl_active,
+                               "error": f"transport: {type(e).__name__}: {e}"})
             if self.dead_transport_ok:
                 return {"_error": f"transport: {e}"}
             raise
@@ -718,8 +727,8 @@ async def s_kill(ctx: Ctx) -> dict:
         ctx.notes.append(f"post-kill crawl_step: {p.get('state')} "
                          f"worker={p.get('worker')}")
         res = await ctx.run_crawl()
+        await ctx.canary_check(ctx.tree["canaries"])
     ctx.extra["wall_s"] = res["wall_s"]
-    await ctx.canary_check(ctx.tree["canaries"])
     return {"resumed after kill -9":
             v(res["final"].get("state") == "done")}
 
@@ -792,8 +801,8 @@ async def s_windows(ctx: Ctx) -> dict:
         j2 = await s2.call_tool("start_crawl",
                                 {"scope_handle": handle})
         j2r = json.loads(j2.content[0].text)
-    res = await ctx.run_crawl()
-    ctx.extra["wall_s"] = res["wall_s"]
+    res = await ctx.run_crawl(timeout=900)   # battery-halved crawls can
+    ctx.extra["wall_s"] = res["wall_s"]      # run ~7 min on 800 files
     worker = j2r.get("worker", "self")
     note = j2r.get("note", "")
     return {"second window deferred or joined": v(
