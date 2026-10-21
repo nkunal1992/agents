@@ -530,6 +530,20 @@ def _worker_loop(s: dict, job_id: str) -> None:
         _notify_terminal(idx, job_id)
 
 
+def _resume_worker(s: dict, job_id: str) -> None:
+    """Resume a running job's worker. Direct mode: spawn the local
+    thread as before. Proxy mode: respawn the daemon — its boot pass
+    reclaims orphans; a proxy must never run a write worker itself
+    (safeguard 2)."""
+    if _daemon_on():
+        try:
+            ensure_daemon(_rpc(), "confluence_knowledge.server", index_root())
+        except DaemonUnavailable:
+            pass                       # job stays 'running' — retry
+    else:
+        _ensure_worker(s, job_id)
+
+
 def _ensure_worker(s: dict, job_id: str) -> bool:
     """Start the crawl worker if none is alive — also the resume path after
     the server restarts mid-crawl (the queue is durable, the thread isn't).
@@ -667,7 +681,7 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
             note = LOADING_NOTE
         else:
             note = None
-        _ensure_worker(s, job_id)
+        _resume_worker(s, job_id)
         p = _progress_for(idx, job_id)
         if note:
             p["note"] = note
@@ -695,7 +709,7 @@ def wait_for_crawl(scope_handle: str, job_id: str,
     if job["state"] == "running":
         if not _models_ready.is_set():
             _start_warmup()
-        _ensure_worker(s, job_id)   # resume after a server restart too
+        _resume_worker(s, job_id)   # resume after a server restart too
     wait_s = max(1, min(int(wait_s), 120))
     deadline = time.monotonic() + wait_s
     prev = _progress_for(idx, job_id)

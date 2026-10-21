@@ -456,6 +456,20 @@ def _maybe_auto_reindex(s: dict, idx: Index) -> str | None:
     return "started" if _ensure_worker(s, job_id) else "queued"
 
 
+def _resume_worker(s: dict, job_id: str) -> None:
+    """Resume a running job's worker. Direct mode: spawn the local
+    thread as before. Proxy mode: respawn the daemon — its boot pass
+    reclaims orphans; a proxy must never run a write worker itself
+    (safeguard 2)."""
+    if _daemon_on():
+        try:
+            ensure_daemon(_rpc(), "sharepoint_knowledge.server_sp", index_root())
+        except DaemonUnavailable:
+            pass                       # job stays 'running' — retry
+    else:
+        _ensure_worker(s, job_id)
+
+
 def _ensure_worker(s: dict, job_id: str) -> bool:
     """Start the worker unless another process holds the job's lease —
     exactly one worker per job across IDE windows."""
@@ -588,7 +602,7 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
             note = LOADING_NOTE
         else:
             note = None
-        _ensure_worker(s, job_id)
+        _resume_worker(s, job_id)
         p = _progress_for(idx, job_id)
         if note:
             p["note"] = note
@@ -616,7 +630,7 @@ def wait_for_crawl(scope_handle: str, job_id: str,
     if job["state"] == "running":
         if not _models_ready.is_set():
             _start_warmup()
-        _ensure_worker(s, job_id)
+        _resume_worker(s, job_id)
     wait_s = max(1, min(int(wait_s), 120))
     deadline = time.monotonic() + wait_s
     prev = _progress_for(idx, job_id)
