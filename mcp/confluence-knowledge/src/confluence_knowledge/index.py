@@ -102,6 +102,13 @@ def _batches(ids: list[str], size: int = 5000):
 
 class Index:
     def __init__(self, path: Path):
+        self._path = path
+        # read-only shadow connection: WAL lets a second reader see the
+        # last-committed snapshot without touching the writer's
+        # transaction — light tools (status/crawl_step/evidence) must
+        # never queue behind a publish sweep or a cache rebuild (#188)
+        self._rdb: sqlite3.Connection | None = None
+        self._rlock = threading.RLock()
         path.parent.mkdir(parents=True, exist_ok=True)
         # timeout: retry transient locks (AV scan, second process, WAL
         # checkpoint) instead of failing instantly; check_same_thread: the
@@ -138,6 +145,15 @@ class Index:
                 self._rebuild_term_stats()
                 self.db.commit()
 
+    def _read(self) -> sqlite3.Connection:
+        """Read-only connection for pure queries — WAL snapshot semantics
+        mean a mid-publish read simply sees the previous snapshot."""
+        if self._rdb is None:
+            uri = f"file:{self._path}?mode=ro"
+            self._rdb = sqlite3.connect(uri, uri=True, timeout=5,
+                                        check_same_thread=False)
+        return self._rdb
+
     # ---- jobs ----
     def create_job(self, job_id: str, root_page: str) -> None:
         with self.lock, self.db:
@@ -165,8 +181,8 @@ class Index:
             self.db.commit()
 
     def latest_job(self) -> dict | None:
-        with self.lock:
-            row = self.db.execute(
+        with self._rlock:
+            row = self._read().execute(
                 "SELECT job_id,state,errors FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
         return row and {"job_id": row[0], "state": row[1], "errors": json.loads(row[2])}
 
@@ -178,8 +194,8 @@ class Index:
             self.db.commit()
 
     def meta_get(self, key: str) -> str | None:
-        with self.lock:
-            row = self.db.execute(
+        with self._rlock:
+            row = self._read().execute(
                 "SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return row[0] if row else None
 
@@ -364,12 +380,12 @@ class Index:
         if not chunk_ids:
             return {}
         out = {}
-        with self.lock:
+        with self._rlock:
             step = self._var_batch()
             for off in range(0, len(chunk_ids), step):
                 part = chunk_ids[off:off + step]
                 q = ",".join("?" * len(part))
-                for cid, blob in self.db.execute(
+                for cid, blob in self._read().execute(
                         f"SELECT chunk_id,payload FROM sparse_vectors "
                         f"WHERE chunk_id IN ({q})", part):
                     # layout: int64[n] indices + float32[n] values → n = len/12
@@ -423,9 +439,9 @@ class Index:
         """(term → document frequency, docs-with-sparse-vectors) for BM25 idf.
         Empty stats mean the index predates stats support — callers fall back
         to unweighted tf scoring until the next publish rebuilds them."""
-        with self.lock:
+        with self._rlock:
             raw = self.meta_get("bm25_docs")
-            df = {t: d for t, d in self.db.execute(
+            df = {t: d for t, d in self._read().execute(
                 "SELECT term_id, df FROM term_stats")}
         return df, int(raw) if raw else 0
 
@@ -507,18 +523,18 @@ class Index:
 
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:
-        with self.lock:
+        with self._rlock:
             return {r[0]: {"title": r[1], "url": r[2], "level": r[3],
                            "version": r[4], "fetched_at": r[5]}
-                    for r in self.db.execute(
+                    for r in self._read().execute(
                         "SELECT page_id,title,url,level,version,fetched_at "
                         "FROM pages WHERE active=1")}
 
     def active_chunks(self) -> list[dict]:
-        with self.lock:
+        with self._rlock:
             return [{"chunk_id": r[0], "page_id": r[1], "heading": r[2],
                      "kind": r[3], "ordinal": r[4], "text": r[5]}
-                    for r in self.db.execute(
+                    for r in self._read().execute(
                         "SELECT chunk_id,page_id,heading,kind,ordinal,text "
                         "FROM chunks WHERE active=1")]
 
@@ -527,12 +543,12 @@ class Index:
         if not chunk_ids:
             return []
         out: dict[str, dict] = {}
-        with self.lock:
+        with self._rlock:
             step = self._var_batch()
             for off in range(0, len(chunk_ids), step):
                 part = chunk_ids[off:off + step]
                 q = ",".join("?" * len(part))
-                for r in self.db.execute(
+                for r in self._read().execute(
                         f"SELECT chunk_id,page_id,heading,kind,ordinal,text "
                         f"FROM chunks WHERE chunk_id IN ({q})", part):
                     out[r[0]] = {"chunk_id": r[0], "page_id": r[1],
@@ -542,10 +558,10 @@ class Index:
 
     def page_chunks(self, page_id: str) -> list[dict]:
         """A page's active chunks in ordinal order."""
-        with self.lock:
+        with self._rlock:
             return [{"chunk_id": r[0], "page_id": r[1], "heading": r[2],
                      "kind": r[3], "ordinal": r[4], "text": r[5]}
-                    for r in self.db.execute(
+                    for r in self._read().execute(
                         "SELECT chunk_id,page_id,heading,kind,ordinal,text "
                         "FROM chunks WHERE page_id=? AND active=1 "
                         "ORDER BY ordinal", (page_id,))]
@@ -553,8 +569,8 @@ class Index:
     def live_page_hash(self, page_id: str) -> str | None:
         """content_hash of the page's live row — a re-crawl with the same
         hash can reuse the page's rows instead of re-embedding."""
-        with self.lock:
-            r = self.db.execute(
+        with self._rlock:
+            r = self._read().execute(
                 "SELECT content_hash FROM pages WHERE page_id=? AND active=1",
                 (page_id,)).fetchone()
         return r[0] if r else None
@@ -632,14 +648,19 @@ class Index:
 
     def search_cache(self) -> _SearchCache:
         """Retrieval structures for the current snapshot, rebuilt only
-        when the epoch advanced. Held under self.lock: build cost is a
-        one-time per-snapshot scan (~seconds at 30k chunks) and blocking
-        writers briefly beats serving a torn half-published cache."""
+        when the epoch advanced. The build reads through the WAL read
+        connection OFF the writer lock (#188) — at 10k+ pages the scan
+        is seconds-scale and must not stall status/crawl_step. A publish
+        landing mid-build bumps the epoch; the swap keeps the fresher
+        cache and the next call rebuilds."""
         epoch = self.snapshot_epoch()
         with self.lock:
             if self._cache is not None and self._cache.epoch == epoch:
                 return self._cache
-            self._cache = self._build_search_cache(epoch)
+        c = self._build_search_cache(epoch)
+        with self.lock:
+            if self._cache is None or self._cache.epoch <= epoch:
+                self._cache = c
             return self._cache
 
     def drop_search_cache(self) -> None:
@@ -648,7 +669,7 @@ class Index:
 
     def _build_search_cache(self, epoch: int) -> _SearchCache:
         c = _SearchCache(epoch)
-        rows = self.db.execute(
+        rows = self._read().execute(
             "SELECT chunk_id,page_id FROM chunks WHERE active=1 "
             "ORDER BY rowid").fetchall()
         c.ids = [r[0] for r in rows]
@@ -669,7 +690,7 @@ class Index:
             c.dense = dense.astype(np.float16)
         # inverted sparse index: term → (row indices, weights)
         postings: dict[int, tuple[list[int], list[float]]] = {}
-        for cid, blob in self.db.execute(
+        for cid, blob in self._read().execute(
                 "SELECT s.chunk_id,s.payload FROM sparse_vectors s "
                 "JOIN chunks ch ON ch.chunk_id=s.chunk_id "
                 "WHERE ch.active=1"):
@@ -693,9 +714,9 @@ class Index:
 
     def fts_search(self, query: str, limit: int = 30,
                    active: set[str] | None = None) -> list[tuple[str, float]]:
-        with self.lock:
+        with self._rlock:
             try:
-                rows = self.db.execute(
+                rows = self._read().execute(
                     "SELECT chunk_id, rank FROM chunks_fts WHERE chunks_fts MATCH ? "
                     "ORDER BY rank LIMIT ?",
                     (" OR ".join('"' + w.replace('"', '""') + '"'
@@ -711,12 +732,12 @@ class Index:
         if not chunk_ids:
             return {}
         out = {}
-        with self.lock:
+        with self._rlock:
             step = self._var_batch()
             for off in range(0, len(chunk_ids), step):
                 part = chunk_ids[off:off + step]
                 q = ",".join("?" * len(part))
-                for cid, b in self.db.execute(
+                for cid, b in self._read().execute(
                         f"SELECT chunk_id,vec FROM vectors "
                         f"WHERE chunk_id IN ({q})", part):
                     out[cid] = np.frombuffer(b, dtype=np.float32)
@@ -733,9 +754,10 @@ class Index:
             return False
 
     def stats(self) -> dict:
-        with self.lock:
-            p = self.db.execute("SELECT COUNT(*) FROM pages WHERE active=1").fetchone()[0]
-            c = self.db.execute("SELECT COUNT(*) FROM chunks WHERE active=1").fetchone()[0]
-            snap = self.db.execute(
+        with self._rlock:
+            r = self._read()
+            p = r.execute("SELECT COUNT(*) FROM pages WHERE active=1").fetchone()[0]
+            c = r.execute("SELECT COUNT(*) FROM chunks WHERE active=1").fetchone()[0]
+            snap = r.execute(
                 "SELECT MAX(fetched_at) FROM pages WHERE active=1").fetchone()[0]
             return {"pages": p, "chunks": c, "as_of": snap}

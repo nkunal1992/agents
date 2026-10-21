@@ -1,5 +1,8 @@
 """Index persistence, snapshot publication, FTS, scope isolation."""
 
+import time
+import types
+
 import numpy as np
 
 from confluence_knowledge.extract import Chunk
@@ -52,3 +55,61 @@ def test_job_resume_state(tmp_path):
     job = idx.job("j1")
     assert job["state"] == "running" and job["queue"] == ["page:2"]
     assert "403" in job["errors"][0]
+
+
+def test_reads_never_wait_on_write_lock(tmp_path):
+    """#188: WAL readers must not queue behind a held writer lock —
+    the mid-crawl/publish stalls behind _build_search_cache showed up
+    as >2 s status calls at 10k scale."""
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j", "1")
+    idx.save_job("j", "running", ["a"], [])
+    # writer holds the lock mid-transaction — all pure reads must still
+    # answer fast via the read-only connection
+    with idx.lock:
+        t0 = time.monotonic()
+        idx.job_progress("j")
+        idx.meta_get("embed_model")
+        idx.stats()
+        idx.active_pages()
+        idx.latest_job()
+        idx.snapshot_epoch()
+        idx.term_stats()
+        idx.page_chunks("nope")
+        idx.live_page_hash("nope")
+        idx.fts_search("x")
+        held = time.monotonic() - t0
+    assert held < 2.0
+
+
+def test_search_cache_builds_off_writer_lock(tmp_path, monkeypatch):
+    """#188: a seconds-scale cache build must not hold self.lock."""
+    idx = Index(tmp_path / "s.db")
+    idx.upsert_page({"page_id": "p", "title": "t", "url": "u"},
+                    [types.SimpleNamespace(chunk_id="p:1", heading_path="",
+                                           kind="p", ordinal=0, text="hi")],
+                    None)
+    idx.publish({"p"})
+    held_during_build = []
+
+    real_execute = idx.db.execute
+
+    def probe_lock(*a, **k):
+        held = idx.lock.acquire(blocking=False)
+        held_during_build.append(not held)
+        if held:
+            idx.lock.release()
+        return real_execute(*a, **k)
+
+    # probe inside the build via vectors_for's read-path call site
+    orig_vf = Index.vectors_for
+    def spied(self, ids):
+        held = self.lock.acquire(blocking=False)
+        held_during_build.append(not held)
+        if held:
+            self.lock.release()
+        return orig_vf(self, ids)
+    monkeypatch.setattr(Index, "vectors_for", spied)
+
+    idx.search_cache()
+    assert held_during_build and not any(held_during_build)
