@@ -124,7 +124,7 @@ def _index_checks(index_root: Path) -> list[dict]:
             ok, stale = False, False
         finally:
             if idx is not None:
-                idx.db.close()  # Windows locks the file while a conn is open
+                idx.close()  # Windows locks the file while a conn is open
         out.append({
             "flag": f"index:{scope}", "ok": ok and not stale,
             "detail": ("corrupt — delete the index and re-crawl" if not ok
