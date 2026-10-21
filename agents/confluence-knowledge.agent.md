@@ -254,13 +254,17 @@ wheel path for the install step — everything else is identical.
    "Indexing the subtree in the background — I'll keep you posted."
    Then drive progress with `wait_for_crawl` — it blocks ≤ `wait_s`
    (default 25s, cap 120) and returns early whenever the phase or page
-   count moves. Call it in a loop and relay one concise line per change:
-   `phase` · `pages_done` (of `pages_seen` fetched when they differ) ·
-   `rate_ppm` · `eta_s` (e.g. "embedding — 410 pages, ~6/min, ~2 min
-   left"). During a `fetching`/`starting` phase, `pages_done` may lag —
-   relay `pages_seen` so the crawl never looks stuck. Mention `errors_n`
-   when it moves. Use `crawl_step` only for an instant snapshot between
-   waits.
+   count moves. Call it in a loop and relay one concise line per change.
+   **Report `pulse`, not internals** — the response carries a ready-made
+   human line (`pulse`, e.g. "fetching pages · 410 done · ~6/min · ~2 min
+   left") and a `stages` breakdown; relay those verbatim-ish in plain
+   language. Do NOT surface raw field names or jargon (`pages_done`,
+   `rate_ppm`, `fetch_cap`, `worker`, `errors_n`) — translate: "still
+   downloading pages, 800 found so far" not "phase=fetching
+   pages_seen=800". Only on user request (e.g. "show me technical
+   details") relay the underlying fields. Mention errors as "N pages
+   couldn't be read", not `errors_n`. Use `crawl_step` only for an
+   instant snapshot between waits.
    - `note: loading local models` or `phase: starting` → the crawl is
      queued while models warm — keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — the crawl

@@ -66,8 +66,10 @@ def test_agent_covers_crawl_awareness():
     doc = AGENT.read_text()
     for token in ("wait_for_crawl", "cancel_crawl", "cancelled",
                   "last_crawl", "notification", "another server process", "the knowledge daemon",
-                  "paused: low memory", "eta_s", "battery saver"):
+                  "paused: low memory", "pulse", "battery saver"):
         assert token in doc, f"agent missing crawl-awareness token: {token}"
+    # user-facing reporting stays plain — internals are for debugging
+    assert "Report `pulse`, not internals" in doc
 
 
 def test_agent_passes_evidence_set_to_verify():
