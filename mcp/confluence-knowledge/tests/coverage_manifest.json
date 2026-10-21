@@ -13,7 +13,6 @@
     "verify_citations",
     "submit_feedback",
     "feedback_report",
-    "refresh_crawl",
     "configure",
     "check_health"
   ],
@@ -98,7 +97,7 @@
       "crawl_step"
     ],
     "refresh-crawl": [
-      "refresh_crawl",
+      "start_crawl",
       "crawl_step",
       "search"
     ]

@@ -1,24 +1,66 @@
 {
   "name": "public-corpus",
   "corpus": "../../tests/fixtures/public_corpus.json",
-  "env": {"FAKE_DC_DELAY": "0.02"},
+  "env": {
+    "FAKE_DC_DELAY": "0.02"
+  },
   "steps": [
-    {"verb": "spawn_server"},
-    {"verb": "set_clipboard", "text": "{token}"},
-    {"verb": "call", "tool": "register_token",
-     "args": {"site": "{base}", "env": "datacenter"}, "timeout": 90,
-     "expect": {"configured": true}},
-    {"verb": "call", "tool": "connect",
-     "args": {"root": "{base}/pages/viewpage.action?pageId=ROOT"},
-     "save": {"scope": "scope_handle"}},
-    {"verb": "call", "tool": "start_crawl",
-     "args": {"scope_handle": "{scope}"}, "save": {"job": "job_id"}},
-    {"verb": "wait_crawl", "scope": "{scope}", "job": "{job}",
-     "timeout_s": 300},
-    {"verb": "call", "tool": "search",
-     "args": {"scope_handle": "{scope}",
-      "question": "what is the bootstrap server configuration"},
-     "expect_len": {"evidence": 1},
-     "note": "a real Kafka-docs question must rank real content"}
+    {
+      "verb": "spawn_server"
+    },
+    {
+      "verb": "set_clipboard",
+      "text": "{token}"
+    },
+    {
+      "verb": "call",
+      "tool": "register_token",
+      "args": {
+        "site": "{base}",
+        "env": "datacenter"
+      },
+      "timeout": 90,
+      "expect": {
+        "configured": true
+      }
+    },
+    {
+      "verb": "call",
+      "tool": "connect",
+      "args": {
+        "root": "{base}/pages/viewpage.action?pageId=27821303"
+      },
+      "save": {
+        "scope": "scope_handle"
+      }
+    },
+    {
+      "verb": "call",
+      "tool": "start_crawl",
+      "args": {
+        "scope_handle": "{scope}"
+      },
+      "save": {
+        "job": "job_id"
+      }
+    },
+    {
+      "verb": "wait_crawl",
+      "scope": "{scope}",
+      "job": "{job}",
+      "timeout_s": 300
+    },
+    {
+      "verb": "call",
+      "tool": "search",
+      "args": {
+        "scope_handle": "{scope}",
+        "question": "what is the bootstrap server configuration"
+      },
+      "expect_len": {
+        "evidence": 1
+      },
+      "note": "a real Kafka-docs question must rank real content"
+    }
   ]
 }
