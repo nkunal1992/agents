@@ -833,6 +833,15 @@ def feedback_report(scope_handle: str) -> dict:
 @tool(mcp)
 def verify_citations(scope_handle: str, evidence_set: str,
                      mappings: list[dict]) -> dict:
+    # evidence sets live in whichever process ran `search` — under the
+    # daemon that's the daemon, so this must route there (the proxy's
+    # _evidence_sets is empty → "unknown evidence set" on every call)
+    out = _daemon_call("verify_citations",
+                       {"scope_handle": scope_handle,
+                        "evidence_set": evidence_set,
+                        "mappings": mappings}, 60)
+    if out is not None:
+        return out
     s = _scope(scope_handle)
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)

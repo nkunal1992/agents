@@ -177,3 +177,17 @@ def test_reconnect_after_crawl_sees_cache(wired):
     again = server.connect("1")
     assert again["cached"] is True
     assert again["cached_pages"] == 1
+
+
+def test_verify_citations_routes_to_daemon(monkeypatch, wired):
+    """Evidence sets are process-local — under daemon mode `search`
+    populates the DAEMON's registry, so verify must route there first.
+    (#196 residual — proxy's _evidence_sets is always empty.)"""
+    seen = {}
+    monkeypatch.setattr(
+        server, "_daemon_call",
+        lambda name, args, timeout: (
+            seen.update(name=name, args=args) or {"ok": True}))
+    out = server.verify_citations("scope:x", "set:1", [])
+    assert seen["name"] == "verify_citations"
+    assert out == {"ok": True}            # daemon answered — no local check
