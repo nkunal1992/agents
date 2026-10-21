@@ -36,6 +36,12 @@ from confluence_knowledge.retrieval import (
     check_citations,
     retrieve,
 )
+from confluence_knowledge.rpc import (
+    DaemonUnavailable,
+    RpcDb,
+    daemon_enabled,
+    ensure_daemon,
+)
 from confluence_knowledge.settings import SetupError
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -68,13 +74,18 @@ LOADING_NOTE = "loading local models — call this tool again"
 EVIDENCE_CHAR_CAP = 12000  # payload cap; `truncated` flags longer chunks
 
 
-def _index_for(scope_key: str) -> Index:
-    idx = _indexes.get(scope_key)
+def _index_for(scope_key: str, *, for_write: bool = False) -> Index:
+    """In proxy mode the index opens read-only — writes are physically
+    impossible from the proxy process (#189 safeguard)."""
+    ro = _daemon_on() and not for_write
+    cache_key = (scope_key, ro)
+    idx = _indexes.get(cache_key)
     if idx is None:
         with _state_lock:
-            idx = _indexes.get(scope_key)
+            idx = _indexes.get(cache_key)
             if idx is None:
-                idx = _indexes[scope_key] = Index(index_root() / f"{scope_key}.db")
+                idx = _indexes[cache_key] = Index(
+                    index_root() / f"{scope_key}.db", readonly=ro)
     return idx
 
 def _feedback_for(scope_key: str) -> FeedbackStore:
@@ -223,7 +234,9 @@ def status() -> dict:
     root = index_root()
     last = None
     try:
-        cands = sorted(root.glob("*.db"), key=lambda p: -p.stat().st_mtime)
+        cands = sorted((x for x in root.glob("*.db")
+                        if x.name != "rpc.db"),
+                       key=lambda p: -p.stat().st_mtime)
         if cands:
             last = _last_crawl(_index_for(cands[0].stem))
     except Exception:  # noqa: BLE001 — status must never fail on this
@@ -235,6 +248,8 @@ def status() -> dict:
         "models_loaded": _models_ready.is_set() and
         (_EMBEDDER is not None or _pool.is_loaded()),
         "index_root": str(root),
+        "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
+                   else "off" if not _daemon_on() else "starting"),
         "live_scopes": sorted(_scopes),
         "last_crawl": last,
     }
@@ -244,6 +259,16 @@ def status() -> dict:
 def connect(root: str) -> dict:
     """Bind a scope to a SharePoint URL — a site (pages + all libraries),
     or a library/folder path inside it. One root per connect."""
+    out = _daemon_call("connect", {"root": root}, 120)
+    if out is not None:
+        h = out.get("scope_handle")
+        if h and h.startswith("scope:"):
+            _, key, entry = h.split(":", 2)
+            with _state_lock:
+                _scopes[h] = {"key": key, "root_entry": entry,
+                              "site_web": out.get("site"),
+                              "client": None}
+        return out
     profile = SPProfile.load()
     cli = _client_for(profile.site_url)
     if root.startswith(("site:", "item:", "drive:", "list:", "page:")):
@@ -259,7 +284,8 @@ def connect(root: str) -> dict:
     except AccessError:
         principal = profile.client_id
     scope_key = profile.scope_key(principal, root_entry)
-    idx = _index_for(scope_key)
+    idx = _index_for(scope_key, for_write=True)
+    idx.meta_set("root_entry", root_entry)   # daemon orphan resume (#189)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root}"
     with _state_lock:
@@ -316,8 +342,67 @@ def _notify_terminal(idx: Index, job_id: str) -> None:
     notify(f"{label} — sharepoint-knowledge", body)
 
 
+_RPC: RpcDb | None = None
+
+
+def _daemon_on() -> bool:
+    """Proxy mode (#189): opt-in via SP_KNOWLEDGE_DAEMON=1."""
+    return daemon_enabled("SP_KNOWLEDGE_DAEMON")
+
+
+def _rpc() -> RpcDb:
+    global _RPC
+    if _RPC is None:
+        _RPC = RpcDb(index_root() / "rpc.db")
+    return _RPC
+
+
+def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
+    """Submit to the daemon and wait on the response row. None = the
+    daemon is unreachable — caller falls back to running locally."""
+    if not _daemon_on():
+        return None
+    try:
+        rpc = _rpc()
+        ensure_daemon(rpc, "sharepoint_knowledge.server_sp", index_root())
+        rid = rpc.submit(name, args, timeout)
+        return rpc.wait(rid, timeout,
+                        on_tick=lambda: heartbeat(
+                            0, message=f"daemon {name}"))
+    except DaemonUnavailable:
+        return None
+    except RuntimeError as e:
+        return {"_error": str(e)}
+
+
+def _resume_job(scope_key: str, job_id: str) -> None:
+    """Daemon-side hook: rebuild a crawler for a job orphaned by a
+    daemon restart — root_entry persists in index meta (#189)."""
+    idx = _index_for(scope_key, for_write=True)
+    root_entry = idx.meta_get("root_entry")
+    if not root_entry:
+        return
+    profile = SPProfile.load()
+    s = {"key": scope_key, "root_entry": root_entry,
+         "site_web": profile.site_url,
+         "client": _client_for(profile.site_url)}
+    t = threading.Thread(target=_worker_loop, args=(s, job_id),
+                         daemon=True, name=f"crawl-{job_id}")
+    _workers[job_id] = t
+    t.start()
+
+
+def _owner_label(idx, job_id: str) -> str:
+    """Lease-holder label — 'the knowledge daemon' or 'another server
+    process' (#186 wording; #189 marks daemon owners explicitly)."""
+    try:
+        from confluence_knowledge.rpc import lease_label
+        return lease_label(idx.lease_owner(job_id))
+    except Exception:                       # noqa: BLE001 — label is
+        return "another server process"     # cosmetic, never block
+
 def _worker_loop(s: dict, job_id: str) -> None:
-    idx = _index_for(s["key"])
+    idx = _index_for(s["key"], for_write=True)
     try:
         _start_warmup()
         _models_ready.wait()
@@ -372,10 +457,10 @@ def _ensure_worker(s: dict, job_id: str) -> bool:
         t = _workers.get(key)
         if t is not None and t.is_alive():
             return True
-        idx = _index_for(s["key"])
+        idx = _index_for(s["key"], for_write=True)
         if not idx.acquire_lease(job_id, _owner.value, _owner.pid):
             prog = _progress.setdefault(job_id, Progress())
-            prog.worker = "another IDE window"
+            prog.worker = _owner_label(_index_for(s["key"]), job_id)
             return False
         prog = _progress.setdefault(job_id, Progress())
         prog.worker = "self"
@@ -399,6 +484,9 @@ def _progress_for(idx: Index, job_id: str) -> dict:
         other = Progress.from_blob(blob) if blob else None
         if other is not None:
             p.update(other.snapshot())
+            # name the real lease holder — 'the knowledge daemon' when
+            # the brain owns it (#186/#189), not a generic label
+            p["worker"] = _owner_label(idx, job_id)
     if live is not None and live.worker != "self":
         p["worker"] = live.worker
     warns = idx.meta_get(f"warns:{job_id}")
@@ -448,6 +536,11 @@ def _last_crawl(idx: Index) -> dict | None:
 @tool(mcp)
 def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
     """Begin indexing the root in the background (Site Pages + libraries)."""
+    out = _daemon_call("start_crawl", {"scope_handle": scope_handle,
+                                       "refresh": refresh}, 60)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     c = SPCrawler(s["client"], idx)
@@ -456,8 +549,8 @@ def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
     _progress[job_id] = Progress()
     if not _ensure_worker(s, job_id):
         return {"job_id": job_id, "state": "running",
-                "worker": "another IDE window",
-                "note": "crawl runs in another IDE window — crawl_step to poll"}
+                "worker": _owner_label(_index_for(s["key"]), job_id),
+                "note": "crawl runs under another process — crawl_step to poll"}
     return {"job_id": job_id, "state": "running",
             "note": "crawl runs in the background — call crawl_step to poll"}
 
@@ -533,6 +626,11 @@ def cancel_crawl(scope_handle: str, job_id: str) -> dict:
     """Stop a running crawl within seconds and mark the job cancelled — it
     never auto-resumes. The previously published snapshot is kept intact;
     start_crawl re-runs (unchanged items are reused)."""
+    out = _daemon_call("cancel_crawl", {"scope_handle": scope_handle,
+                                        "job_id": job_id}, 30)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     job = idx.job(job_id)
@@ -565,6 +663,11 @@ def _coverage(idx: Index) -> str:
 @tool(mcp, heavy=True)
 def search(scope_handle: str, question: str) -> dict:
     """Hybrid retrieve + local rerank; returns bounded, cited evidence."""
+    out = _daemon_call("search", {"scope_handle": scope_handle,
+                                  "question": question}, 90)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
     st = idx.stats()
@@ -651,6 +754,12 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
     """Store a saved correction — disclosed alongside the docs on
     similar future questions (never overrides them)."""
+    out = _daemon_call("submit_feedback",
+                       {"scope_handle": scope_handle, "question": question,
+                        "correction": correction, "note": note}, 30)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     if not _models_loaded(0):
         return {"stored": False, "note": LOADING_NOTE}
@@ -664,6 +773,10 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
 def feedback_report(scope_handle: str) -> dict:
     """Aggregated corrections — the agent infers which doc keeps
     getting corrected and suggests it to the user."""
+    out = _daemon_call("feedback_report", {"scope_handle": scope_handle}, 30)
+    if out is not None:
+        return out
+
     s = _scope(scope_handle)
     return _feedback_for(s["key"]).report()
 

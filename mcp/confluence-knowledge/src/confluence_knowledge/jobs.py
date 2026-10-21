@@ -25,12 +25,16 @@ class CrawlCancelled(Exception):
 
 
 class LeaseOwner:
-    """This process's identity in `job_lease.owner` — hostname:pid:nonce."""
+    """This process's identity in `job_lease.owner` — hostname:pid:nonce.
+    Inside the daemon (#189) the 'daemon:' prefix lets the proxy label the
+    holder honestly as the brain rather than 'another IDE window'."""
 
     def __init__(self) -> None:
         self.host = socket.gethostname()
         self.pid = os.getpid()
-        self.value = f"{self.host}:{self.pid}:{uuid.uuid4().hex[:6]}"
+        prefix = "daemon:" if os.environ.get("KNOWLEDGE_DAEMON_ROLE") else ""
+        self.value = (f"{prefix}{self.host}:{self.pid}:"
+                      f"{uuid.uuid4().hex[:6]}")
 
 
 @dataclass
@@ -45,7 +49,7 @@ class Progress:
     errors_n: int = 0
     phase: str = "starting"
     rate_ppm: float = 0.0          # EWMA of pages/minute
-    worker: str = "self"           # or "another IDE window"
+    worker: str = "self"           # or a lease-holder label
     fetch_cap: int = 0    # current adaptive submission cap (#179)
     updated_at: float = field(default_factory=time.time)
     _win_n: int = 0
@@ -94,7 +98,7 @@ class Progress:
             p.errors_n = int(d.get("errors_n", 0))
             p.phase = str(d.get("phase", "running"))
             p.rate_ppm = float(d.get("rate_ppm") or 0.0)
-            p.worker = "another IDE window"
+            p.worker = "another server process"
             p.fetch_cap = int(d.get("fetch_cap", 0))
             p.started_at = float(d.get("started_at", time.time()))
             p.updated_at = float(d.get("updated_at", time.time()))

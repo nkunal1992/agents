@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,7 +51,9 @@ class LocalProfile:
     def save(self) -> Path:
         p = home() / PROFILE_NAME
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
+        tmp = p.with_suffix(f".tmp.{uuid.uuid4().hex[:8]}")   # per-call —
+        # concurrent writers (daemon pool threads / proxy) must never
+        # share a tmp name (#189)
         tmp.write_text(json.dumps({
             "root_path": self.root_path, "device": self.device,
         }, indent=2))

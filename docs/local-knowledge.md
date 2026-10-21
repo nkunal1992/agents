@@ -84,6 +84,7 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `KNOWLEDGE_FETCH_CONCURRENCY` / `KNOWLEDGE_FETCH_MAX` | fetch workers (6) / adaptive ceiling — default 0 caps the window at the base; the window halves under CPU ≥75 % and bottoms at 1 over ≥90 % (`fetch_cap` in progress) |
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
+| `LOCAL_KNOWLEDGE_DAEMON` | `1` enables the proxy-daemon architecture (#189): a long-lived background daemon owns the index/crawls/models; the per-window MCP server is a thin read-only proxy. IDE restarts no longer interrupt crawls — the daemon survives and a new window reattaches. Off by default in this release — engine + IDEKILL stress coverage exist; flip it on to field-test. |
 
 ### Three-tier reporting
 

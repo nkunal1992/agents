@@ -7,7 +7,7 @@ def test_account_change_must_not_reuse_scope(tmp_path, monkeypatch):
     idx = Index(tmp_path / "scope.db")
     profile = SPProfile("tenant", "app", "https://audit.sharepoint.com/sites/team", "ref")
     monkeypatch.setattr(server_sp.SPProfile, "load", lambda: profile)
-    monkeypatch.setattr(server_sp, "_index_for", lambda key: idx)
+    monkeypatch.setattr(server_sp, "_index_for", lambda key, **_kw: idx)
     monkeypatch.setattr(server_sp, "_start_warmup", lambda: None)
     monkeypatch.setattr(server_sp, "_scopes", {})
     account = ["alice"]

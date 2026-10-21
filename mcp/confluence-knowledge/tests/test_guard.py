@@ -114,4 +114,4 @@ def test_progress_rate_and_snapshot(tmp_path):
     assert snap["elapsed_s"] == 29
     back = Progress.from_blob(__import__("json").dumps(snap))
     assert back is not None and back.pages_done == 30
-    assert back.worker == "another IDE window"
+    assert back.worker == "another server process"
