@@ -1,10 +1,7 @@
 """#191: zero-friction onboarding — clipboard seamless path, heartbeat
 BEFORE persist, masked confirmation, no token in output."""
 
-import sys
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from confluence_knowledge import cli
 
@@ -73,7 +70,7 @@ def test_bad_token_persists_nothing(monkeypatch, tmp_path, capsys):
                         lambda *a, **k: stored.append(1) or "keyring")
 
     def boom(*a, **k):
-        raise Exception("401 Unauthorized")
+        raise RuntimeError("401 Unauthorized")
     monkeypatch.setattr(cli, "make_client", boom)
     args = MagicMock(env="cloud", site="https://x.atlassian.net",
                      email="a@b.c", from_clipboard=True,
