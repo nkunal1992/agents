@@ -105,6 +105,10 @@
       "search",
       "crawl_step",
       "verify_citations"
+    ],
+    "transient-faults": [
+      "start_crawl",
+      "crawl_step"
     ]
   },
   "stress_scenarios": [
