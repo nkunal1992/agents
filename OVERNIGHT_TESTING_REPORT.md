@@ -42,3 +42,13 @@ Started: 2026-10-21 ~22:30 local.
 | 02:55 | Phase 2 | full 15-session sweep on final tree | **15/15 green** — onboarding, bad clipboard, wrong-env, corrupt/busy index, auth expiry, server flap, two windows, server kill, cancel/refresh, latency, public corpus (246 real pages), hostile corpus (223 pages), feedback loop, concurrent burst |
 | 02:55 | Phase 2 | journey e2e on final tree | green — full navigation incl. daemon kill/resume |
 | 03:15 | Phase 4 | verify-published 0.10.1 | all 3 OS legs SUCCESS — installable on ubuntu/macos/windows + local fresh-venv check |
+| 04:00 | — | release train staged | confluence-knowledge 0.10.2 bumped on branch — merges with #205 → tag rc → publish → final |
+
+## Final state (04:00)
+- **Published tonight**: sharepoint-knowledge 0.7.0, confluence-knowledge 0.10.1 (both verify-published 3/3 OS)
+- **PR #203 merged**: verify daemon-routing, register_token, .bak guard, pulse
+- **PR #205 pending CI drain**: work-laptop replica — FakeIDE sessions, hostile corpus, contracts, coverage manifest, all field-found fixes, 0.10.2 bump
+- **Sessions**: 16/16 green ×2 sweeps; journey green on 3 OS in CI
+- **Suite**: 351+59+36 pass; ruff clean
+- **RAG eval**: 100% recall/fact/honesty (real ONNX)
+- **Wheel**: twine PASSED, fresh-venv install + journey green against artifact
