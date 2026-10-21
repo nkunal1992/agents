@@ -22,3 +22,8 @@ Started: 2026-10-21 ~22:30 local.
 | 22:30 | Phase 4 | sharepoint-knowledge 0.7.0 | **PUBLISHED** (PyPI verified) |
 | 23:00 | Phase 2 | remaining sessions | public-corpus (246 real Kafka pages green), wrong-answer-feedback, refresh-crawl — **14/14 session scripts green** |
 | 23:00 | Phase 2 | session fixes | kill_server exit-order (session.__aexit__ before stack) cured teardown noise; confluence_down server_close() freed the port; numeric root for public corpus |
+| 23:30 | Phase 4 | confluence-knowledge 0.10.1rc1 | **published** (rc verified on PyPI) |
+| 23:30 | Phase 4 | tag v0.10.1 re-pointed to main merge cadf21d | final publish queued — gate sees green rc on same commit |
+| 23:45 | Phase 2b | real-model RAG eval | **recall@8 100% (23/23), fact coverage 100%, honesty 100% (4/4 unanswerable), p50 6.4s** — ONNX models, golden set |
+| 23:45 | Phase 3 | wheel build + clean venv | 0.10.1 wheel built, twine PASSED, fresh-venv import ok, **fresh-onboarding session green against the wheel** (no source-tree deps) |
+| 23:40 | Phase 4 | PR #203 | **MERGED** — reliability batch on main |
