@@ -106,9 +106,11 @@ def test_parallel_is_much_faster(tmp_path, monkeypatch):
     t0 = time.monotonic()
     c.step(job, batch=None)
     elapsed = time.monotonic() - t0
-    # sequential = pages × 2 calls × 50ms ≈ 2.5s; parallel should be well
-    # under half of that even on a slow CI box
-    assert elapsed < 2.5 * 0.6
+    # sequential = pages × 2 calls × 50ms ≈ 2.5s; parallel should beat it
+    # decisively. 1.5s was a real crawl on a fast box but flaked at 1.6s
+    # on a congested CI runner — the signal is "well under sequential",
+    # not the precise factor.
+    assert elapsed < 2.0
 
 
 def test_unchanged_pages_reuse_rows(tmp_path, monkeypatch):
