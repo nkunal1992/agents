@@ -125,7 +125,7 @@ def _mini_rag(home: Path) -> dict:
         idx.publish({d["page_id"] for d in MINI_DOCS})
         ev = retrieve(idx, MINI_QUERY, emb, LocalReranker(home),
                       sparse=sparse)
-        idx.db.close()
+        idx.close()
     if not ev:
         return {"stage": "mini_rag", "ok": False, "detail": "no evidence"}
     top = ev[0]

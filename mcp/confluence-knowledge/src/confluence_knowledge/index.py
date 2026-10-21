@@ -145,6 +145,17 @@ class Index:
                 self._rebuild_term_stats()
                 self.db.commit()
 
+    def close(self) -> None:
+        """Release both connections — Windows refuses file deletion while
+        the read conn is still open (e2e cleanup hit WinError 32)."""
+        for conn in (self._rdb, self.db):
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:           # noqa: BLE001,S110 — close
+                    pass                     # is best-effort at teardown
+        self._rdb = None
+
     def _read(self) -> sqlite3.Connection:
         """Read-only connection for pure queries — WAL snapshot semantics
         mean a mid-publish read simply sees the previous snapshot."""
