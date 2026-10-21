@@ -86,6 +86,7 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
 | `KNOWLEDGE_FETCH_CONCURRENCY` / `KNOWLEDGE_FETCH_MAX` | fetch workers (6) / adaptive ceiling — default 0 caps the window at the base; the window halves under CPU ≥75 % and bottoms at 1 over ≥90 % (`fetch_cap` in progress) |
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
+| `SP_KNOWLEDGE_DAEMON` | `0` disables the proxy-daemon architecture (#189/#196) — **on by default**: a detached daemon owns index/crawls/models so IDE restarts don't interrupt work. |
 
 ### Three-tier reporting
 

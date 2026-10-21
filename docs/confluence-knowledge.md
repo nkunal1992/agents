@@ -222,6 +222,11 @@ The server is designed to stay out of the way on a developer laptop:
   `KNOWLEDGE_NO_NICE=1` opts out.
 - `KNOWLEDGE_IDLE_UNLOAD_S` sets the idle timeout in seconds
   (0 disables unloading).
+- **Proxy-daemon** (#189/#196): on by default — `CONF_KNOWLEDGE_DAEMON=0`
+  disables. A detached background daemon owns the index, crawl workers,
+  and model pool; each IDE window's MCP server is a thin read-only
+  proxy. Crawls survive IDE restarts/crashes; a new window attaches to
+  the running job.
 - **Parallel fetching**: page bodies and child listings run on
   `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6, max 16) while
   the submission window breathes with system pressure (`fetch_cap` in

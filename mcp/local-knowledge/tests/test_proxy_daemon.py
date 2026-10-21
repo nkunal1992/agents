@@ -68,6 +68,11 @@ def test_label(rpc):
 
 
 def test_daemon_role_env(monkeypatch):
+    # default-on (#196): no env → enabled; =0 → off; daemon role always off
+    monkeypatch.delenv("LOCAL_KNOWLEDGE_DAEMON", raising=False)
+    assert daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
+    monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "0")
+    assert not daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
     monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "1")
     assert daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
     monkeypatch.setenv("KNOWLEDGE_DAEMON_ROLE", "1")
