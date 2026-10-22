@@ -21,6 +21,7 @@ Gate:   exit 0 only when every run stage is green.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -92,13 +93,22 @@ def cloud_stage(rows: list) -> bool:
                      ("no ~/.config/agents/cloud.env — rerun on a machine "
                      "with the Cloud credential file")))
         return True
-    rc, _out = run([sys.executable,
-                   str(REPO / "mcp" / "confluence-knowledge" / "scripts" /
-                       "e2e_cloud_real.py")],
-                  timeout=3600)
+    # optional scope: CK_E2E_ROOT/CK_E2E_MIN_PAGES pin the crawl to a
+    # subtree — the full 874-page corpus is a multi-hour soak; a ~100-page
+    # subtree proves the journey in ~35 min. Unset → whole corpus.
+    root = os.environ.get("CK_E2E_ROOT")
+    cmd = [sys.executable, str(REPO / "mcp" / "confluence-knowledge" /
+                               "scripts" / "e2e_cloud_real.py")]
+    detail = "real Cloud journey (874-page corpus)"
+    if root:
+        cmd += ["--root-id", root]
+        detail = f"real Cloud journey (scoped subtree {root})"
+    min_p = os.environ.get("CK_E2E_MIN_PAGES")
+    if min_p:
+        cmd += ["--min-pages", min_p]
+    rc, _out = run(cmd, timeout=3600)
     ok = rc == 0
-    rows.append(("cloud:e2e_cloud_real", "PASS" if ok else "FAIL",
-                 "real Cloud journey (874-page corpus)"))
+    rows.append(("cloud:e2e_cloud_real", "PASS" if ok else "FAIL", detail))
     return ok
 
 
