@@ -22,8 +22,12 @@ the per-phase breakdown the daemon now records:
                battery; plug in for ~2x
 
 Interpretation cheat-sheet:
-  embed ≫ others → CPU-bound: expected on dense pages; plugging in +
-  closing heavy apps helps. wait/fetch high → network-bound: corporate
+  embed ≫ others → CPU-bound: expected on dense pages. On a
+  roomy machine (≥16 GB, ≥8 cores) these env knobs typically buy 2-4x:
+  KNOWLEDGE_MAX_BATCH=16  (chunks per ONNX call — default 4)
+  KNOWLEDGE_THREADS=8     (ONNX intra-op threads — default cores/4)
+  KNOWLEDGE_BATTERY_SAVER=0 (opt out of the 50% duty cycle on battery)
+  wait/fetch high → network-bound: corporate
   proxy/VPN/DC latency; concurrency already adapts. store high → disk.
 
 Needs a configured profile (`confluence-knowledge setup` or the env-var

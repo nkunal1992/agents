@@ -33,6 +33,7 @@ MANIFEST = Path.home() / ".config/agents/seed_manifest.json"
 SPACE_DEFAULT = "E2E"
 PAUSE_S = 0.35          # polite pacing on the free tier
 CANARY = "CONFLUENCE_CANARY_FACT_4482"
+WAVE2_CANARY = "WAVE2_CANARY_7711"
 
 random.seed(20251022)
 
@@ -310,8 +311,57 @@ def rich_corpus() -> list[dict]:
     return T
 
 
-def corpus() -> list[dict]:
-    return rich_corpus()
+def wave2_corpus() -> list[dict]:
+    """+~400 pages, fatter than wave 1 — giant config matrices, deep
+    expand trees, wide children groups. Wave-2 canary lives on the
+    anchor spec page."""
+    T = []
+
+    def add(title, parent, body):
+        T.append({"title": title, "parent": parent, "body": body})
+
+    anchor_parent = "Extended Corpus"
+    add(anchor_parent, "Engineering Knowledge Base", prose(
+        "Extended Corpus", "the extended corpus", [
+            ("Second-wave corpus — deeper, denser pages exercising the "
+            "crawler at enterprise scale."),
+            ("Each section below holds long-form specifications with "
+            "large tables, macros and deep expand trees.")]))
+
+    add("Extended Spec — Audit Record", anchor_parent, prose(
+        "Extended Spec — Audit Record", "the extended audit record", [
+            (f"The wave-2 audit codeword is {WAVE2_CANARY} — verify it "
+            "appears in the audit log within the same release cycle."),
+            ("Long records below reproduce the density of a real audit "
+            "evidence page.")]))
+    # the anchor spec gets a genuinely giant body (200+ chunks)
+    T[-1]["body"] = long_dense_body("Extended Audit Record", 16) + \
+        macro("info", f"Audit codeword: {WAVE2_CANARY}")
+
+    # 8 deep-dive sections × ~50 pages, heavier long-page share (~40%)
+    sections = ["Reliability Engineering", "Platform Internals",
+                "Delivery Process", "Data Platform",
+                "Developer Tooling", "Quality Engineering",
+                "Service Operations", "Enterprise Integrations"]
+    for s in sections:
+        add(s, anchor_parent, prose(s, f"the {s.lower()} area", [
+            (f"Extended {s.lower()} documentation — long-form "
+            "specifications and runbook archives.")]))
+        for i in range(25):          # 20 long + 20 medium + 10 short
+            topic = f"{s} Spec {i + 1}"
+            add(topic, s, long_dense_body(topic, sections=12 + i % 6))
+        for i in range(20):
+            topic = f"{s} Runbook {i + 1}"
+            add(topic, s, medium_body(topic, sections=6 + i % 4))
+        for i in range(5):
+            add(f"{s} Note {i + 1}", s, short_body(
+                f"{s.lower()} note {i + 1}"))
+    print(f"wave-2 corpus spec: {len(T)} pages")
+    return T
+
+
+def corpus(wave: int = 1) -> list[dict]:
+    return wave2_corpus() if wave == 2 else rich_corpus()
 
 
 def find_by_title(env, space_key: str, title: str):
@@ -359,7 +409,8 @@ def main() -> int:
 
     # create parents first — spec order guarantees that
     import hashlib
-    tree = corpus()
+    wave = 2 if "--wave2" in sys.argv else 1
+    tree = corpus(wave)
     id_of = {t: m["id"] for t, m in manifest.items()}
     created = skipped = updated = 0
     for spec in tree:

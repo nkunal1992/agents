@@ -9,6 +9,7 @@ memory released when idle. KNOWLEDGE_* env vars override every bound.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 
 
@@ -21,9 +22,74 @@ def _int_env(name: str, default: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
 
 
+def _battery_active() -> bool:
+    """On battery right now — module twin of Limits.on_battery so the
+    defaults below can read it before a Limits instance exists."""
+    if _psutil is None:
+        return False
+    forced = os.environ.get("KNOWLEDGE_FORCE_BATTERY")
+    if forced is not None:
+        return forced == "1"
+    try:
+        b = _psutil.sensors_battery()
+        return b is not None and b.power_plugged is False
+    except Exception:  # noqa: BLE001 — desktops have no battery sensor
+        return False
+
+
+_CPU_SAMPLE_S = 2.0
+_cpu_cache: list = [0.0, 50.0]   # [monotonic_ts, last_pct]
+
+
+def _cpu_pct() -> float:
+    """System-wide CPU utilisation — 2 s-cached so limits() stays cheap
+    when embed() calls it per micro-batch."""
+    now = time.monotonic()
+    ts, pct = _cpu_cache
+    if now - ts < _CPU_SAMPLE_S:
+        return pct
+    try:
+        pct = float(_psutil.cpu_percent(interval=None)) \
+            if _psutil is not None else 50.0
+    except Exception:  # noqa: BLE001 — no sensor → assume mid-band
+        pct = 50.0
+    _cpu_cache[:] = (now, pct)
+    return pct
+
+
+def _avail_mb() -> float:
+    """RAM actually free for embeddings — psutil's `available` accounts
+    for cache/buffers, so it tracks real headroom, not just `free`."""
+    try:
+        return _psutil.virtual_memory().available / 1048576 \
+            if _psutil is not None else 4096.0
+    except Exception:  # noqa: BLE001 — can't measure → assume mid-size
+        return 4096.0
+
+
+def _pressured() -> bool:
+    """Machine busy or on battery → run at half-size; stays the polite
+    background service even on a big workstation."""
+    return _battery_active() or _cpu_pct() > 70
+
+
 def _default_threads() -> int:
-    # ~a quarter of the cores, capped — the IDE and the OS keep the rest
-    return max(1, min(4, (os.cpu_count() or 4) // 4))
+    # ~half the cores, capped — sized per machine at session build.
+    # A 20-core/32GB workstation gets 10, a 4-core laptop 2; halved when
+    # the machine is already busy or on battery. KNOWLEDGE_THREADS wins.
+    t = max(2, min(10, (os.cpu_count() or 4) // 2))
+    return max(2, t // 2) if _pressured() else t
+
+
+def _default_max_batch() -> int:
+    # Chunks per ONNX micro-batch — memory-driven: each item at ~512
+    # tokens carries ~a few tens of MB of activations, so scale to the
+    # RAM that's actually free. Halved under pressure. KNOWLEDGE_MAX_
+    # BATCH wins. batch_tokens still clamps every run.
+    avail = _avail_mb()
+    b = (4 if avail < 2048 else 8 if avail < 8192
+         else 12 if avail < 16384 else 16)
+    return max(2, b // 2) if _pressured() else b
 
 
 @dataclass(frozen=True)
@@ -90,7 +156,8 @@ def limits() -> Limits:
         threads=_int_env("KNOWLEDGE_THREADS", _default_threads(), 1, 32),
         batch_tokens=_int_env("KNOWLEDGE_BATCH_TOKENS", 2_500_000,
                               100_000, 64_000_000),
-        max_batch=_int_env("KNOWLEDGE_MAX_BATCH", 4, 1, 256),
+        max_batch=_int_env("KNOWLEDGE_MAX_BATCH",
+                           _default_max_batch(), 1, 256),
         idle_unload_s=float(
             _int_env("KNOWLEDGE_IDLE_UNLOAD_S", 600, 0, 86_400)),
         fetch_concurrency=_int_env("KNOWLEDGE_FETCH_CONCURRENCY", 6, 1, 16),

@@ -7,13 +7,46 @@ from confluence_knowledge import resources
 from confluence_knowledge.resources import Limits, limits, plan_batches
 
 
+def _calm(monkeypatch):
+    """Neutral machine: mains power, idle CPU, ample RAM."""
+    monkeypatch.setattr(resources, "_battery_active", lambda: False)
+    monkeypatch.setattr(resources, "_cpu_pct", lambda: 30.0)
+    monkeypatch.setattr(resources, "_avail_mb", lambda: 32768.0)
+
+
 def test_default_threads_scale_with_cores(monkeypatch):
-    for cpus, want in ((2, 1), (8, 2), (12, 3), (16, 4), (64, 4)):
+    _calm(monkeypatch)
+    # half the cores, floored at 2, capped at 10
+    for cpus, want in ((2, 2), (8, 4), (12, 6), (16, 8), (64, 10)):
         monkeypatch.setattr(os, "cpu_count", lambda c=cpus: c)
         monkeypatch.delenv("KNOWLEDGE_THREADS", raising=False)
         assert limits().threads == want
     monkeypatch.setattr(os, "cpu_count", lambda: None)
-    assert limits().threads == 1
+    assert limits().threads == 2
+
+
+def test_default_threads_halve_under_pressure(monkeypatch):
+    _calm(monkeypatch)
+    monkeypatch.setattr(os, "cpu_count", lambda: 20)
+    assert limits().threads == 10
+    monkeypatch.setattr(resources, "_battery_active", lambda: True)
+    assert limits().threads == 5
+    monkeypatch.setattr(resources, "_battery_active", lambda: False)
+    monkeypatch.setattr(resources, "_cpu_pct", lambda: 85.0)
+    assert limits().threads == 5
+
+
+def test_default_max_batch_tracks_free_ram(monkeypatch):
+    _calm(monkeypatch)
+    monkeypatch.delenv("KNOWLEDGE_MAX_BATCH", raising=False)
+    for mb, want in ((1024.0, 4), (4096.0, 8), (12000.0, 12),
+                     (32768.0, 16)):
+        monkeypatch.setattr(resources, "_avail_mb", lambda a=mb: a)
+        assert limits().max_batch == want
+    monkeypatch.setattr(resources, "_cpu_pct", lambda: 90.0)
+    assert limits().max_batch == 8
+    monkeypatch.setenv("KNOWLEDGE_MAX_BATCH", "6")   # env wins over auto
+    assert limits().max_batch == 6
 
 
 def test_limits_env_overrides_and_invalid(monkeypatch):
@@ -37,7 +70,7 @@ def test_limits_env_overrides_and_invalid(monkeypatch):
 
 
 def _default():
-    return max(1, min(4, (os.cpu_count() or 4) // 4))
+    return max(2, min(10, (os.cpu_count() or 4) // 2))
 
 
 def test_lower_priority_calls_nice(monkeypatch):
