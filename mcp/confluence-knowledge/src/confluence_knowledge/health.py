@@ -88,7 +88,7 @@ def _resources_check(cli: str) -> dict:
               f"fetch_concurrency={lim.fetch_concurrency}"
               f" phys_cores={_phys_cores()}"
               f" guard={'on' if _psutil is not None else 'off (psutil missing)'}"
-              f" battery_saver={"on" if lim.on_battery() else "off"}{mem}"
+              f" battery_saver={'on' if lim.on_battery() else 'off'}{mem}"
               + (f"; {n} knowledge server process(es) running"
                  if n >= 0 else "; process count unavailable"))
     too_many = n > 4
