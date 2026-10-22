@@ -455,7 +455,7 @@ def _license_ok_upstream(dest: Path, spec: dict, snapshot_download) -> None:
         if not m:
             continue
         try:
-            path = snapshot_download(repo_id=m.group(1),  # nosec B615 — revision-pinned + sha256-verified before session use
+            path = snapshot_download(repo_id=m.group(1),  # nosec B615
                                      allow_patterns=["README.md", "LICENSE*"],
                                      local_dir=dest / "_upstream")
         except Exception:  # noqa: BLE001 — upstream card optional; license judge stays on local files
