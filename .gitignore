@@ -17,3 +17,5 @@ mcp/confluence-knowledge/src/*.egg-info/
 mcp/confluence-knowledge/build/
 eval_report.json
 judge_verdicts.json
+mcp/local-knowledge/build/
+mcp/sharepoint-knowledge/build/
