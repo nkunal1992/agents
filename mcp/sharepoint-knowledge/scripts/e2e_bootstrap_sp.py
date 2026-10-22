@@ -130,7 +130,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
             f"venv + pip install {src_spec}")
 
     cache = os.environ.get("CK_MODEL_CACHE")
-    models_dir = sp_home / "models"
+    models_dir = Path(env["HOME"]) / ".knowledge" / "models"
     if cache and (Path(cache) / "bge-m3").exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")

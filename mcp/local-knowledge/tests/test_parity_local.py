@@ -4,8 +4,8 @@ adaptive fetch wiring — the four gaps the confluence epic left behind."""
 from __future__ import annotations
 
 import pytest
-from confluence_knowledge.index import Index
 
+from confluence_knowledge.index import Index
 from local_knowledge.crawl_local import LocalCrawler
 
 

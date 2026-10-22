@@ -4,9 +4,9 @@ from __future__ import annotations
 import json
 
 import pytest
+
 from confluence_knowledge.index import Index
 from confluence_knowledge.settings import SetupError
-
 from local_knowledge.crawl_local import LocalCrawler, resolve_root
 
 

@@ -1,5 +1,4 @@
 from confluence_knowledge.index import Index
-
 from local_knowledge.crawl_local import LocalCrawler
 
 

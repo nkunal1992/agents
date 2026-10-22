@@ -70,3 +70,6 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 110
+
+[tool.ruff.lint.isort]
+known-first-party = ["confluence_knowledge", "local_knowledge", "sharepoint_knowledge"]

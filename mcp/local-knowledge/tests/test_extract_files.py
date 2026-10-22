@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 
 import pytest
+
 from confluence_knowledge.extract_files import (
     extract_file_chunks,
     is_secret_name,

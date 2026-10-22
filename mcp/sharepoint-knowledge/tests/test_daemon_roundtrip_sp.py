@@ -60,7 +60,6 @@ def rig(tmp_path, monkeypatch):
     import importlib
 
     import sharepoint_knowledge.server_sp as sp
-
     from confluence_knowledge.rpc import RpcDb
     importlib.reload(sp)
     from confluence_knowledge.settings import daemon_home

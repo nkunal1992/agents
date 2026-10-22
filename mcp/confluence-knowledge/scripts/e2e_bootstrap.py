@@ -100,7 +100,8 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     # 3. models — reuse a cache dir if provided, else download for real
     cache = os.environ.get("CK_MODEL_CACHE")
     cache = os.path.expanduser(cache) if cache else None
-    models_dir = ck_home / "models"
+    # #206 — models live in the SHARED store under the sandboxed HOME
+    models_dir = Path(env["HOME"]) / ".knowledge" / "models"
     if cache and (Path(cache) / "bge-m3").exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")

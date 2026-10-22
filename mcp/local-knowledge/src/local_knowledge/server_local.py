@@ -16,6 +16,8 @@ import time
 import uuid
 from pathlib import Path
 
+from mcp.server.fastmcp import Context, FastMCP
+
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
 from confluence_knowledge.index import Index
@@ -50,7 +52,6 @@ from confluence_knowledge.rpc import (
     ensure_daemon,
 )
 from confluence_knowledge.settings import SetupError, daemon_home
-from mcp.server.fastmcp import Context, FastMCP
 
 from .crawl_local import LocalCrawler, resolve_root
 from .settings_local import APP_NAME, LocalProfile, home, index_root, workdir

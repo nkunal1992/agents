@@ -84,8 +84,10 @@ def main() -> None:
             "install")
 
     cache = os.environ.get("CK_MODEL_CACHE")
+    # #206 — models live in the SHARED store under the sandboxed HOME
+    mdl = Path(env["HOME"]) / ".knowledge" / "models"
     if cache and (Path(cache) / "bge-m3").exists():
-        shutil.copytree(cache, home / "models", dirs_exist_ok=True)
+        shutil.copytree(cache, mdl, dirs_exist_ok=True)
         print("PASS models seeded from cache")
     else:
         run([str(cli), "prepare-models"], env, "prepare-models")
@@ -107,7 +109,7 @@ def main() -> None:
     check(flags.get("creds_valid"), "valid token → creds flag green", flags)
 
     # break 1: partial model
-    (home / "models" / "bge-m3" / "tokenizer_config.json").unlink()
+    (mdl / "bge-m3" / "tokenizer_config.json").unlink()
     d = run([str(cli), "doctor"], env, check_rc=False)
     check("model_embed" in d.stdout and d.returncode != 0,
           "partial model flagged + non-zero", d.stdout)

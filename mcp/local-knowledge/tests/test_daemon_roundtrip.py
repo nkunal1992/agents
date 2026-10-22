@@ -54,9 +54,8 @@ def rig(tmp_path, monkeypatch):
 
     import importlib
 
-    from confluence_knowledge.rpc import RpcDb
-
     import local_knowledge.server_local as srv
+    from confluence_knowledge.rpc import RpcDb
     importlib.reload(srv)          # pick up fresh env/global state
     from confluence_knowledge.settings import daemon_home
     dhome = daemon_home()

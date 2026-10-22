@@ -5,6 +5,7 @@ import os
 import time
 
 import pytest
+
 from confluence_knowledge.index import Index
 from confluence_knowledge.rpc import (
     DaemonUnavailable,
