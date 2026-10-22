@@ -43,7 +43,7 @@ The crawl is a resumable breadth-first walk driven interactively —
 | Component | Problem it solves |
 |---|---|
 | `_table_to_text` | Converts `<table>` DOM into a structured text form where the row/column relationship survives embedding. |
-| `split_table_text` | An oversized table's tail rows were *unfindable*: one giant chunk exceeded the embedder and reranker windows, so BGE-M3 never "saw" rows past the cutoff. Row-group splitting with header preservation keeps every row retrievable; chunking is token-aware (448-token budget) when the embedder's tokenizer is available, word-based otherwise. |
+| `split_table_text` | An oversized table's tail rows were *unfindable*: one giant chunk exceeded the embedder and reranker windows, so the model never "saw" rows past the cutoff. Row-group splitting with header preservation keeps every row retrievable; chunking is token-aware (448-token budget) when the embedder's tokenizer is available, word-based otherwise. |
 
 Serialization format (per chunk):
 
@@ -68,16 +68,16 @@ row 2: …
 
 | Component | Problem it solves |
 |---|---|
-| `onnx-community/granite-embedding-small-english-r2-ONNX` quantized ONNX (`onnx/model_quantized.onnx` + `.onnx_data`, ~52 MB) | 384-dim normalized dense vectors, English, 8k-token context — token-aware chunk budget (448 tokens) plus the page title prepended to the embedded text; runtime input cap 2048 covers row-atomic oversize. |
-| `Qdrant/bm25` via fastembed `SparseTextEmbedding` | BM25 sparse leg — token weights + corpus IDF computed in SQLite `term_stats` at publish; queries encode via `query_embed`. (Honest substitution: no ONNX export of BGE-M3 exposes the lexical head — real BM25 fills the same RRF slot.) |
-| `onnx-community/mxbai-rerank-xsmall-v1` quantized (~600 MB) | Cross-encoder reranker; `<APP>_RERANKER` env swaps to the ~4× lighter `mxbai-rerank-base` for weak hardware. |
+| `nomic-ai/nomic-embed-text-v1.5` quantized ONNX (`onnx/model_quantized.onnx`, ~137 MB — vendor-published) | 768-dim normalized dense vectors, English, 8k-token context — token-aware chunk budget (448 tokens) plus the page title prepended to the embedded text; runtime input cap 2048 covers row-atomic oversize. |
+| `Qdrant/bm25` via fastembed `SparseTextEmbedding` | BM25 sparse leg — token weights + corpus IDF computed in SQLite `term_stats` at publish; queries encode via `query_embed`. (No dense ONNX export exposes a lexical head — real BM25 fills the same RRF slot.) |
+| `mixedbread-ai/mxbai-rerank-xsmall-v1` quantized (~600 MB) | Cross-encoder reranker; `<APP>_RERANKER` env swaps to the ~4× lighter `mxbai-rerank-base` for weak hardware. |
 | ONNX Runtime + `tokenizers` | No torch/sentence-transformers (~2.4 GB → ~250 MB footprint); wheels exist for linux/win-arm64/macos arm64. |
 
 **Index** = SQLite per scope at `<workdir>/.<app>_index/<scope_key>.db`:
 
 - `pages(page_id, parent_id, title, url, level, version, content_hash, warnings)`
 - `chunks(chunk_id, page_id, heading_path, kind, ordinal, text)`
-- `vectors(chunk_id, vec BLOB)` — float32, dim varies by model (384 for granite-small-r2)
+- `vectors(chunk_id, vec BLOB)` — float32, dim is 768 for nomic-embed-text-v1.5
 - `sparse_vectors(chunk_id, payload BLOB)` — int64 indices + float32 weights
   (int64 because `Qdrant/bm25` hashed term ids overflow int32 — found in
   the #101 hunt)
@@ -114,7 +114,7 @@ sequenceDiagram
     participant A as Copilot Agent
     participant S as MCP search
     participant I as SQLite Index
-    participant D as BGE-M3 dense
+    participant D as nomic dense
     participant B as BM25 sparse leg
     participant F as FTS5
     participant R as Cross-Encoder v2-m3
@@ -123,7 +123,7 @@ sequenceDiagram
     U->>A: question
     A->>S: search scope_handle q
     S->>I: active_chunks bounded at 100k
-    S->>D: embed q to 384-dim vec
+    S->>D: embed q to 768-dim vec
     S->>B: embed q to term weights
     S->>F: FTS5 match max 16 terms
     S->>I: vectors_for and sparse_for active only
@@ -228,7 +228,7 @@ skipped. Wiped by `clean` along with the index.
 
 ### 4.2 Injection & disclosure
 
-`submit_feedback` embeds the question with the same BGE-M3 embedder.
+`submit_feedback` embeds the question with the same nomic embedder.
 During `search`, the query vector is cosine-matched against stored
 `qvec`s; hits ≥ `0.75` appear as `user_corrections` in the response —
 **auto-injected into search output so the agent can't skip it**.
@@ -319,7 +319,7 @@ flowchart TD
         API[Confluence REST v2 / DC /<br/>Graph / filesystem] --> CW[Crawler: BFS + resumable jobs]
         CW --> EX[extract_chunks<br/>HTML→text, macros skipped]
         EX --> TB[split_table_text<br/>row-atomic + header preserved]
-        TB --> EM[embed: granite-small-r2 ONNX + bm25 sparse]
+        TB --> EM[embed: nomic-embed-text-v1.5 ONNX + bm25 sparse]
         EM --> IX[("SQLite per scope<br/>pages+chunks+vectors+sparse+FTS5<br/>atomic publish")]
     end
     subgraph Retrieval["2 · Search"]

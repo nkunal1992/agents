@@ -97,7 +97,7 @@ that, not on parameters trained on the public internet.
 "Reset credentials" lands next to "forgotten password" — even though zero
 words overlap — because they *mean* similar things.
 
-**Technical:** `granite-small-r2` — 384-dimensional dense vectors (English), quantized ONNX, runs locally (~52 MB). Every chunk of
+**Technical:** `nomic-embed-text-v1.5` — 768-dimensional dense vectors (English), quantized ONNX, runs locally (~137 MB). Every chunk of
 every page gets a vector; questions get vectors; we fetch by cosine
 distance.
 

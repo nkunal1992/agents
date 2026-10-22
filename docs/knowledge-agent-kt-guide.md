@@ -22,7 +22,7 @@ command or file where you can check the claim hands-on.
 flowchart TD
     Q["You ask a question in Copilot chat"] --> AG["Knowledge agent<br/>(instructions file)"]
     AG --> SE["search tool<br/>(local MCP service)"]
-    SE --> D["Leg 1: meaning match<br/>granite-small-r2 dense vectors"]
+    SE --> D["Leg 1: meaning match<br/>nomic-embed-text-v1.5 dense vectors"]
     SE --> SP["Leg 2: exact terms<br/>learned-sparse bm25"]
     SE --> FT["Leg 3: literal keywords<br/>SQLite FTS5"]
     D & SP & FT --> FU["RRF merge → top 30"]
@@ -181,13 +181,13 @@ decides:
 
 ### Technical
 
-- **Dense leg** — `granite-small-r2` quantized ONNX (~52 MB): every chunk → a
-  384-dimensional normalized *vector* (a point in "meaning space");
+- **Dense leg** — `nomic-embed-text-v1.5` quantized ONNX (~137 MB): every chunk → a
+  768-dimensional normalized *vector* (a point in "meaning space");
   questions get vectors too; nearest points by *cosine similarity* (angle
   between vectors — identical direction ≈ 1.0) come back.
 - **Sparse leg** — `Qdrant/bm25` learned sparse embeddings via fastembed:
   each chunk/query → `{term_id: weight}` where rare terms weigh more.
-  *(Honest engineering note: every public ONNX export of granite-small-r2 drops its
+  *(Honest engineering note: every public ONNX export of nomic-embed-text-v1.5 drops its
   lexical head, so the sparse leg uses bm25 — same role, ONNX-native.)*
 - **FTS leg** — SQLite FTS5 `MATCH`, first 16 whitespace terms, per-word
   quoting so punctuation can't break the query.
@@ -284,7 +284,7 @@ both.
 ### Technical
 
 - **Storage** — `submit_feedback(scope, question, correction, note)`
-  embeds the question with the same granite-small-r2 embedder and appends
+  embeds the question with the same nomic-embed-text-v1.5 embedder and appends
   `{id, question, qvec, correction, note, ts}` to
   `<index_root>/<scope>.feedback.db` (SQLite WAL — concurrent writers
   can't lose corrections). A legacy `.feedback.json` migrates on first open.

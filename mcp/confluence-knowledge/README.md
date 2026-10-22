@@ -5,7 +5,7 @@ See `../../docs/confluence-knowledge.md` for the full guide.
 
 - GET-only `ConfluenceClient` — non-GET raises `SecurityException` pre-flight.
 - Recursive subtree crawl (Cloud v2 + Data Center), resumable.
-- Local ONNX embeddings (`granite-small-r2`, quantized) + sparse leg (`Qdrant/bm25`)
+- Local ONNX embeddings (`nomic-embed-text-v1.5`, quantized) + sparse leg (`Qdrant/bm25`)
   + reranker (`mxbai-rerank-xsmall-v1`, quantized) — MIT/Apache-2.0, pinned in
   `models.lock.json`, no torch, never a cloud embedding call.
 - SQLite + FTS5 + vector-blob index under `.conf_knowledge_index/`.

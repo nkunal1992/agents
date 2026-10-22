@@ -9,8 +9,8 @@ Backend layout (all under <home>/models/):
            onnx/model_quantized.onnx
            (dense 768-dim, normalized, English, 8k ctx)
   sparse — Qdrant/bm25 via fastembed SparseTextEmbedding
-           (learned term-weight leg; BGE-M3's lexical head has no ONNX
-           export, so a purpose-built sparse model fills that slot)
+           (learned term-weight leg — a purpose-built sparse model covering
+           the lexical slot no dense ONNX export provides)
   rerank — mixedbread-ai/mxbai-rerank-xsmall-v1    onnx/model_quantized.onnx
            (sequence-classification logits → relevance score)
 """
@@ -42,7 +42,10 @@ SPARSE_MODEL_ID = "qdrant-bm25-fastembed"
 # Composite fingerprint of every model whose output is PERSISTED (dense +
 # sparse vectors). The reranker is deliberately absent: it only scores at
 # query time, so a reranker swap must not trigger a full rebuild (#178).
-MODEL_MARKER = f"{EMBED_MODEL_ID}+{SPARSE_MODEL_ID}"
+# +taskpre — nomic search_document/search_query prefixes changed the
+# embed contract; every old index restamps → auto-recrawl (never
+# silently reuses role-less vectors)
+MODEL_MARKER = f"{EMBED_MODEL_ID}+taskpre+{SPARSE_MODEL_ID}"
 
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
@@ -76,24 +79,34 @@ def _model_home(home: Path, repo: str) -> Path:
     return _models_dir(home) / repo.split("/")[-1]
 
 
+def _sha256_ok(dest: Path, spec: dict) -> bool:
+    """Verify pinned content hashes where the lock provides them —
+    deletes corrupt files so a re-download/refetch actually happens.
+    Without this a bad artifact passes `files_ok` forever: prepare says
+    'already prepared' while _require rejects it at session open —
+    an infinite failure loop."""
+    import hashlib
+    ok = True
+    for rel, want in (spec.get("sha256") or {}).items():
+        f = dest / rel
+        if f.exists() and \
+                hashlib.sha256(f.read_bytes()).hexdigest() != want:
+            f.unlink()                     # untrusted — drop for refetch
+            ok = False
+    return ok
+
+
 def _require(dest: Path, repo: str, cli: str, needed: list[str]) -> Path:
     if not all((dest / f).exists() for f in needed):
         raise SetupError(
             f"local model '{repo}' not prepared — run `{cli} prepare-models`. "
             "Cloud embeddings are never used.")
-    # sha256 spot-check: the lock pins content hashes — a corrupted or
-    # swapped artifact fails loudly rather than embedding garbage
     spec = next((m for m in _load_lock()["models"].values()
                  if m.get("repo") == repo), {})
-    for rel, want in (spec.get("sha256") or {}).items():
-        f = dest / rel
-        if f.exists():
-            import hashlib
-            got = hashlib.sha256(f.read_bytes()).hexdigest()
-            if got != want:
-                raise SetupError(
-                    f"model artifact {rel} sha256 mismatch — re-run "
-                    f"`{cli} prepare-models` to refetch")
+    if not _sha256_ok(dest, spec):
+        raise SetupError(
+            f"model artifact under '{repo}' failed sha256 — refetching is "
+            f"safe: run `{cli} prepare-models`")
     return dest
 
 
@@ -142,7 +155,9 @@ def _tokenizer(dest: Path):
 
 
 class LocalEmbedder:
-    """BGE-M3 dense embeddings via ONNX (no torch). Same interface."""
+    """nomic-embed-text-v1.5 dense embeddings via ONNX int8
+    (no torch). 768-dim, 8192-ctx, vendor-published artifact —
+    replaces BGE-M3 under the non-BAAI workspace policy."""
 
     def __init__(self, home: Path, cli: str = "confluence-knowledge"):
         needed = [EMBED_ONNX, "tokenizer.json"]
@@ -170,8 +185,14 @@ class LocalEmbedder:
         return len(self._tok.encode(text, add_special_tokens=False).ids)
 
     def embed(self, texts: list[str],
-              on_batch=None) -> np.ndarray:
-        """Length-sorted micro-batches — a batch's attention cost is
+              on_batch=None, query: bool = False) -> np.ndarray:
+        """nomic-embed-text-v1.5 embeddings — the model card's task
+        prefixes are required for retrieval-quality embeddings:
+        documents get `search_document: `, queries `search_query: `.
+        The prefix sits INSIDE the dedup key — the same raw text never
+        collides across roles.
+
+        Length-sorted micro-batches — a batch's attention cost is
         B × Lmax², so an unbounded call padded to one long outlier could
         allocate gigabytes per layer. `batch_tokens`/`max_batch` bound
         every run; results are numerically identical per item.
@@ -184,6 +205,8 @@ class LocalEmbedder:
         # content-hash dedup — template/boilerplate strings repeat across
         # enterprise pages and embed identically; cache by sha256 so each
         # unique text pays the ONNX cost once per daemon life
+        prefix = "search_query: " if query else "search_document: "
+        texts = [prefix + t for t in texts]
         import hashlib
         cache = getattr(self, "_vec_cache", None)
         if cache is None:
@@ -258,8 +281,9 @@ class LocalEmbedder:
 class LocalSparseEmbedder:
     """Learned term-weight sparse vectors via fastembed (ONNX, no torch).
 
-    Fills the role BGE-M3's lexical head plays on torch — no ONNX export of
-    that head exists, so a purpose-built sparse model covers the same leg.
+    Fills the lexical-head role dense models expose only on torch — no
+    ONNX export of that head exists, so a purpose-built sparse model covers
+    the same leg.
     """
 
     def __init__(self, home: Path, cli: str = "confluence-knowledge"):
@@ -361,7 +385,10 @@ def prepare_models(home: Path) -> list[str]:
         spec = lock["models"][key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         if dest.exists():
-            files_ok = all((dest / f).exists() for f in spec["files"])
+            # files present AND content-verified — sha256 mismatch drops
+            # the corrupt file inside _sha256_ok so files_ok re-checks fail
+            files_ok = all((dest / f).exists() for f in spec["files"]) \
+                and _sha256_ok(dest, spec)
             stamp = dest / ".revision"
             if files_ok and not stamp.exists():
                 # pre-stamp install — verify files, then stamp in place
@@ -371,10 +398,21 @@ def prepare_models(home: Path) -> list[str]:
                 continue
             if stamp.exists() and stamp.read_text().strip() != spec["revision"]:
                 shutil.rmtree(dest)  # wrong revision — untrusted, refetch
-            # else: missing files but right revision — snapshot_download
-            # resumes/skips valid files; only the gaps re-download
+            # else: missing/corrupt files but right revision —
+            # snapshot_download resumes/skips valid; only gaps re-download
         snapshot_download(repo_id=spec["repo"], revision=spec["revision"],
                           local_dir=dest, allow_patterns=spec["files"])
+        if not _sha256_ok(dest, spec):
+            # downloaded bytes failed the pinned hash — a poisoned mirror
+            # or truncated transfer; one clean refetch attempt, then hard fail
+            snapshot_download(repo_id=spec["repo"],
+                              revision=spec["revision"], local_dir=dest,
+                              allow_patterns=spec["files"])
+            if not _sha256_ok(dest, spec):
+                raise SetupError(
+                    f"{spec['repo']} sha256 mismatch after refetch — "
+                    "artifact contents differ from the pinned lock; "
+                    "refusing to run unverified model bytes")
         (dest / ".revision").write_text(spec["revision"])
         if not _license_ok(dest):
             _license_ok_upstream(dest, spec, snapshot_download)
@@ -407,7 +445,7 @@ def prepare_models(home: Path) -> list[str]:
 
 
 def _license_ok_upstream(dest: Path, spec: dict, snapshot_download) -> None:
-    """ONNX-community repackages sometimes drop the license line — if the card
+    """Upstream repos sometimes drop the license line — if the card
     points at a `base_model`, fetch that model's card and judge IT. The
     upstream card is saved next to ours for audit."""
     import re
@@ -470,7 +508,17 @@ def _load_lock() -> dict:
 
     p = Path(__file__).parent / "models.lock.json"  # shipped inside the package
     if p.exists():
-        return json.loads(p.read_text())
+        try:
+            lock = json.loads(p.read_text())
+        except json.JSONDecodeError as e:
+            raise SetupError(
+                f"models.lock.json is corrupt ({e}) — reinstall the "
+                "service to restore the pinned model manifest") from e
+        if not isinstance(lock, dict) or "models" not in lock:
+            raise SetupError(
+                "models.lock.json has no 'models' map — reinstall the "
+                "service to restore the pinned model manifest")
+        return lock
     raise SetupError("models.lock.json missing from package — reinstall the service")
 
 
@@ -542,7 +590,7 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     # dense leg — blocked float32 matmul over the float16 matrix, so a
     # query touches ~61 MB instead of re-decoding every vector blob
     dense_rank: list[str] = []
-    qvec = embedder.embed([query])[0].astype(np.float32)
+    qvec = embedder.embed([query], query=True)[0].astype(np.float32)
     if cache.dense.shape[0] and cache.dense.shape[1] == qvec.shape[0]:
         q = qvec / (np.linalg.norm(qvec) + 1e-9)
         scores = np.empty(len(cache.ids), dtype=np.float32)

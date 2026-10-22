@@ -61,9 +61,12 @@ def test_embed_respects_batch_token_budget(monkeypatch):
     texts = ["x" * 600, "a" * 20, "b" * 20, "c" * 20]
     out = emb.embed(texts)
     assert out.shape == (4, 8)
+    # nomic task prefixes ride inside the input — "search_document: "
+    # is 17 chars, so the fake's chars-as-tokens lengths all grow by 17
+    pad = len("search_document: ")
     for b, l in sess.calls:
-        assert b * l * l <= 100_000 or b == 1  # the 600-token item alone
-    assert max(l for b, l in sess.calls) == 600
+        assert b * l * l <= 100_000 or b == 1  # the outlier alone
+    assert max(l for b, l in sess.calls) == 600 + pad
     assert len(sess.calls) == 2               # outlier + packed rest
 
 
@@ -106,3 +109,47 @@ def test_rerank_micro_batches_and_order(monkeypatch):
 def test_rerank_empty():
     rr = _reranker(_FakeSess(), _FakeTok())
     assert rr.score("q", []).shape == (0,)
+
+
+def test_task_prefixes_split_roles_and_never_collide(monkeypatch):
+    """nomic contract: documents carry `search_document: `, queries carry
+    `search_query: ` — and the dedup cache must not let the same raw text
+    share a vector across roles."""
+    seen = []
+
+    class T:
+        def encode_batch(self, ts, **k):
+            seen.extend(ts)
+            return [_FakeEnc(len(t)) for t in ts]
+
+    sess, _ = _FakeSess(), None
+    emb = _embedder(sess, T())
+    emb.embed(["alpha"])                  # document role
+    emb.embed(["alpha"], query=True)      # query role — must re-embed
+    assert len(emb._vec_cache) == 2
+    assert seen[0] == "search_document: alpha"
+    assert seen[1] == "search_query: alpha"
+
+
+def test_embed_masked_mean_all_padded_row(monkeypatch):
+    """Pillar-3 chaos: an all-padding row's mean must not ZeroDivision —
+    the denominator is clamped at 1e-9."""
+    import numpy as np
+
+    class S:
+        def run(self, outs, feed):
+            # last_hidden_state only — forces the masked-mean path
+            return [np.ones((feed["input_ids"].shape[0],
+                             feed["input_ids"].shape[1], 4))]
+
+    class T:
+        def encode_batch(self, ts, **k):
+            return [type("E", (), {"ids": [1], "attention_mask": [0]})()
+                    for _ in ts]          # one token, mask=0 → all-pad
+
+    emb = _embedder(S(), T())
+    emb._needs_token_types = False
+    emb._has_sentence_emb = False
+    emb._dim = 4
+    v = emb.embed([""])
+    assert np.isfinite(v).all()

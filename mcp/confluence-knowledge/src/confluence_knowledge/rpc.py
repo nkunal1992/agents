@@ -138,7 +138,21 @@ class RpcDb:
                 "UPDATE rpc_requests SET claimed_by=NULL, claimed_at=NULL "
                 "WHERE claimed_at < ? AND id NOT IN "
                 "(SELECT id FROM rpc_responses)", (now - _LEASE_STALE_S * 4,))
-        return [(r[0], r[1], json.loads(r[2]), r[3]) for r in rows]
+        out = []
+        for r in rows:
+            try:
+                args = json.loads(r[2])
+            except json.JSONDecodeError:
+                # poisoned row — a truncated/corrupt args payload must not
+                # crash the dispatch loop: answer it with an error in the
+                # same transaction instead of leaving it unclaimed to kill
+                # every daemon restart forever
+                self.db.execute(
+                    "INSERT OR REPLACE INTO rpc_responses VALUES (?,?,?,?)",
+                    (r[0], None, "corrupt request payload", time.time()))
+                continue
+            out.append((r[0], r[1], args, r[3]))
+        return out
 
     def respond(self, rid: str, result: dict | None = None,
                 error: str | None = None) -> None:

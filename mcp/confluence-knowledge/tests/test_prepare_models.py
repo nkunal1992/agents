@@ -119,3 +119,95 @@ def test_missing_license_rejected(monkeypatch, tmp_path):
     from confluence_knowledge import retrieval, settings
     with pytest.raises(settings.SetupError, match="license"):
         retrieval.prepare_models(tmp_path)
+
+
+# ---- chaos: sha256 integrity enforcement (#211 / audit pillar 1) ----
+
+import hashlib
+from copy import deepcopy
+
+LOCK_SHA = deepcopy(FAKE_LOCK)
+LOCK_SHA["models"]["embed"]["sha256"] = {
+    "m.onnx": hashlib.sha256(b"real-weights").hexdigest()}
+
+
+def _fake_hf_sha(monkeypatch, good=b"real-weights"):
+    calls = []
+    fake_hf = types.ModuleType("huggingface_hub")
+
+    def fake_download(repo_id, revision, local_dir, **kw):
+        calls.append(repo_id)
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "m.onnx").write_bytes(good)
+        (local_dir / "r.onnx").write_bytes(b"x")
+        (local_dir / "tokenizer.json").write_text("{}")
+        (local_dir / "LICENSE").write_text("apache")
+        return str(local_dir)
+
+    fake_hf.snapshot_download = fake_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
+    monkeypatch.setattr(
+        "confluence_knowledge.retrieval._load_lock", lambda: LOCK_SHA)
+    fake_fe = types.ModuleType("fastembed")
+
+    class FakeSparse:
+        def __init__(self, *a, **kw):
+            pass
+
+    fake_fe.SparseTextEmbedding = FakeSparse
+    monkeypatch.setitem(sys.modules, "fastembed", fake_fe)
+    return calls
+
+
+def test_corrupt_artifact_refetched_not_stuck(monkeypatch, tmp_path):
+    """Tampered file on disk: files_ok must FAIL via hash check → refetch.
+    Without this, prepare says 'already prepared' while _require fails —
+    the infinite failure loop."""
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
+    emb = tmp_path / "models" / "emb"
+    emb.mkdir(parents=True)
+    (emb / "m.onnx").write_bytes(b"corrupted")
+    (emb / "tokenizer.json").write_text("{}")
+    (emb / ".revision").write_text("r1")
+
+    calls = _fake_hf_sha(monkeypatch)
+    from confluence_knowledge import retrieval
+    out = retrieval.prepare_models(tmp_path)
+    assert any("prepared org/emb" in line for line in out), out
+    assert "org/emb" in calls          # refetched the corrupt model
+    assert hashlib.sha256(
+        (emb / "m.onnx").read_bytes()).hexdigest() == \
+        LOCK_SHA["models"]["embed"]["sha256"]["m.onnx"]
+
+
+def test_still_bad_after_refetch_is_a_hard_fail(monkeypatch, tmp_path):
+    """If the refetched bytes STILL mismatch the pinned hash — poisoned
+    mirror / broken upstream — refuse loudly instead of running them."""
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
+    _fake_hf_sha(monkeypatch, good=b"wrong-weights")
+    from confluence_knowledge import retrieval, settings
+    with pytest.raises(settings.SetupError, match="sha256"):
+        retrieval.prepare_models(tmp_path)
+
+
+def test_require_purges_mismatch_so_prepare_refetches(monkeypatch, tmp_path):
+    """_require must DELETE the corrupt file (not just complain) — else
+    files_ok stays true and prepare_models reports 'already prepared'
+    while every session open fails. The healing loop must exist."""
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
+    _fake_hf_sha(monkeypatch)
+    emb = tmp_path / "models" / "emb"
+    emb.mkdir(parents=True)
+    (emb / "m.onnx").write_bytes(b"corrupted")
+    (emb / "tokenizer.json").write_text("{}")
+    (emb / "config.json").write_text("{}")
+
+    from confluence_knowledge import retrieval, settings
+    monkeypatch.setattr(retrieval, "EMBED_REPO", "org/emb")
+    monkeypatch.setattr(retrieval, "EMBED_ONNX", "m.onnx")
+    with pytest.raises(settings.SetupError, match="sha256"):
+        retrieval._require(emb, "org/emb", "cli", ["m.onnx"])
+    assert not (emb / "m.onnx").exists(), "corrupt file must be purged"
+    # and now a fresh prepare refetches it — no infinite loop
+    out = retrieval.prepare_models(tmp_path)
+    assert any("prepared org/emb" in line for line in out)

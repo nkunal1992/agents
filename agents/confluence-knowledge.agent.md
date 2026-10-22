@@ -112,7 +112,7 @@ pausing between them; the user sees each command anyway.
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
 3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
-   prepare-models` — downloads the pinned local models — granite-small-r2 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
+   prepare-models` — downloads the pinned local models — nomic-embed-text-v1.5 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
    into `~/.knowledge/models/`. If the network blocks Hugging
    Face, tell the user to drop the model dirs there from their internal
    mirror — never switch to a cloud embedding API.
