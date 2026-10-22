@@ -56,13 +56,12 @@ def test_dispatch_routes_by_service(tmp_path, monkeypatch):
     _fake_eps(monkeypatch, ["confluence-knowledge", "local-knowledge"])
     d = Daemon(tmp_path)
     d.services = discover_services()
-    hits = []
     for name, srv in d.services.items():
         monkeypatch.setattr(srv, "probe_tool",
                             lambda _n=name, **kw: {"svc": _n},
                             raising=False)
     rpc = RpcDb(tmp_path / "rpc.db")
-    rid = rpc.submit("probe_tool", {}, 30, service="local-knowledge")
+    rpc.submit("probe_tool", {}, 30, service="local-knowledge")
     for rid2, tool, args, service in rpc.poll_requests(d.owner):
         d._dispatch(rid2, tool, args, service)
     time.sleep(0.3)
@@ -78,7 +77,7 @@ def test_dispatch_unknown_service_errors(tmp_path):
     d = Daemon(tmp_path)
     d.services = {"a": object()}
     rpc = RpcDb(tmp_path / "rpc.db")
-    rid = rpc.submit("whatever", {}, 30, service="not-installed")
+    rpc.submit("whatever", {}, 30, service="not-installed")
     for rid2, tool, args, service in rpc.poll_requests(d.owner):
         d._dispatch(rid2, tool, args, service)
     row = rpc.db.execute(
@@ -91,6 +90,7 @@ def test_daemon_home_is_venv_keyed(monkeypatch, tmp_path):
     one daemon; another venv gets its own (can't import us anyway)."""
     monkeypatch.setenv("KNOWLEDGE_SHARED_HOME", str(tmp_path))
     import sys
+
     from confluence_knowledge.settings import daemon_home
     h = daemon_home()
     assert h.parent.parent == tmp_path

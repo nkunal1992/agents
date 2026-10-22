@@ -42,7 +42,7 @@ def daemon_home(tmp_path):
 def test_daemon_claims_and_answers(daemon_home):
     """A spawned daemon takes the lease and answers a whitelisted tool."""
     from confluence_knowledge.rpc import RpcDb
-    home, work, idx_root = daemon_home
+    home, work, _idx_root = daemon_home
     from confluence_knowledge.settings import daemon_home
     dhome = daemon_home()
     dhome.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,7 @@ def test_daemon_lease_survives_proxy_death(daemon_home):
     """Killing the 'IDE-side' caller leaves the daemon + its lease alive —
     the next proxy attaches to the same owner (#189's core promise)."""
     from confluence_knowledge.rpc import RpcDb
-    home, work, idx_root = daemon_home
+    home, work, _idx_root = daemon_home
     from confluence_knowledge.settings import daemon_home
     dhome = daemon_home()
     dhome.mkdir(parents=True, exist_ok=True)

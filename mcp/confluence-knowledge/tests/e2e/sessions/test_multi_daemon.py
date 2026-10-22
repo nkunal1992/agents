@@ -64,10 +64,9 @@ def _tools(meta: dict, svc: str) -> list[str]:
         h = {"Authorization": f"Bearer {meta['token']}"}
         async with streamablehttp_client(
                 f"http://127.0.0.1:{meta['port']}/{svc}/mcp",
-                headers=h) as (r, w, _):
-            async with ClientSession(r, w) as s:
-                await s.initialize()
-                return sorted(t.name for t in (await s.list_tools()).tools)
+                headers=h) as (r, w, _), ClientSession(r, w) as s:
+            await s.initialize()
+            return sorted(t.name for t in (await s.list_tools()).tools)
     return asyncio.run(go())
 
 
@@ -105,8 +104,8 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
                 meta = _meta(home, timeout=3)
                 if set(_services(meta)) >= set(svcs):
                     break
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001,S110 — endpoint not
+                pass                   # respawned yet — keep polling
             time.sleep(0.5)
         else:
             pytest.fail("watchdog never respawned the daemon")
@@ -127,5 +126,5 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
                         "confluence_knowledge.daemon" in " ".join(
                             p.info["cmdline"]):
                     p.terminate()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001,S110 — teardown is
+            pass                       # best-effort

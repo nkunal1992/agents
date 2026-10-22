@@ -57,16 +57,15 @@ async def _call(url: str, token: str, tool: str, args: dict) -> dict:
     """One MCP session — reconnect-per-request is the point, so each call
     opens a fresh streamable-http session like a fresh IDE request."""
     headers = {"Authorization": f"Bearer {token}"}
-    async with streamablehttp_client(url, headers=headers) as (r, w, _):
-        async with ClientSession(r, w) as session:
-            await session.initialize()
-            res = await session.call_tool(tool, args)
-            text = "".join(c.text for c in res.content
-                           if getattr(c, "type", "") == "text")
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return {"raw": text}
+    async with streamablehttp_client(url, headers=headers) as (r, w, _), ClientSession(r, w) as session:
+        await session.initialize()
+        res = await session.call_tool(tool, args)
+        text = "".join(c.text for c in res.content
+                       if getattr(c, "type", "") == "text")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"raw": text}
 
 
 def _url(meta: dict) -> str:
@@ -98,11 +97,10 @@ def test_http_endpoint_answers_tools(daemon, workdir):
         try:
             async with streamablehttp_client(
                     _url(meta), headers={"Authorization": "Bearer x"}
-            ) as (r, w, _):
-                async with ClientSession(r, w) as s:
-                    await s.initialize()
-                    return "connected"
-        except Exception:
+            ) as (r, w, _), ClientSession(r, w) as s:
+                await s.initialize()
+                return "connected"
+        except Exception:  # noqa: BLE001 — session asserts the failure shape
             return "rejected"
     assert asyncio.run(unauth()) == "rejected"
 
@@ -118,7 +116,7 @@ def test_daemon_restart_same_url(daemon, workdir):
         asyncio.run(asyncio.wait_for(
             _call(_url(meta), meta["token"], "status", {}), 5))
         dead = False
-    except Exception:
+    except Exception:  # noqa: BLE001 — session asserts the failure shape
         dead = True
     assert dead, "killed daemon still answering"
     # doctor's heal path — respawn + same port re-binds
@@ -144,7 +142,8 @@ def test_suspend_wake_no_reload(daemon, workdir):
     meta = _wait_http(workdir)
     daemon.send_signal(signal.SIGSTOP)
     try:
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 — suspended transport
+                                      # fails however the client surfaces it
             asyncio.run(asyncio.wait_for(
                 _call(_url(meta), meta["token"], "status", {}), 4))
     finally:

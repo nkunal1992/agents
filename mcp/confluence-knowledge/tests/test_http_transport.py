@@ -6,7 +6,6 @@ import threading
 import time
 
 import pytest
-
 from test_server_flow import _FakeClient
 
 from confluence_knowledge import server
