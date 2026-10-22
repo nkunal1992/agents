@@ -143,8 +143,11 @@ async def journey(s, ctx) -> None:
                         for k, v in st.items() if k.endswith("_ms")}
         ctx["stats"]["pages/s"] = st.get("pages_per_s")
         ctx["stats"]["battery_saver"] = st.get("battery_saver")
-    check(w.get("pages_done", 0) >= 150,
-          "covered most of the 180-page tree", w.get("pages_done"))
+    min_pages = int(args[args.index("--min-pages") + 1]) \
+        if "--min-pages" in args else 150
+    check(w.get("pages_done", 0) >= min_pages,
+          f"covered most of the subtree (≥{min_pages} expected)",
+          w.get("pages_done"))
 
     # ---- canary recall: real reranker scores + real URL citations ----
     res = await timed("search", "search",

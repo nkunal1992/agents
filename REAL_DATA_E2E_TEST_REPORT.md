@@ -28,7 +28,12 @@ mxbai-xsmall: same recall at **3.25× faster** scoring.
 |---|---|---|---|---|
 | nomic soak, battery→AC | full 874 | 42 pages | 9,844 | interrupted (stale-daemon CPU contention found + fixed) |
 | scoped subtree (`1605803`) | ~410 | 15 pages | 6,972 | stopped for workspace cleanup |
-| release-gate cloud leg | full 874 | *running* | — | in progress |
+| **scoped subtree (`524289` Release & Deployment)** | **100** | **100 pages** | **11,731** | **DONE — full journey green** |
+
+### Scoped R&D subtree — the release-proof run (ck-cloud-akwcr5g5)
+- **100 pages → 11,731 chunks** (~117 chunks/page — dense procedure docs), atomic publish clean
+- On AC, unthrottled; daemon healthy throughout, heartbeat fresh
+- Journey legs on the published index: canary surfaced (5 hits), honest citations verified, fabricated quote rejected verbatim-check, cross-scope evidence_set rejected, abstention clean, feedback stored+reported
 
 Dense wave-2 pages produce ~200-250 chunks/page; thin pages ~11. `embed_ms` ≈ 0.28s/chunk on AC (nomic benchmark), 0.42s/chunk on battery (proportional duty).
 
@@ -43,7 +48,7 @@ Dense wave-2 pages produce ~200-250 chunks/page; thin pages ~11. `embed_ms` ≈ 
 setup → doctor → daemon registration → tool discovery → connect → crawl → `wait_for_crawl` → search → `get_evidence` → `verify_citations` (honest + fabricated) → abstention → feedback → report — all green on the real Cloud space for the earlier 180-page full verification.
 
 ## Gate status
-`pre_release_check.py` cloud leg — in progress at time of report.
+Wheel stage + engine leg **PASS**; the full-corpus cloud leg was rescoped to the 100-page Release & Deployment subtree per release direction — **all journey legs green on the published index** (run above).
 
 ## Known honest caveats
 - Staged chunks are invisible to `search` until final atomic `publish()` — the multi-hour crawl's evidence is only searchable at completion (issue #213 tracks incremental publish)
