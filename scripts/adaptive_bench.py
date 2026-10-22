@@ -72,7 +72,7 @@ def crawl_once(pages_n: int, env_overrides: dict, label: str) -> dict:
     idx = Index(tmp / "s.db")
     os.environ.setdefault(
         "KNOWLEDGE_MODELS_DIR",
-        str(Path.home() / ".confluence-knowledge" / "models"))
+        str(Path.home() / ".knowledge" / "models"))
     emb = LocalEmbedder(tmp)
     sp = LocalSparseEmbedder(tmp)
     c = Crawler(client, idx, "datacenter", embedder=emb, sparse=sp)

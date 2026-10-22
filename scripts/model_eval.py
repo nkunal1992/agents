@@ -157,7 +157,7 @@ def _rerank(sess, tok, query: str, docs: list[str], np) -> list[float]:
 
 def _rerank_eval(np):
     texts, _owner = _corpus()
-    root = Path.home() / ".confluence-knowledge" / "models"
+    root = Path.home() / ".knowledge" / "models"
     print(f"{'reranker':<26}{'params':>7}  {'hits':>6}")
     for name, repo, rel, params in RERANK_CANDIDATES:
         try:
@@ -181,7 +181,7 @@ def _chunk_size_eval(np, sizes: list[int]):
     repo, rel = ("nomic-ai/nomic-embed-text-v1.5",
                  "onnx/model_quantized.onnx")
     sess, tok = _load(repo, rel,
-                      Path.home() / ".confluence-knowledge" / "models")
+                      Path.home() / ".knowledge" / "models")
     print(f"{'chunk_tokens':>12}  {'chunks':>7}  {'ms/chunk':>9}  "
           f"{'probes':>7}")
     for size in sizes:
@@ -252,7 +252,7 @@ def main() -> int:
     texts, owner = _corpus()
     print(f"eval corpus: {len(texts)} chunks across {max(owner) + 1} pages")
 
-    root = Path.home() / ".confluence-knowledge" / "models"
+    root = Path.home() / ".knowledge" / "models"
     root.mkdir(exist_ok=True)
     print(f"{'model':<22}{'params':>7}  {'embed_s':>8}  {'ms/chunk':>9}  "
           f"{'probes':>8}")

@@ -1,4 +1,4 @@
-confluence-knowledge[files]~=0.10.0
+confluence-knowledge[files]~=0.11.0
 msal>=1.31
 httpx>=0.27
 mcp<2,>=1.8
@@ -12,4 +12,4 @@ openpyxl>=3.1
 pypdf>=5.0
 
 [models]
-confluence-knowledge[models]~=0.10.0
+confluence-knowledge[models]~=0.11.0

@@ -235,7 +235,7 @@ def main() -> int:
            # this leg must never fall back to fake embeddings
            "KNOWLEDGE_MODELS_DIR":
                os.environ.get("KNOWLEDGE_MODELS_DIR")
-               or str(Path.home() / ".confluence-knowledge" / "models")}
+               or str(Path.home() / ".knowledge" / "models")}
     print(f"sandbox: {sandbox}")
 
     # venv: --cli reuses an installed package (dev verification); default

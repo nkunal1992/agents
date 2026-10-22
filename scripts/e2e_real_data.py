@@ -374,7 +374,7 @@ def main() -> int:
            "KNOWLEDGE_MODELS_DIR":
                os.environ.get("KNOWLEDGE_MODELS_DIR")
                or os.environ.get("CK_MODEL_CACHE")
-               or str(Path.home() / ".confluence-knowledge" / "models"),
+               or str(Path.home() / ".knowledge" / "models"),
            "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
     note(f"workspace: {ws}")
 
