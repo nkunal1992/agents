@@ -84,9 +84,11 @@ jobs:
         shell: bash
         env:
           KNOWLEDGE_E2E: "1"
+        env:
+          # hostedtoolcache pythons ship real distutils; setuptools'
+          # _distutils_hack asserts on it without this
+          SETUPTOOLS_USE_DISTUTILS: stdlib
         run: |
-          # --no-build-isolation: pip's build-env setuptools trips
-          # _distutils_hack on Windows 3.11 — ambient setuptools works
           python -m pip install -U pytest setuptools wheel
           python -m pip install --no-build-isolation             ./mcp/local-knowledge ./mcp/sharepoint-knowledge
           cd mcp/confluence-knowledge
