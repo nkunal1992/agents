@@ -126,29 +126,29 @@ def test_http_endpoint_answers_tools(daemon, workdir):
 def test_daemon_restart_same_url(daemon, workdir):
     meta = _wait_http(workdir)
     asyncio.run(_call(_url(meta), meta["token"], "status", {}))
-    # kill the daemon — SIGKILL, the field's worst case
+    # hard kill — the field's worst case. Under watchdog supervision
+    # "the URL stays dead" is impossible BY DESIGN: the watchdog respawns
+    # the daemon, which re-binds the persisted port. The contract the
+    # field needs is recovery-on-same-URL, so assert exactly that.
     daemon.kill()
     daemon.wait(timeout=8)
-    # the URL is now dead — a real client gets connection refused
-    try:
-        asyncio.run(asyncio.wait_for(
-            _call(_url(meta), meta["token"], "status", {}), 5))
-        dead = False
-    except Exception:  # noqa: BLE001 — session asserts the failure shape
-        dead = True
-    assert dead, "killed daemon still answering"
-    # doctor's heal path — respawn + same port re-binds
-    proc2 = _spawn_daemon(workdir)
-    try:
-        meta2 = _wait_http(workdir)
-        assert meta2["port"] == meta["port"], \
-            "daemon restart must re-bind the registered port"
-        assert meta2["token"] == meta["token"]
-        out = asyncio.run(_call(_url(meta2), meta2["token"], "status", {}))
-        assert isinstance(out, dict) and "configured" in out
-    finally:
-        proc2.terminate()
-        proc2.wait(timeout=8)
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            out = asyncio.run(asyncio.wait_for(
+                _call(_url(meta), meta["token"], "status", {}), 5))
+            break                                  # a respawn answered
+        except Exception:                          # noqa: BLE001 — gap
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    "watchdog never respawned the daemon") from None
+            time.sleep(0.5)
+    # same URL + token: the registered IDE entry never changes
+    meta2 = json.loads((workdir / "http.json").read_text())
+    assert meta2["port"] == meta["port"], \
+        "daemon restart must re-bind the registered port"
+    assert meta2["token"] == meta["token"]
+    assert isinstance(out, dict) and "configured" in out
 
 
 def test_jetbrains_query_token_auth(daemon, workdir):

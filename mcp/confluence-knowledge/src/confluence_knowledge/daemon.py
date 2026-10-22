@@ -118,7 +118,18 @@ class Daemon:
         self.workdir = workdir
         self.only_module = only_module
         self.owner = daemon_owner()
-        self.rpc = RpcDb(workdir / "rpc.db")
+        # a watchdog respawn can boot while the previous daemon still
+        # holds the WAL lock — transient lock on open, retry briefly
+        import sqlite3
+        self.rpc = None
+        for _ in range(30):
+            try:
+                self.rpc = RpcDb(workdir / "rpc.db")
+                break
+            except sqlite3.OperationalError:
+                time.sleep(0.2)
+        if self.rpc is None:
+            self.rpc = RpcDb(workdir / "rpc.db")   # final attempt raises
         self.stop = threading.Event()
         self._inflight: list[threading.Thread] = []
         self._http = None
