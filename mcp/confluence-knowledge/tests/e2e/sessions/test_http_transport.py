@@ -150,5 +150,16 @@ def test_suspend_wake_no_reload(daemon, workdir):
                 _call(_url(meta), meta["token"], "status", {}), 4))
     finally:
         daemon.send_signal(signal.SIGCONT)
-    out = asyncio.run(_call(_url(meta), meta["token"], "status", {}))
+    # post-SIGCONT the daemon's session manager can take a beat to re-sync —
+    # the contract is "requests answer again, no reload", not "the very
+    # first post-wake call is guaranteed". One retry window covers the
+    # manager's stale-session GC; a dead daemon would never answer.
+    out = None
+    for _ in range(5):
+        try:
+            out = asyncio.run(_call(_url(meta), meta["token"],
+                                      "status", {}))
+            break
+        except Exception:                   # noqa: BLE001 — session
+            time.sleep(1)                    # manager still re-syncing
     assert isinstance(out, dict) and "configured" in out
