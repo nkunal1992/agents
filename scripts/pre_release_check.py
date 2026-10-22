@@ -111,8 +111,13 @@ def main() -> int:
     rows: list[tuple[str, str, str]] = []
     print("pre-release gate — #212\n" + "-" * 40)
     wheels = [args.pkg] if args.pkg else PKGS
-    for pkg in wheels:
-        wheel_stage(pkg, rows)
+    # wheels are independent subprocess builds — run them in parallel.
+    # The legs stay SEQUENTIAL on purpose: both spawn ONNX-saturated
+    # daemons; overlapping them would starve the cloud crawl of CPU and
+    # turn a passing run into a spurious wait_for_crawl timeout.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(wheels)) as pool:
+        list(pool.map(lambda p: wheel_stage(p, rows), wheels))
     engine_stage(rows)
     cloud_stage(rows)
 
