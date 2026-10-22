@@ -73,3 +73,5 @@ Started: 2026-10-21 ~22:30 local.
 | Wheel quality | twine PASSED; fresh-venv install + journey on artifact green |
 | Field-found fixes | orphan-resume, start_crawl dedup, corrupt/busy tri-state, page-title indexing, auth-pause visibility, model-note masking, unflushed phases — all in 0.10.2 |
 | 08:35 | Phase 4 | local-knowledge + sharepoint-knowledge 0.7.1 staged | both 0.7.0 wheels predate the verify_citations daemon-routing fix (cadf21d landed post-tag). Bumped → rc1 tagged → publish queued |
+| 09:20 | field | agent-doc drift | confluence agent file: `register_token` was never in `tools:` frontmatter (the clipboard onboarding couldn't be invoked); creds were asked BEFORE the IDE reload so tools weren't callable yet → agent fell back to terminal `setup` (the screenshot). Fixed: register_token in tools, flow reordered reload→credentials, numbered env pick |
+| 09:20 | field | `database is locked` on Windows CI | daemon roundtrip's `errors=['OperationalError: database is locked']` mid-fetch — SQLITE_BUSY_SNAPSHOT isn't covered by connect(timeout); added `_LockedRetry` (BEGIN IMMEDIATE + bounded backoff) on all index writes |
