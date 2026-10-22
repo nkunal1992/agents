@@ -74,3 +74,15 @@ jobs:
           PYTHONIOENCODING: utf-8
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: python mcp/sharepoint-knowledge/scripts/e2e_failure_sp.py
+      - name: Kill leftover daemon/watchdog orphans
+        if: always()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            powershell -NoProfile -Command "Get-CimInstance Win32_Process | \
+              Where-Object { \$_.CommandLine -match 'confluence_knowledge\.(daemon|watchdog|server)' } | \
+              ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -EA SilentlyContinue }" || true
+          else
+            pkill -f "confluence_knowledge.\(daemon\|watchdog\|server\)" 2>/dev/null || true
+          fi
+          exit 0

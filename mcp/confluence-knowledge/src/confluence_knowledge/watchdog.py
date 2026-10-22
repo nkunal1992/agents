@@ -112,12 +112,20 @@ def stop_daemon(home: Path, timeout: float = 8) -> dict:
     (home / _STOP_FILE).write_text("1")
     out["stop_file"] = True
     rpc = RpcDb(home / "rpc.db")
-    for name, pid in (("daemon", rpc.daemon_pid()),
-                      ("watchdog", _watchdog_pid(home))):
-        if pid is None:
+    # boot race: the daemon may still be starting (no lease yet) — the
+    # pid FILE is written at spawn time, before the lease exists
+    pid = rpc.daemon_pid()
+    if pid is None:
+        try:
+            pid = int((home / ".daemon.pid").read_text().strip())
+        except (OSError, ValueError):
+            pid = None
+    for name, pid_ in (("daemon", pid),
+                       ("watchdog", _watchdog_pid(home))):
+        if pid_ is None:
             continue
         try:
-            os.kill(pid, _TERM)
+            os.kill(pid_, _TERM)
             out[f"{name}_signalled"] = True
         except (ProcessLookupError, PermissionError, OSError):
             pass
