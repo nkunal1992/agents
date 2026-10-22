@@ -387,7 +387,7 @@ class Index:
         error). Must run inside a transaction on self.db."""
         for t in _STAGE_TABLES:
             self.db.execute(
-                f"DELETE FROM {t} WHERE job_id != ? AND job_id NOT IN "
+                f"DELETE FROM {t} WHERE job_id != ? AND job_id NOT IN "  # nosec B608 — module-constant fragment, no user input
                 "(SELECT job_id FROM jobs WHERE state IN ('queued','running'))",
                 (SCRATCH_JOB,))
         self.db.execute(
@@ -491,7 +491,7 @@ class Index:
                 part = chunk_ids[off:off + step]
                 q = ",".join("?" * len(part))
                 for cid, blob in self._read().execute(
-                        f"SELECT chunk_id,payload FROM sparse_vectors "
+                        f"SELECT chunk_id,payload FROM sparse_vectors "  # nosec B608 — module-constant fragment, no user input
                         f"WHERE chunk_id IN ({q})", part):
                     # layout: int64[n] indices + float32[n] values → n = len/12
                     k = len(blob) // 12
@@ -510,7 +510,7 @@ class Index:
         with self.lock, _LockedRetry(self.db):
             for t in ("pages", "chunks", "chunks_fts", "vectors",
                       "sparse_vectors", "term_stats") + _STAGE_TABLES:
-                self.db.execute(f"DELETE FROM {t}")
+                self.db.execute(f"DELETE FROM {t}")  # nosec B608 — module-constant fragment, no user input
             self.db.execute(
                 "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
                 " OR key LIKE 'levels:%' OR key LIKE 'warns:%'"
@@ -582,20 +582,20 @@ class Index:
             # doomed live rows: restaged (replaced below) or no longer seen
             doom = ("page_id IN (SELECT pid FROM pub_staged) "
                     "OR page_id NOT IN (SELECT pid FROM pub_seen)")
-            doomed_chunks = ("SELECT chunk_id FROM chunks WHERE " + doom)
+            doomed_chunks = ("SELECT chunk_id FROM chunks WHERE " + doom)  # nosec B608 — module-constant fragment
             deleted_n = self.db.execute(
                 "SELECT COUNT(*) FROM pages WHERE page_id NOT IN "
                 "(SELECT pid FROM pub_seen)").fetchone()[0]
             staged_n = self.db.execute(
                 "SELECT COUNT(*) FROM pub_staged").fetchone()[0]
             self.db.execute(
-                f"DELETE FROM chunks_fts WHERE chunk_id IN ({doomed_chunks})")
+                f"DELETE FROM chunks_fts WHERE chunk_id IN ({doomed_chunks})")  # nosec B608 — module-constant fragment, no user input
             self.db.execute(
-                f"DELETE FROM vectors WHERE chunk_id IN ({doomed_chunks})")
+                f"DELETE FROM vectors WHERE chunk_id IN ({doomed_chunks})")  # nosec B608 — module-constant fragment, no user input
             self.db.execute(
-                f"DELETE FROM sparse_vectors WHERE chunk_id IN ({doomed_chunks})")
-            self.db.execute(f"DELETE FROM chunks WHERE {doom}")
-            self.db.execute(f"DELETE FROM pages WHERE {doom}")
+                f"DELETE FROM sparse_vectors WHERE chunk_id IN ({doomed_chunks})")  # nosec B608 — module-constant fragment, no user input
+            self.db.execute(f"DELETE FROM chunks WHERE {doom}")  # nosec B608 — module-constant fragment, no user input
+            self.db.execute(f"DELETE FROM pages WHERE {doom}")  # nosec B608 — module-constant fragment, no user input
             # staged content becomes the live snapshot
             self.db.execute(
                 "INSERT INTO pages(page_id,parent_id,title,url,level,version,"
@@ -616,7 +616,7 @@ class Index:
                 "INSERT INTO sparse_vectors SELECT chunk_id,payload "
                 "FROM sparse_vectors_stage WHERE job_id=?", (job_id,))
             for t in _STAGE_TABLES:
-                self.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job_id,))
+                self.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job_id,))  # nosec B608 — module-constant fragment, no user input
             self._purge_dead_stage()
             self._rebuild_term_stats()
             self.db.execute(
@@ -653,7 +653,7 @@ class Index:
                 part = chunk_ids[off:off + step]
                 q = ",".join("?" * len(part))
                 for r in self._read().execute(
-                        f"SELECT chunk_id,page_id,heading,kind,ordinal,text "
+                        f"SELECT chunk_id,page_id,heading,kind,ordinal,text "  # nosec B608 — module-constant fragment, no user input
                         f"FROM chunks WHERE chunk_id IN ({q})", part):
                     out[r[0]] = {"chunk_id": r[0], "page_id": r[1],
                                  "heading": r[2], "kind": r[3],
@@ -842,7 +842,7 @@ class Index:
                 part = chunk_ids[off:off + step]
                 q = ",".join("?" * len(part))
                 for cid, b in self._read().execute(
-                        f"SELECT chunk_id,vec FROM vectors "
+                        f"SELECT chunk_id,vec FROM vectors "  # nosec B608 — module-constant fragment, no user input
                         f"WHERE chunk_id IN ({q})", part):
                     out[cid] = np.frombuffer(b, dtype=np.float32)
         return out

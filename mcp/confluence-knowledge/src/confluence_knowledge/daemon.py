@@ -278,7 +278,13 @@ class Daemon:
                      "Accept": "application/json, text/event-stream",
                      "Authorization": f"Bearer {meta['token']}"})
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
+            # localhost-only probe — the URL is built above from our own
+            # http.json; assert the scheme/host so a tampered meta can't
+            # smuggle file:/ or a remote origin into urllib
+            if not req.full_url.startswith("http://127.0.0.1:"):
+                log.warning("mcp self-probe refused non-local URL")
+                return False
+            with urllib.request.urlopen(req, timeout=10) as r:  # nosec B310
                 return r.status == 200
         except Exception:
             log.warning("mcp self-probe failed", exc_info=True)

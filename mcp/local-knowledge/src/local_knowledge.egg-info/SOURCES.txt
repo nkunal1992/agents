@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 src/local_knowledge/__init__.py

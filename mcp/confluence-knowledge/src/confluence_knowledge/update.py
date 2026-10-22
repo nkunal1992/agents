@@ -77,7 +77,7 @@ def _parse_ts(raw: str | None) -> datetime | None:
 def _pypi(dist: str, timeout: float = TIMEOUT) -> dict | None:
     url = os.environ.get(ENV_INDEX, INDEX).format(dist=dist)
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # nosec B310 — https-pinned default; env override is the documented private-index knob
             return json.loads(r.read())
     except Exception:  # noqa: BLE001 — every failure means "couldn't check"
         return None

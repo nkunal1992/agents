@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.8.0"
 description = "SharePoint connector for the grounded-Q&A engine — site pages + document libraries, Entra device-code sign-in, local models, cited answers"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Apache-2.0"}
+license = "MIT"
 dependencies = [
     "confluence-knowledge[files]~=0.11.0",
     "msal>=1.31",

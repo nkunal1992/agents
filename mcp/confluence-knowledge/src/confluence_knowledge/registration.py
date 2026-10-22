@@ -151,7 +151,9 @@ def _mounted_services(meta: dict) -> list[str]:
         req = urllib.request.Request(
             f"http://127.0.0.1:{meta['port']}/_services",
             headers={"Authorization": f"Bearer {meta['token']}"})
-        with urllib.request.urlopen(req, timeout=3) as r:
+        if not req.full_url.startswith("http://127.0.0.1:"):
+            return []                          # refuse a tampered meta URL
+        with urllib.request.urlopen(req, timeout=3) as r:  # nosec B310
             return _json.loads(r.read()).get("services", [])
     except Exception:                           # noqa: BLE001 — probe is
         return []                                # best-effort
