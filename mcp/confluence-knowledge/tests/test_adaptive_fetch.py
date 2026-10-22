@@ -13,6 +13,9 @@ def _ctl(tmp_path, monkeypatch, battery=False):
     # saver halves the cap independently of the CPU ladder; _battery is
     # latched at ctor so the env must land BEFORE the factory call
     monkeypatch.setenv("KNOWLEDGE_FORCE_BATTERY", "1" if battery else "0")
+    # the saver is opt-in (default off since the battery flip) — the
+    # battery-floor path under test requires it explicitly enabled
+    monkeypatch.setenv("KNOWLEDGE_BATTERY_SAVER", "1" if battery else "0")
     idx = Index(tmp_path / "s.db")
     idx.create_job("j", "1")
     idx.save_job("j", "running", ["page:1"], [])
