@@ -267,9 +267,16 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         workdir.mkdir(parents=True, exist_ok=True)
         pid_path = workdir / ".daemon.pid"
         # a deliberate respawn means someone wants the daemon up — a
-        # stale stop-file from an earlier `X stop` must not leave this
-        # process watchdog-less forever
-        (workdir / ".watchdog.stop").unlink(missing_ok=True)
+        # STALE stop-file from an earlier `X stop` must not leave this
+        # process watchdog-less forever. But a FRESH stop-file means a
+        # shutdown is mid-flight — an unlink would resurrect the pair
+        # the user just killed, so only honour it when it's older than
+        # a watchdog poll cycle
+        stop = workdir / ".watchdog.stop"
+        if stop.exists():
+            age = time.time() - stop.stat().st_mtime
+            if age > 5:
+                stop.unlink(missing_ok=True)
         cli_env = dict(os.environ)
         cli_env["KNOWLEDGE_DAEMON_ROLE"] = "1"   # the brain never proxies
         if env:

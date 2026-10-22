@@ -145,6 +145,60 @@ def test_watchdog_respawns_dead_daemon(tmp_path, monkeypatch):
     assert spawned, "watchdog never attempted a respawn"
 
 
+def test_ensure_daemon_respects_fresh_stop_file(tmp_path, monkeypatch):
+    """Bug hunt: a `.watchdog.stop` written moments ago means a shutdown
+    is mid-flight — ensure_daemon must NOT unlink it (that would let
+    the watchdog resurrect the pair the user just killed). A STALE
+    file is fair game: a later spawn is new intent."""
+    import json as _json
+    import socket as _sock
+
+    import confluence_knowledge.rpc as rpc_mod
+    from confluence_knowledge import settings
+    monkeypatch.setattr(settings, "daemon_home", lambda: tmp_path)
+    spawned = []
+    monkeypatch.setattr(
+        rpc_mod.RpcDb, "daemon_alive",
+        lambda self: bool(spawned))        # dead → alive after spawn
+    srv = _sock.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(1)
+    (tmp_path / "http.json").write_text(
+        _json.dumps({"port": srv.getsockname()[1], "token": "x"}))
+    class _Proc:
+        pid = 4242
+    monkeypatch.setattr(rpc_mod.subprocess, "Popen",
+                        lambda *a, **k: spawned.append(True) or _Proc())
+
+    fresh = tmp_path / ".watchdog.stop"
+    fresh.write_text("1")
+    rpc_mod.ensure_daemon(RpcDb(tmp_path / "rpc.db"))
+    assert fresh.exists(), "fresh stop-file was unlinked — mid-stop resurrect"
+    assert spawned, "daemon itself should still spawn — tools stay up"
+
+    import os
+    os.utime(fresh, (0, 0))                     # ancient mtime → stale
+    spawned.clear()                            # daemon "dead" again
+    rpc_mod.ensure_daemon(RpcDb(tmp_path / "rpc.db"))
+    assert not fresh.exists(), "stale stop-file should clear"
+    assert spawned, "daemon never spawned after stale stop cleared"
+
+
+def test_stop_never_signals_pid_reused_foreign_process(tmp_path):
+    """Bug hunt: a stale .daemon.pid file (or a fresh lease row) that
+    now points at an unrelated process must NOT be SIGTERMed — pid
+    reuse hands the number to an innocent program."""
+    import subprocess
+
+    from confluence_knowledge.watchdog import stop_daemon
+    victim = subprocess.Popen(["sleep", "60"])
+    try:
+        (tmp_path / ".daemon.pid").write_text(str(victim.pid))
+        out = stop_daemon(tmp_path, timeout=1)
+        assert out["daemon_signalled"] is False
+        assert victim.poll() is None, "foreign process was killed"
+    finally:
+        victim.kill()
+
+
 def test_http_services_endpoint_lists_mounts(tmp_path, monkeypatch):
     """/_services is the mount registry register() probes — it must name
     exactly the mounted set."""

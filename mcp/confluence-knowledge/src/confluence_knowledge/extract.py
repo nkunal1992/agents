@@ -211,6 +211,8 @@ def extract_chunks(storage_html: str, measure=_word_count,
         elif el.name == "table":
             flush()
             t = _table_to_text(el)
+            if not t:
+                continue            # gridless/empty table → no chunks
             for seg in split_table_text(t, budget, measure):
                 chunks.append(Chunk(seg, " > ".join(heading_path), "table",
                                     len(chunks)))

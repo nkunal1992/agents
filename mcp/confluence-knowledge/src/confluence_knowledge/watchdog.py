@@ -73,6 +73,10 @@ def run(home: Path) -> int:
     fails = 0
     while home.exists() and not (home / _STOP_FILE).exists():
         if not rpc.daemon_alive():
+            # a `stop` may have landed mid-iteration — re-check before
+            # respawning so the shutdown is honoured, not resurrected
+            if (home / _STOP_FILE).exists():
+                break
             if fails >= 3:
                 # e.g. the package was uninstalled — respawning a
                 # crash-loop forever is worse than standing down
@@ -93,6 +97,30 @@ def run(home: Path) -> int:
     except OSError:
         pass
     return 0
+
+
+def _cmdline_is(pid: int, needle: str) -> bool:
+    """Pid-file entries can outlive their process — pid reuse hands the
+    number to an innocent program, so a bare os.kill is wrong. Verify
+    the cmdline before signalling (mirrors watchdog_running's check)."""
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode()
+        return needle in cmdline
+    except OSError:
+        try:
+            import psutil
+            return needle in " ".join(
+                psutil.Process(pid).cmdline())
+        except Exception:                       # noqa: BLE001 — can't
+            return False                        # verify → don't signal
+
+
+def _daemon_pid_file(home: Path) -> int | None:
+    try:
+        pid = int((home / ".daemon.pid").read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return pid if _cmdline_is(pid, "confluence_knowledge.daemon") else None
 
 
 def _watchdog_pid(home: Path) -> int | None:
@@ -116,11 +144,11 @@ def stop_daemon(home: Path, timeout: float = 8) -> dict:
     # pid FILE is written at spawn time, before the lease exists
     pid = rpc.daemon_pid()
     if pid is None:
-        try:
-            pid = int((home / ".daemon.pid").read_text().strip())
-        except (OSError, ValueError):
-            pid = None
-    for name, pid_ in (("daemon", pid),
+        pid = _daemon_pid_file(home)   # stale-file path — cmdline verified
+    daemon_pid = (pid if pid is not None and
+                  _cmdline_is(pid, "confluence_knowledge.daemon")
+                  else None)
+    for name, pid_ in (("daemon", daemon_pid),
                        ("watchdog", _watchdog_pid(home))):
         if pid_ is None:
             continue
