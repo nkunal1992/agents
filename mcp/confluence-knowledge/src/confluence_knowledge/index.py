@@ -99,6 +99,38 @@ def _batches(ids: list[str], size: int = 5000):
     for i in range(0, len(ids), size):
         yield ids[i:i + size]
 
+class _LockedRetry:
+    """sqlite3 database context manager that retries `database is locked`.
+
+    WAL writers get SQLITE_BUSY_SNAPSHOT instantly — connect(timeout=30)
+    only covers lock contention, not checkpoint starvation behind a
+    reader's snapshot (real failure on loaded Windows CI runners). A
+    small bounded retry turns the snapshot conflict into a transient.
+    """
+    _TRIES = 6
+    _BACKOFF = (0.05, 0.1, 0.2, 0.4, 0.8)
+
+    def __init__(self, db: sqlite3.Connection):
+        self.db = db
+
+    def __enter__(self):
+        for attempt in range(self._TRIES):
+            try:
+                self.db.execute("BEGIN IMMEDIATE")
+                return self.db
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e) or attempt == self._TRIES - 1:
+                    raise
+                time.sleep(self._BACKOFF[attempt])
+        return self.db                       # pragma: no cover
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.db.commit()
+        else:
+            self.db.rollback()
+        return False
+
 
 class Index:
     def __init__(self, path: Path, readonly: bool = False):
@@ -188,7 +220,7 @@ class Index:
 
     # ---- jobs ----
     def create_job(self, job_id: str, root_page: str) -> None:
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             self.db.execute(
                 "INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?)",
                 (job_id, root_page, "queued", time.time(),
@@ -223,9 +255,8 @@ class Index:
     def abandon_running_jobs(self) -> None:
         """A new crawl supersedes any unfinished one (e.g. an earlier failed
         attempt) so it can't leave coverage reported as partial forever."""
-        with self.lock:
+        with self.lock, _LockedRetry(self.db):
             self.db.execute("UPDATE jobs SET state='abandoned' WHERE state='running'")
-            self.db.commit()
 
     def latest_job(self) -> dict | None:
         with self._rlock:
@@ -234,11 +265,10 @@ class Index:
         return row and {"job_id": row[0], "state": row[1], "errors": json.loads(row[2])}
 
     def save_job(self, job_id: str, state: str, queue: list, errors: list) -> None:
-        with self.lock:
+        with self.lock, _LockedRetry(self.db):
             self.db.execute(
                 "UPDATE jobs SET state=?, queue=?, errors=? WHERE job_id=?",
                 (state, json.dumps(queue), json.dumps(errors), job_id))
-            self.db.commit()
 
     def meta_get(self, key: str) -> str | None:
         with self._rlock:
@@ -262,10 +292,9 @@ class Index:
         return out
 
     def meta_set(self, key: str, value: str) -> None:
-        with self.lock:
+        with self.lock, _LockedRetry(self.db):
             self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                             (key, value))
-            self.db.commit()
 
     # ---- cross-process worker lease ----
     # Every MCP server process (each IDE window spawns one) could otherwise
@@ -281,7 +310,7 @@ class Index:
             psutil = None
         host = socket.gethostname()
         now = time.time()
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             row = self.db.execute(
                 "SELECT owner,pid,heartbeat FROM job_lease WHERE job_id=?",
                 (job_id,)).fetchone()
@@ -317,7 +346,7 @@ class Index:
         """Refresh our lease; returns the job's current state so the worker
         notices cross-process cancel/supersede. None when not our lease."""
         now = time.time()
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             cur = self.db.execute(
                 "UPDATE job_lease SET heartbeat=? WHERE job_id=? AND owner=?",
                 (now, job_id, owner))
@@ -328,7 +357,7 @@ class Index:
             return row[0] if row else "missing"
 
     def release_lease(self, job_id: str, owner: str) -> None:
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             self.db.execute(
                 "DELETE FROM job_lease WHERE job_id=? AND owner=?",
                 (job_id, owner))
@@ -353,7 +382,7 @@ class Index:
                     job_id: str = SCRATCH_JOB) -> None:
         """Stage a crawled page under its job. Live tables are NEVER touched
         here — readers keep the last published snapshot until publish()."""
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             if job_id != SCRATCH_JOB:
                 row = self.db.execute(
                     "SELECT state FROM jobs WHERE job_id=?",
@@ -458,7 +487,7 @@ class Index:
         """Drop all indexed content (pages/chunks/vectors, live AND staged)
         + the model marker. Job rows are kept for history. Used when a
         model change makes the existing vector space invalid."""
-        with self.lock:
+        with self.lock, _LockedRetry(self.db):
             for t in ("pages", "chunks", "chunks_fts", "vectors",
                       "sparse_vectors", "term_stats") + _STAGE_TABLES:
                 self.db.execute(f"DELETE FROM {t}")
@@ -466,11 +495,10 @@ class Index:
                 "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
                 " OR key LIKE 'levels:%' OR key LIKE 'warns:%'"
                 " OR key LIKE 'keep:%' OR key LIKE 'build:%'")
-            self.db.commit()
             self._cache = None  # wiped content must not answer queries
 
     def set_model_id(self, model_id: str) -> None:
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('embed_model', ?)",
                             (model_id,))
 
@@ -517,7 +545,7 @@ class Index:
 
         Returns {staged, deleted, kept} — surfaced in job state so a
         refresh's effect is auditable (#176)."""
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             staged_n = deleted_n = 0
             self.db.execute(
                 "CREATE TEMP TABLE IF NOT EXISTS pub_seen(pid TEXT PRIMARY KEY)")
@@ -645,7 +673,7 @@ class Index:
         job's staging — for re-crawls where content_hash matched (the
         page is byte-identical, so its embeddings still hold). Clears any
         same-job staged rows first. False when no live page exists."""
-        with self.lock, self.db:
+        with self.lock, _LockedRetry(self.db):
             page = self.db.execute(
                 "SELECT page_id,parent_id,title,url,level,version,"
                 "fetched_at,content_hash,warnings FROM pages "

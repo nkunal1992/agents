@@ -74,9 +74,13 @@ set up confluence-knowledge
 The agent does everything itself from the chat — Python discovery, virtual
 environment, service install, model download, and it writes the IDE's MCP
 config files (`confluence-knowledge register`) so there's nothing to paste
-into settings. You do exactly two things manually: run `confluence-knowledge
-setup` in your own terminal when asked (hidden token input, OS credential
-store) and reload the IDE once so the new server registers.
+into settings. The credential step happens in chat too — when the agent
+asks, you copy your API token and it reads it straight from your OS
+clipboard (`register_token`), validates it, and stores it in the OS
+credential store — the token never enters the conversation. The only
+manual step left is reloading the IDE once so the new server registers.
+(Terminal users can still run `confluence-knowledge setup` — hidden
+input, same credential store.)
 
 Manual install (if preferred):
 
@@ -170,7 +174,7 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
 | `database is locked` | Fixed in v0.1.6+ (self-deadlock bug); upgrade the service |
 | `Request timeout` on `crawl_step` | Fixed in v0.2.1: the crawl runs server-side in the background; `crawl_step` returns instantly with progress |
 | "loading local models" | First call per session warms the models; retry the tool call |
-| `no stored token` | Run `confluence-knowledge setup` in your own terminal |
+| `no stored token` | Ask the agent to register again — it reads the token from your clipboard. Terminal: `confluence-knowledge setup` |
 | Two `python.exe` processes on Windows | Normal — a venv `python.exe` is a launcher that starts the base interpreter as its child |
 | Model download blocked | Copy the `bge-m3`, `bge-reranker-v2-m3-ONNX`, and `fastembed` dirs into `~/.confluence-knowledge/models/` from a colleague or mirror |
 | doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |

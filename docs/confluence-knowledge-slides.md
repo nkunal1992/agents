@@ -156,7 +156,7 @@ The last row matters most: instructions ask nicely; the verifier *checks*.
 - Works behind **TLS-inspecting proxies** (bundles `pip-system-certs`)
 - Survives **ARM64/x64 confusion** (diagnosed + documented)
 - **Resumable** crawl — network blips don't lose progress
-- **Self-bootstrapping** — the agent installs and registers itself from chat; one terminal command (`setup`) for the token, one IDE reload
+- **Self-bootstrapping** — the agent installs and registers itself from chat; the token lands via clipboard (`register_token` — never typed, never in chat), one IDE reload
 
 Every bullet is a real failure we hit, reproduced, and fixed.
 
