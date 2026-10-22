@@ -99,6 +99,16 @@ def test_concurrency_bound_is_respected(tmp_path, monkeypatch):
 
 
 def test_parallel_is_much_faster(tmp_path, monkeypatch):
+    # measure the sequential baseline on THIS runner — an absolute bound
+    # flakes on congested CI (a 2.0s cap failed at 2.875s on Windows)
+    monkeypatch.setenv("KNOWLEDGE_FETCH_CONCURRENCY", "1")
+    idx_seq = Index(tmp_path / "seq.db")
+    c = Crawler(_fan_client(delay=0.05), idx_seq, "datacenter")
+    job = c.start("1")
+    t0 = time.monotonic()
+    c.step(job, batch=None)
+    sequential = time.monotonic() - t0
+
     monkeypatch.setenv("KNOWLEDGE_FETCH_CONCURRENCY", "8")
     idx = Index(tmp_path / "s.db")
     c = Crawler(_fan_client(delay=0.05), idx, "datacenter")
@@ -106,11 +116,10 @@ def test_parallel_is_much_faster(tmp_path, monkeypatch):
     t0 = time.monotonic()
     c.step(job, batch=None)
     elapsed = time.monotonic() - t0
-    # sequential = pages × 2 calls × 50ms ≈ 2.5s; parallel should beat it
-    # decisively. 1.5s was a real crawl on a fast box but flaked at 1.6s
-    # on a congested CI runner — the signal is "well under sequential",
-    # not the precise factor.
-    assert elapsed < 2.0
+    # parallel must decisively beat the runner's own sequential baseline —
+    # the ratio is the signal, not an absolute wall-clock bound
+    assert elapsed < sequential * 0.5, \
+        f"parallel {elapsed:.2f}s vs sequential {sequential:.2f}s"
 
 
 def test_unchanged_pages_reuse_rows(tmp_path, monkeypatch):
