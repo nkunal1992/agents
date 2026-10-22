@@ -1,0 +1,53 @@
+[
+ {
+  "fetch_ms": 24096.878794021904,
+  "wait_ms": 2547.1135412808508,
+  "extract_ms": 813.5833332780749,
+  "embed_ms": 2321603.4842091613,
+  "sparse_ms": 697.887210175395,
+  "store_ms": 151.72208286821842,
+  "chunks": 2463,
+  "pages": 6,
+  "battery_saver": false,
+  "pages_per_s": 0.0,
+  "wall_s": 2326.1,
+  "pages_done": 6,
+  "label": "legacy (3t/4b)",
+  "threads": 3,
+  "max_batch": 4
+ },
+ {
+  "fetch_ms": 22310.7319585979,
+  "wait_ms": 2705.7549187447876,
+  "extract_ms": 1154.775499831885,
+  "embed_ms": 2122438.426416833,
+  "sparse_ms": 1073.1180827133358,
+  "store_ms": 289.65999907813966,
+  "chunks": 2505,
+  "pages": 9,
+  "battery_saver": false,
+  "pages_per_s": 0.0,
+  "wall_s": 2128.0,
+  "pages_done": 9,
+  "label": "tuned (8t/16b)",
+  "threads": 8,
+  "max_batch": 16
+ },
+ {
+  "fetch_ms": 22225.766834104434,
+  "wait_ms": 3431.9135409314185,
+  "extract_ms": 1396.3351652491838,
+  "embed_ms": 4494265.221375041,
+  "sparse_ms": 1240.7971252687275,
+  "store_ms": 513.2460417225957,
+  "chunks": 2519,
+  "pages": 10,
+  "battery_saver": false,
+  "pages_per_s": 0.0,
+  "wall_s": 4501.2,
+  "pages_done": 10,
+  "label": "adaptive (auto)",
+  "threads": 3,
+  "max_batch": 6
+ }
+]

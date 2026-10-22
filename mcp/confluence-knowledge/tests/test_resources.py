@@ -16,18 +16,20 @@ def _calm(monkeypatch):
 
 def test_default_threads_scale_with_cores(monkeypatch):
     _calm(monkeypatch)
-    # half the cores, floored at 2, capped at 10
-    for cpus, want in ((2, 2), (8, 4), (12, 6), (16, 8), (64, 10)):
-        monkeypatch.setattr(os, "cpu_count", lambda c=cpus: c)
+    # half the physical cores, floored at 2, capped at 16
+    for cpus, want in ((2, 2), (8, 4), (12, 6), (16, 8), (32, 16),
+                       (64, 16)):
+        monkeypatch.setattr(resources, "_phys_cores", lambda c=cpus: c)
         monkeypatch.delenv("KNOWLEDGE_THREADS", raising=False)
         assert limits().threads == want
+    monkeypatch.setattr(resources, "_phys_cores", lambda: 4)
     monkeypatch.setattr(os, "cpu_count", lambda: None)
     assert limits().threads == 2
 
 
 def test_default_threads_halve_under_pressure(monkeypatch):
     _calm(monkeypatch)
-    monkeypatch.setattr(os, "cpu_count", lambda: 20)
+    monkeypatch.setattr(resources, "_phys_cores", lambda: 20)
     assert limits().threads == 10
     # battery alone no longer halves — its throttle is the duty-cycle
     # sleep in the embed loop, not smaller pools
@@ -41,7 +43,7 @@ def test_default_threads_halve_under_pressure(monkeypatch):
 def test_default_max_batch_tracks_free_ram(monkeypatch):
     _calm(monkeypatch)
     monkeypatch.delenv("KNOWLEDGE_MAX_BATCH", raising=False)
-    for mb, want in ((1024.0, 4), (4096.0, 8), (12000.0, 12),
+    for mb, want in ((1024.0, 4), (4096.0, 8), (12000.0, 16),
                      (32768.0, 16)):
         monkeypatch.setattr(resources, "_avail_mb", lambda a=mb: a)
         assert limits().max_batch == want
@@ -74,7 +76,7 @@ def test_limits_env_overrides_and_invalid(monkeypatch):
 
 
 def _default():
-    return max(2, min(10, (os.cpu_count() or 4) // 2))
+    return max(2, min(16, (resources._phys_cores() or 4) // 2))
 
 
 def test_lower_priority_calls_nice(monkeypatch):

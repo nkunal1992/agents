@@ -108,10 +108,57 @@ def row(st: dict) -> str:
             f"{st.get('pages_per_s', 0):>9.2f}")
 
 
+def bench_embed_sweep(texts: list[str], batches: list[int]) -> None:
+    """Direct-embedder sweep — chunks/s + peak RSS at each max_batch on
+    the real model. The throughput knee tells us where the adaptive
+    ceiling should sit (32 is a guess until measured)."""
+    sys.path.insert(0, str(REPO / "mcp" / "confluence-knowledge" / "src"))
+    import psutil
+    from confluence_knowledge.retrieval import LocalEmbedder
+
+    home = Path(tempfile.mkdtemp(prefix="bench-"))
+    emb = LocalEmbedder(home)
+    proc = psutil.Process()
+    print(f"\n{'max_batch':>9} {'chunks/s':>9} {'ms/chunk':>9} "
+          f"{'peak_rss_delta':>15}")
+    for mb in batches:
+        os.environ["KNOWLEDGE_MAX_BATCH"] = str(mb)
+        base = proc.memory_info().rss
+        emb.embed(texts)                       # warmup
+        t0 = time.monotonic()
+        emb.embed(texts)
+        dt = time.monotonic() - t0
+        peak = proc.memory_info().rss - base
+        print(f"{mb:>9} {len(texts) / dt:>9.1f} "
+              f"{dt / len(texts) * 1000:>9.0f} "
+              f"{peak // 1048576:>13} MB")
+    os.environ.pop("KNOWLEDGE_MAX_BATCH", None)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages", type=int, default=30)
+    ap.add_argument("--batch-sweep", default=None,
+                    help="comma list e.g. 8,16,32,64 — direct embedder "
+                         "sweep at each max_batch (no crawl)")
     args = ap.parse_args()
+
+    if args.batch_sweep:
+        from seed_cloud import long_dense_body, medium_body
+        texts = []
+        for i in range(args.pages):
+            b = (long_dense_body(f"Spec {i}", 8) if i % 5 in (3, 4)
+                 else medium_body(f"Runbook {i}", 6))
+            import re
+            c = re.sub(r"<[^>]+>", " ", b)
+            words = c.split()
+            step = max(120, len(words) // 8)
+            texts.extend(" ".join(words[j:j + step])
+                         for j in range(0, len(words), step))
+        print(f"sweep corpus: {len(texts)} chunks")
+        bench_embed_sweep(texts,
+                          [int(x) for x in args.batch_sweep.split(",")])
+        return 0
 
     try:
         import psutil

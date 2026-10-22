@@ -75,11 +75,20 @@ def _pressured() -> bool:
     return _cpu_pct() > 70
 
 
+def _phys_cores() -> int:
+    """Physical cores — psutil reports 20 on an i7-13850HX (28 logical);
+    Apple Silicon returns all physical cores. Logical counting inflates
+    big-core machines with hyperthread pairs."""
+    n = _psutil.cpu_count(logical=False) if _psutil is not None else None
+    return n or os.cpu_count() or 4
+
+
 def _default_threads() -> int:
-    # ~half the cores, capped — sized per machine at session build.
-    # A 20-core/32GB workstation gets 10, a 4-core laptop 2; halved when
-    # the machine is already busy. KNOWLEDGE_THREADS wins.
-    t = max(2, min(10, (os.cpu_count() or 4) // 2))
+    # ~half the PHYSICAL cores, capped — sized per machine at session
+    # build. i7-13850HX → 10, M-series → ~7, a 4-core laptop → 2;
+    # halved when the machine is already busy. KNOWLEDGE_THREADS wins
+    # (set =16 to run full-bore on a 20-core workstation).
+    t = max(2, min(16, _phys_cores() // 2))
     return max(2, t // 2) if _pressured() else t
 
 
@@ -88,9 +97,11 @@ def _default_max_batch() -> int:
     # tokens carries ~a few tens of MB of activations, so scale to the
     # RAM that's actually free. Halved under CPU pressure. KNOWLEDGE_MAX_
     # BATCH wins. batch_tokens still clamps every run.
+    # Ceiling 16 measured on the nomic sweep: throughput is flat past
+    # ~8 (intra_op threads already saturate), bigger batches only grow
+    # padded memory — 32 ran ~7% SLOWER at +345 MB peak RSS.
     avail = _avail_mb()
-    b = (4 if avail < 2048 else 8 if avail < 8192
-         else 12 if avail < 16384 else 16)
+    b = (4 if avail < 2048 else 8 if avail < 8192 else 16)
     return max(2, b // 2) if _pressured() else b
 
 

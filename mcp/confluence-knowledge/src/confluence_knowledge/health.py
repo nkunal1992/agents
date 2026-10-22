@@ -68,7 +68,7 @@ def _server_process_count() -> int:
 
 
 def _resources_check(cli: str) -> dict:
-    from .resources import _psutil, limits
+    from .resources import _phys_cores, _psutil, limits
     lim = limits()
     n = _server_process_count()
     mem = ""
@@ -86,6 +86,7 @@ def _resources_check(cli: str) -> dict:
               f"max_batch={lim.max_batch} "
               f"idle_unload_s={lim.idle_unload_s:.0f} "
               f"fetch_concurrency={lim.fetch_concurrency}"
+              f" phys_cores={_phys_cores()}"
               f" guard={'on' if _psutil is not None else 'off (psutil missing)'}"
               f" on_battery={lim.on_battery()}{mem}"
               + (f"; {n} knowledge server process(es) running"
