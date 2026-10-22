@@ -33,3 +33,20 @@ Structured record of every failure hit during the RC runs and how each was resol
 - `health.py` used nested same-quote f-string interpolation (PEP 701,
   3.12+) — SyntaxError under py311 wheel tests. Fixed to inner single
   quotes; RC re-tagged.
+
+## ISSUE-003 — golden-set honesty regression under the new reranker
+
+- **Run**: `confluence-knowledge-v0.11.0rc1` (39818616828), step
+  "Golden-set RAG gate".
+- **Failure**: `honesty: 25% (1/4 unanswerable)` — unanswerable queries
+  (wifi password, meaning of life, Japanese weather) returned unrelated
+  evidence.
+- **Root cause**: `MIN_RERANK_SCORE = 0.02` was calibrated for the old
+  stack ("real reranker zeros junk at ~0.00"). `mxbai-rerank-xsmall-v1`
+  scores off-topic queries at 0.02–0.056 — above the old floor. Real
+  answers score ~0.99. Probed scores: junk band 0.021–0.055, real 0.9925.
+- **Fix**: floor raised to `0.1` — ~2× above the measured junk ceiling,
+  ~10× below real hits. `LOW_CONFIDENCE=0.3` still flags the 0.1–0.3
+  borderline band. Docs-consistency pin updated 0.02→0.1.
+- **Verify**: `eval_rag.py` locally → recall 96% (≥80%), honesty 100%
+  (4/4). Grounding + docs-consistency tests green (76 passed).

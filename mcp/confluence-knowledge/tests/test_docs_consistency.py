@@ -71,7 +71,7 @@ def test_doc_threshold_constants_match_code():
     for m in re.finditer(r"capped at (\d+) chars", all_docs):
         assert m.group(1) == ev_cap, \
             f"docs say evidence capped at {m.group(1)} but code slices {ev_cap}"
-    assert checks["MIN_RERANK_SCORE"] in ("0.02",), "noise floor changed — audit docs"
+    assert checks["MIN_RERANK_SCORE"] in ("0.1",), "noise floor changed — audit docs"
 
 
 def test_doc_claims_no_two_leg_retrieval():

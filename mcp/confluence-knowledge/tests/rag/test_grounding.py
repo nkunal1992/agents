@@ -45,7 +45,7 @@ def test_noise_floor_still_drops_junk(rag_index):
     class TinyReranker:
         def score(self, q, docs):
             import numpy as np
-            return np.full(len(docs), 0.01, dtype=np.float32)  # < 0.02
+            return np.full(len(docs), 0.01, dtype=np.float32)  # < 0.1 floor
 
     ev = retrieval.retrieve(rag_index, "password length", emb,
                             TinyReranker(), sp)

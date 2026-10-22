@@ -50,7 +50,10 @@ MODEL_MARKER = f"{EMBED_MODEL_ID}+taskpre+{SPARSE_MODEL_ID}"
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
 RERANK_MAX = 25          # bounds cross-encoder latency on CPU
-MIN_RERANK_SCORE = 0.02  # noise floor — real reranker zeros junk at ~0.00
+MIN_RERANK_SCORE = 0.1   # noise floor — mxbai-xsmall scores junk 0.02-0.06,
+                         # real answers ~0.9+; 0.1 sits an order of magnitude
+                         # between the bands (golden-set abstention regressed
+                         # when the old 0.02 floor met the new reranker)
 LOW_CONFIDENCE_SCORE = 0.3  # below this the hit is surfaced but flagged
 MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
 # Chunking is token-aware at CHUNK_TOKENS; the raised caps below are the
