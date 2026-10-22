@@ -306,6 +306,9 @@ class Index:
         pub = self.meta_get(f"publish:{job_id}")
         if pub:
             out["publish"] = json.loads(pub)   # staged/deleted/kept (#176)
+        st = self.meta_get(f"stats:{job_id}")
+        if st:
+            out["stats"] = json.loads(st)   # per-phase crawl timing
         return out
 
     def meta_set(self, key: str, value: str) -> None:

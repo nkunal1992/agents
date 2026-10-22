@@ -142,18 +142,24 @@ class LocalEmbedder:
         overcount massively; the embed path adds them once per input."""
         return len(self._tok.encode(text, add_special_tokens=False).ids)
 
-    def embed(self, texts: list[str]) -> np.ndarray:
+    def embed(self, texts: list[str],
+              on_batch=None) -> np.ndarray:
         """Length-sorted micro-batches — a batch's attention cost is
         B × Lmax², so an unbounded call padded to one long outlier could
         allocate gigabytes per layer. `batch_tokens`/`max_batch` bound
-        every run; results are numerically identical per item."""
+        every run; results are numerically identical per item.
+        `on_batch(done, total)` fires between micro-batches — the crawl
+        heartbeats + reports progress through it so a multi-minute dense
+        flush doesn't look like a wedged job."""
         if not texts:
             return np.zeros((0, 1024), dtype=np.float32)
         enc = self._tok.encode_batch(texts, add_special_tokens=True)
         lim = limits()
         out = None
-        for batch in plan_batches([len(e.ids) for e in enc],
-                                  lim.batch_tokens, lim.max_batch):
+        batches = plan_batches([len(e.ids) for e in enc],
+                               lim.batch_tokens, lim.max_batch)
+        done = 0
+        for batch in batches:
             maxlen = max(len(enc[i].ids) for i in batch)
             ids = np.zeros((len(batch), maxlen), dtype=np.int64)
             mask = np.zeros((len(batch), maxlen), dtype=np.int64)
@@ -169,6 +175,9 @@ class LocalEmbedder:
                 out = np.empty((len(enc), v.shape[1]), dtype=np.float32)
             for j, i in enumerate(batch):
                 out[i] = v[j]
+            done += len(batch)
+            if on_batch is not None:
+                on_batch(done, len(enc))
         n = np.linalg.norm(out, axis=1, keepdims=True)
         return out / (n + 1e-9)  # defensive normalize — quantized graphs drift
 

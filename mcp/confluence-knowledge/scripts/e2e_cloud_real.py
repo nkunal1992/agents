@@ -123,7 +123,7 @@ async def journey(s, ctx) -> None:
                     {"scope_handle": scope})
     jid = j["job_id"]
     # long crawl (~180 real pages) — wait_for_crawl caps at 45s per call
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + 2700
     while True:
         w = await timed("wait_for_crawl", "wait_for_crawl",
                         {"scope_handle": scope, "job_id": jid,
@@ -131,10 +131,18 @@ async def journey(s, ctx) -> None:
         if w["state"] in ("done", "failed"):
             break
         if time.monotonic() > deadline:
-            sys.exit("crawl did not finish in 10 min")
+            sys.exit("crawl did not finish in 45 min — dense corpus "
+                     "is slow by design")
     check(w["state"] == "done", "real-cloud crawl completed",
           f"errors={w.get('errors')}")
     print(f"  indexed {w.get('pages_done')} pages", flush=True)
+    st = w.get("stats")
+    if st:
+        tot = sum(v for k, v in st.items() if k.endswith("_ms")) or 1
+        ctx["stats"] = {k[:-3]: f"{v / 1000:.1f}s ({v * 100 // tot}%)"
+                        for k, v in st.items() if k.endswith("_ms")}
+        ctx["stats"]["pages/s"] = st.get("pages_per_s")
+        ctx["stats"]["battery_saver"] = st.get("battery_saver")
     check(w.get("pages_done", 0) >= 150,
           "covered most of the 180-page tree", w.get("pages_done"))
 
@@ -279,6 +287,8 @@ def main() -> int:
     asyncio.run(mcp(url, meta["token"],
                     lambda s: journey(s, ctx)))
     print("\nlatencies:", {k: f"{v:.1f}s" for k, v in ctx["lat"].items()})
+    if ctx.get("stats"):
+        print("crawl phases:", ctx["stats"])
     print("\nREAL CLOUD E2E OK")
     return 0
 

@@ -138,11 +138,96 @@ def long_page(topic: str, paragraphs: int = 60) -> str:
     return "".join(out)
 
 
+# ---- enterprise-density bodies — the work-laptop realism profile ----
+# A real wiki's page mix: dense tables, macros, code blocks, long section
+# trees. Chunk counts per page land ~15-150 (vs the old thin corpus's ~5)
+# which is what makes the embed phase dominate like it does on real
+# Confluence instances.
+
+def code_macro(lines: int = 14) -> str:
+    body = "<![CDATA[" + "\n".join(
+        f"step_{i} = run(command_{i}, retries=3, backoff=100*2**i)"
+        for i in range(lines)) + "]] >"
+    return ('<ac:structured-macro ac:name="code"><ac:plain-text-body>'
+            f"{body}</ac:plain-text-body></ac:structured-macro>")
+
+
+def expand_macro(title: str, paras: int) -> str:
+    inner = "".join(para(f"{title} detail {i}: procedure verified during "
+                         f"the last drill; owner sign-off recorded in the "
+                         "change log.")
+                    for i in range(paras))
+    return ('<ac:structured-macro ac:name="expand"><ac:parameter '
+            f'ac:name="title">{title}</ac:parameter><ac:rich-text-body>'
+            f"{inner}</ac:rich-text-body></ac:structured-macro>")
+
+
+def config_matrix(rows: int = 60) -> str:
+    out = [("<table><tbody><tr><th>Parameter</th><th>Value</th>"
+           "<th>Owner</th><th>Notes</th></tr>")]
+    for i in range(rows):
+        out.append(
+            f"<tr><td>cfg_{i}</td><td>{i * 7 % 13}.{i % 10}</td>"
+            f"<td>team-{i % 5}</td><td>tuned {2020 + i % 5}-Q{i % 4 + 1}"
+            "</td></tr>")
+    out.append("</tbody></table>")
+    return "".join(out)
+
+
+def medium_body(topic: str, sections: int = 6) -> str:
+    """~15-40 chunks: headed sections + tables + one macro each."""
+    out = [f"<h2>{topic}</h2>",
+           para(f"Operational runbook for {topic}. Reviewed every release "
+                "cycle; deviations need staff-engineer sign-off.")]
+    for i in range(sections):
+        out += [f"<h3>{topic} — part {i + 1}</h3>",
+                para(f"Part {i + 1} covers the {topic.lower()} steps that "
+                     f"run in window {i + 1}. The checklist below is "
+                     "executed in order and verified before the next "
+                     "phase begins."),
+                table([["Step", "Command", "Verify"],
+                       [f"{i + 1}.1", f"deploy --stage {i}",
+                        "health check green"],
+                       [f"{i + 1}.2", "smoke --suite core",
+                        "0 failures"],
+                       [f"{i + 1}.3", "annotate --log release",
+                        "entry present"]]),
+                macro("info" if i % 3 else "warning",
+                      f"{topic} part {i + 1}: page the on-call if the "
+                      "verify step fails twice."),
+                code_macro(lines=8)]
+    return "".join(out)
+
+
+def long_dense_body(topic: str, sections: int = 12) -> str:
+    """~60-150 chunks: deep sections, config matrices, expand+code macros."""
+    out = [f"<h2>{topic}</h2>",
+           para(f"Long-form specification for {topic}. This page is the "
+                "detailed record — the summary lives in the parent "
+                "runbook.")]
+    for i in range(sections):
+        out += [f"<h3>{topic} — section {i + 1}</h3>",
+                para(f"Section {i + 1} documents the {topic.lower()} "
+                     f"behaviour under load profile {i + 1}. Thresholds "
+                     "are production-measured; the matrix below is the "
+                     "authoritative tuning record."),
+                config_matrix(rows=30 + (i % 4) * 15),
+                expand_macro(f"{topic} — detail {i + 1}", paras=5),
+                code_macro(lines=10)]
+    return "".join(out)
+
+
+def short_body(topic: str) -> str:
+    return (f"<h2>{topic}</h2>" + para(f"Brief note on {topic}.") +
+            para("Follow-up owner and date recorded in the tracker."))
+
+
 # ------------------------------- the tree --------------------------------
 
-def corpus() -> list[dict]:
-    """Returns a flat spec: {title, parent_title, body} — parents come
-    first so ids resolve by the time children are created."""
+def rich_corpus() -> list[dict]:
+    """~300 pages, enterprise-density mix — ~20% short notes, ~55%
+    medium runbooks/guides, ~25% long dense specs. Canary facts live at
+    fixed pages so assertions stay deterministic."""
     T = []
 
     def add(title, parent, body):
@@ -152,120 +237,81 @@ def corpus() -> list[dict]:
     add(root, None, prose(root, "the engineering knowledge base", [
         ("This space contains release procedures, architecture "
         "specifications, operational runbooks and the team handbook."),
-        ("Navigation is hierarchical — each section below expands into "
+        ("Navigation is hierarchical — each section expands into "
         "sub-pages covering the detailed procedure or specification."),
     ]))
 
-    sections = {
-        "Release & Deployment": [
-            ("Release Procedure v4.2", ["Releases ship Thursday 18:00.",
-             "The release engineer owns the end-to-end window.",
-             "A failed smoke test inside 15 minutes triggers rollback."]),
-            ("Canary Rollout Guide", [
-                (f"Step 1: deploy the blue environment. Step 2: direct "
-                f"10% of traffic to blue for 30 minutes. Step 3: raise "
-                f"to 50% for one hour. Step 4: full cutover. The canary "
-                f"codeword for audit trails is {CANARY}."),
-                ("If error rate exceeds 0.5% at any stage, pause the "
-                "rollout and page the release engineer."),
-                ("Canary phases are recorded in the release log with the "
-                "codeword so audits can correlate them later.")]),
-            ("Hotfix Policy", [("Hotfixes bypass the Thursday window with "
-                               "staff-engineer approval."),
-                               ("Every hotfix lands behind a feature flag "
-                               "defaulted off.")]),
-            ("Rollback Playbook", [
-                ("Rollback restores the previous container image tag; "
-                "database migrations are always backwards-compatible "
-                "for two releases."),
-                ("The on-call engineer executes rollback within 15 "
-                "minutes of a red deployment signal.")]),
-        ],
-        "Architecture": [
-            ("Database Failover Specification", [
-                ("Failover triggers after 3000ms of heartbeat timeout "
-                "across three consecutive probes."),
-                ("The standby promotes to primary within 12 seconds; "
-                "clients retry on the connection-pool level."),
-                ("Split-brain is prevented by a consensus lock held on "
-                "the coordinator service.")]),
-            ("Service Mesh Topology", [
-                ("All service-to-service traffic traverses the mesh; "
-                "east-west TLS is mandatory."),
-                ("Retries are capped at three attempts with exponential "
-                "backoff starting at 100ms.")]),
-            ("Event Schema Registry", [
-                ("Schemas evolve under backward-compatibility rules "
-                "enforced by CI."),
-                "Deprecated fields are removed after two minor releases."]),
-        ],
-        "Operations": [
-            ("Incident Playbook", [
-                ("Sev-1 pages the on-call engineer and the incident "
-                "commander simultaneously; acknowledgment required "
-                "inside 5 minutes."),
-                ("Escalation ladder: on-call → team lead (15 min) → "
-                "engineering manager (30 min) → director (45 min)."),
-                ("Every incident ends with a blameless postmortem within "
-                "72 hours.")]),
-            ("On-Call Handbook", [
-                ("The rotation is weekly, handoff Monday 10:00 with a "
-                "written summary."),
-                ("On-call carries the escalation phone and the runbook "
-                "tablet.")]),
-            ("Monitoring Baselines", [
-                ("Alert thresholds: p99 latency 800ms, error rate 0.5%, "
-                "queue depth 5000."),
-                ("Dashboards refresh every 30 seconds; anomaly review "
-                "happens in the weekly ops sync.")]),
-        ],
-        "Team Handbook": [
-            ("Onboarding Checklist", [
-                ("Week one: environment setup, first PR merged, buddy "
-                "introductions complete."),
-                ("Access requests route through the IT portal and close "
-                "within one business day.")]),
-            ("Code Review Norms", [
-                ("Two approvals on protected branches; the author "
-                "addresses comments or marks them resolved with a reply."),
-                "Reviews aim to start within four business hours."]),
-            ("Meeting Cadence", [
-                ("Standup is asynchronous in chat; the weekly sync is "
-                "Wednesday 14:00 for 45 minutes."),
-                "Retros happen every second Friday, alternating hosts."]),
-        ],
-    }
-
-    for section, pages in sections.items():
-        add(section, root, prose(section, f"the {section.lower()} area", [
-            (f"This section collects the team's {section.lower()} "
+    sections = ["Release & Deployment", "Architecture", "Operations",
+                "Team Handbook", "Platform Engineering", "Security"]
+    for s in sections:
+        add(s, root, prose(s, f"the {s.lower()} area", [
+            (f"This section collects the team's {s.lower()} "
             "documentation. Each child page covers one procedure in "
             "operational detail.")]))
-        for title, facts in pages:
-            add(title, section, prose(title,
-                                      title.lower(), facts))
-            # each top page gets a batch of sub-pages — real depth
-            for i in range(1, 13):
-                kind = random.choice(["checklist", "notes", "drill",
-                                      "template"])
-                add(f"{title} — {kind.title()} {i}", title,
-                    prose(f"{kind.title()} {i}",
-                          f"{title.lower()} ({kind} {i})", [
-                        (f"This {kind} belongs to {title} and is "
-                        f"maintained with it."),
-                        (f"Checklist item {i}: verify the procedure "
-                        f"end-to-end in staging before production."),
-                    ]))
 
-    # stress shapes: two very long pages + a few near-empty ones
-    add("Capacity Planning — Long Record", "Architecture",
-        long_page("capacity planning"))
-    add("Ops Runbook — Extended Log", "Operations",
-        long_page("extended operations log", 40))
-    for i in range(4):
-        add(f"Scratch Note {i}", "Team Handbook",
-            para(f"Placeholder — to be expanded. Ref note {i}."))
+    anchor = [
+        ("Canary Rollout Guide", "Release & Deployment", prose(
+            "Canary Rollout Guide", "canary rollouts", [
+             ("Step 1: deploy the blue environment. Step 2: direct 10% "
+             "of traffic to blue for 30 minutes. Step 3: raise to 50% "
+             "for one hour. Step 4: full cutover. The audit codeword "
+             f"is {CANARY}. Pause on error rate >0.5%."),
+             ("Canary phases are recorded in the release log with the "
+             "codeword so audits can correlate them later."),
+             ("Roll back by restoring the previous image tag — "
+             "migrations stay backwards-compatible for two releases.")])),
+        ("Database Failover Specification", "Architecture", prose(
+            "Database Failover Specification", "database failover", [
+             ("Failover triggers after 3000ms heartbeat timeout across "
+             "three consecutive probes."),
+             ("The standby promotes to primary within 12 seconds; "
+             "clients retry on the connection-pool level."),
+             ("Split-brain is prevented by a consensus lock held on "
+             "the coordinator service.")])),
+        ("Incident Playbook", "Operations", prose(
+            "Incident Playbook", "incident handling", [
+             "Sev-1 pages on-call + incident commander; ack in 5 min.",
+             ("Escalation ladder: on-call → team lead (15 min) → "
+             "engineering manager (30 min) → director (45 min)."),
+             "Blameless postmortem within 72 hours."])),
+    ]
+    for title, parent, body in anchor:
+        add(title, parent, body)
+
+    # ~55% medium runbooks/guides — 8 sections × ~20 each
+    n_med = 0
+    for s in sections:
+        for i in range(20):
+            n_med += 1
+            topic = f"{s} Runbook {i + 1}"
+            add(topic, s, medium_body(topic, sections=6 + i % 3))
+            # a few get one drill sub-page each (depth + variety)
+            if i % 4 == 0:
+                add(f"{topic} — Drill", topic,
+                    medium_body(f"{topic} drill", sections=3))
+
+    # ~25% long dense specs — config matrices + expand/code macros
+    n_long = 0
+    for s in sections:
+        for i in range(12):
+            n_long += 1
+            topic = f"{s} Specification {i + 1}"
+            add(topic, s, long_dense_body(topic, sections=10 + i % 5))
+
+    # ~20% short notes
+    n_short = 0
+    for s in sections:
+        for i in range(10):
+            n_short += 1
+            add(f"{s} — Note {i + 1}", s, short_body(
+                f"{s.lower()} note {i + 1}"))
+    print(f"corpus spec: {len(T)} pages "
+          f"({n_med} medium, {n_long} long, {n_short} short)")
     return T
+
+
+def corpus() -> list[dict]:
+    return rich_corpus()
 
 
 def find_by_title(env, space_key: str, title: str):
@@ -312,13 +358,37 @@ def main() -> int:
         return 0
 
     # create parents first — spec order guarantees that
+    import hashlib
     tree = corpus()
     id_of = {t: m["id"] for t, m in manifest.items()}
-    created = skipped = 0
+    created = skipped = updated = 0
     for spec in tree:
         title = spec["title"]
+        bhash = hashlib.sha256(spec["body"].encode()).hexdigest()[:12]
         if title in id_of:
-            skipped += 1
+            if manifest[title].get("body_hash") == bhash:
+                skipped += 1
+                continue
+            # body changed (e.g. thin → dense upgrade) — bump the page
+            # version so the crawl's changed-page path gets exercised
+            cur = manifest[title]
+            try:
+                api(env, "PUT", f"wiki/rest/api/content/{cur['id']}", {
+                    "id": cur["id"], "type": "page", "title": title,
+                    "space": {"key": space_key},
+                    "version": {"number": cur["version"] + 1},
+                    "body": {"storage": {"value": spec["body"],
+                                         "representation": "storage"}}})
+            except urllib.error.HTTPError as e:
+                print(f"FAIL update {title}: HTTP {e.code}")
+                continue
+            cur["version"] += 1
+            cur["body_hash"] = bhash
+            updated += 1
+            if updated % 20 == 0:
+                MANIFEST.write_text(json.dumps(manifest, indent=1))
+                print(f"  {updated} pages upgraded…")
+            time.sleep(PAUSE_S)
             continue
         parent_id = id_of.get(spec["parent"]) if spec["parent"] else None
         if spec["parent"] and parent_id is None:
@@ -339,7 +409,8 @@ def main() -> int:
                     manifest[title] = {"id": page["id"],
                                        "version": page["version"]
                                        ["number"],
-                                       "parent": spec["parent"]}
+                                       "parent": spec["parent"],
+                                       "body_hash": bhash}
                     id_of[title] = page["id"]
                     print(f"adopted existing {title}")
                     continue
@@ -348,7 +419,8 @@ def main() -> int:
             continue
         manifest[title] = {"id": page["id"],
                            "version": page["version"]["number"],
-                           "parent": spec["parent"]}
+                           "parent": spec["parent"],
+                           "body_hash": bhash}
         id_of[title] = page["id"]
         created += 1
         if created % 25 == 0:
@@ -356,8 +428,9 @@ def main() -> int:
             print(f"  {created} pages created…")
         time.sleep(PAUSE_S)
     MANIFEST.write_text(json.dumps(manifest, indent=1))
-    print(f"done — {created} created, {skipped} skipped, "
-          f"{len(manifest)} total in space {space_key}")
+    print(f"done — {created} created, {updated} upgraded, "
+          f"{skipped} skipped, {len(manifest)} total in space "
+          f"{space_key}")
     root = manifest.get("Engineering Knowledge Base")
     if root:
         print(f"root page id: {root['id']}  "

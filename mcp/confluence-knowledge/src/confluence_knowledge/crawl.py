@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 import uuid
 from collections import deque
@@ -293,6 +294,38 @@ class Crawler:
         levels: dict[str, int] = (json.loads(levels_raw) if levels_raw
                                   else {job["root_page"]: 0})
 
+        # per-phase wall-clock stats — the field's "why is the crawl slow"
+        # answer. Durable under stats:{job_id} so bounded step() calls and
+        # process restarts accumulate rather than reset. fetch_ms is the
+        # workers' own elapsed (network), wait_ms is the main thread
+        # blocked on the fetch window, embed/sparse/store/extract are the
+        # CPU phases. job_progress exposes it; wait_for_crawl carries it.
+        stats_raw = self.index.meta_get(f"stats:{job_id}")
+        stats: dict = (json.loads(stats_raw) if stats_raw else {
+            "fetch_ms": 0.0, "wait_ms": 0.0, "extract_ms": 0.0,
+            "embed_ms": 0.0, "sparse_ms": 0.0, "store_ms": 0.0,
+            "chunks": 0, "pages": 0})
+        _stats_lock = threading.Lock()
+
+        def _save_stats() -> None:
+            stats["battery_saver"] = bool(
+                self.control and self.control.battery_saver())
+            stats["pages_per_s"] = round(
+                stats["pages"] /
+                max(stats["extract_ms"] + stats["embed_ms"]
+                    + stats["store_ms"] + stats["wait_ms"], 1) * 1000, 2)
+            self.index.meta_set(f"stats:{job_id}", json.dumps(stats))
+
+        def _timed(fn, *a):
+            """Fetch-worker self-timer — runs inside pool threads so the
+            network cost is measured per-task, not as wall-gaps."""
+            t = time.monotonic()
+            try:
+                return fn(*a)
+            finally:
+                with _stats_lock:
+                    stats["fetch_ms"] += (time.monotonic() - t) * 1000
+
         processed = 0
         # checkpoints are throttled — the full seen/levels/queue JSON used
         # to be rewritten per page, which is O(n²) writes on a big tree.
@@ -334,10 +367,32 @@ class Crawler:
                 texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
                          for _, pg, chunks, _, _ in buf for c in chunks]
                 if texts:
+                    def _embed_tick(done: int, total: int,
+                                    _c=self.control) -> None:
+                        """Heartbeats + progress inside a dense-page embed —
+                        a big flush used to freeze the visible job for
+                        minutes, indistinguishable from a wedged crawl."""
+                        if _c is None:
+                            return
+                        _c.check()           # cancel + lease heartbeat —
+                                            # CrawlCancelled MUST propagate
+                        _c.progress.note = \
+                            f"embedding {done}/{total} chunks"
                     t0 = time.monotonic()
-                    vecs = self.embedder.embed(texts)
+                    import inspect as _ins
+                    if "on_batch" in _ins.signature(
+                            self.embedder.embed).parameters:
+                        vecs = self.embedder.embed(
+                            texts, on_batch=_embed_tick)
+                    else:
+                        vecs = self.embedder.embed(texts)
+                    stats["embed_ms"] += \
+                        (time.monotonic() - t0) * 1000
                     if self.sparse is not None:
+                        t0 = time.monotonic()
                         sp = self.sparse.embed(texts)
+                        stats["sparse_ms"] += \
+                            (time.monotonic() - t0) * 1000
                     if self.control is not None and \
                             self.control.battery_saver():
                         # ~50% duty cycle while on battery — halves sustained
@@ -346,6 +401,7 @@ class Crawler:
             off = 0
             for pid, pg, chunks, warns, h in buf:
                 n = len(chunks)
+                t0 = time.monotonic()
                 try:
                     self.index.upsert_page({
                         "page_id": pid, "parent_id": None,
@@ -358,11 +414,16 @@ class Crawler:
                         job_id=job_id)
                 except StaleJobError:
                     return False
+                finally:
+                    stats["store_ms"] += \
+                        (time.monotonic() - t0) * 1000
+                    stats["pages"] += 1
                 off += n
             seen.update(pid for pid, *_ in buf)
             if self.control is not None:
                 self.control.page_done(len(buf))
                 self.control.phase("fetching")
+            _save_stats()
             return True
 
         def _pending_chunks() -> int:
@@ -400,14 +461,16 @@ class Crawler:
                     visited_submit.add(pid)
                     if entry.startswith("folder:"):
                         inflight[pool.submit(
-                            self._children, pid, True)] = entry
+                            _timed, self._children, pid, True)] = entry
                     else:
                         inflight[pool.submit(
-                            self._fetch_page, pid)] = entry
+                            _timed, self._fetch_page, pid)] = entry
                 if not inflight:
                     break
+                t_wait = time.monotonic()
                 done, _ = wait(tuple(inflight),
                                return_when=FIRST_COMPLETED)
+                stats["wait_ms"] += (time.monotonic() - t_wait) * 1000
                 for fut in done:
                     entry = inflight.pop(fut)
                     pid = entry.split(":", 1)[1] if ":" in entry else entry
@@ -498,9 +561,13 @@ class Crawler:
                             # must show progress, not sit at 0 (#171)
                             self.control.page_done(1)
                     else:
+                        t_ex = time.monotonic()
                         chunks, warns = extract_chunks(
                             page["storage"], page_title=page.get("title", ""),
                             **self._chunk_kwargs())
+                        stats["extract_ms"] += \
+                            (time.monotonic() - t_ex) * 1000
+                        stats["chunks"] += len(chunks)
                         for c in chunks:
                             c.chunk_id = \
                                 f"{pid}:{content_hash[:8]}:{c.ordinal}"
@@ -526,10 +593,12 @@ class Crawler:
                         f"prefetch {entry}: "
                         f"{type(e).__name__} (refetches on resume)")
         if not _flush_pending():
+            _save_stats()
             return {"job_id": job_id, "state": "abandoned",
                     "remaining": len(queue), "pages_seen": len(seen),
                     "errors": errors}
 
+        _save_stats()
         self._checkpoint(job_id, list(queue) + sorted(inflight.values()),
                          errors, seen, levels, keep_failed)
 
