@@ -70,21 +70,19 @@ def test_watchdog_stands_down_after_three_spawn_failures(tmp_path,
 
 
 def test_unreadable_index_dir_is_actionable(tmp_path):
-    """chmod-000 index dir — SetupError/operational message, not a bare
-    PermissionError traceback."""
+    """Blocked index dir → SetupError/operational message, not a bare
+    traceback. A regular FILE at the dir path blocks uniformly on every
+    OS — chmod-000 does not (Windows ignores unix mode bits)."""
     d = tmp_path / "locked"
-    d.mkdir(mode=0o000)
+    d.write_text("not a dir")           # Index(d/"x.db") can't mkdir beneath it
+    from confluence_knowledge.index import Index
     try:
-        from confluence_knowledge.index import Index
-        try:
-            Index(d / "x.db")
-            verdict = "created silently"   # would be its own bug
-        except Exception as e:                  # noqa: BLE001 — any exception name is the verdict
-            verdict = type(e).__name__
-        assert "Permission" in verdict or "Operational" in verdict \
-            or "Error" in verdict
-    finally:
-        d.chmod(0o755)
+        Index(d / "x.db")
+        verdict = "created silently"   # would be its own bug
+    except Exception as e:                  # noqa: BLE001 — any exception name is the verdict
+        verdict = type(e).__name__
+    assert "Permission" in verdict or "Operational" in verdict \
+        or "Error" in verdict
 
 
 def test_locked_db_retries_then_surfaces(tmp_path, monkeypatch):

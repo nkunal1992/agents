@@ -496,7 +496,11 @@ def models_complete(home: Path) -> dict:
 
 def _license_ok(dest: Path) -> bool:
     for md in list(dest.glob("*.md")) + list(dest.glob("LICENSE*")):
-        head = md.read_text(errors="ignore")[:6000].lower()
+        # cards declare `license:` in YAML front matter OR anywhere in the
+        # body — nomic's README puts it at line 2605 of 72KB; a 6KB head
+        # scan missed it (CI fresh-download gate fail). Bound at 256KB —
+        # model cards are text, the whole card is cheap to scan.
+        head = md.read_text(errors="ignore")[:262144].lower()
         if ("apache" in head or "mit license" in head or "license: mit" in head
                 or "cc-by" in head):
             return True
