@@ -57,6 +57,8 @@ def test_limits_env_overrides_and_invalid(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_FETCH_CONCURRENCY", "3")
     monkeypatch.setenv("KNOWLEDGE_MIN_FREE_MB", "2048")
     monkeypatch.setenv("KNOWLEDGE_BATTERY_SAVER", "0")
+    # freeze pressure sampling — env parsing is under test, not live load
+    monkeypatch.setattr(resources, "_pressured", lambda: False)
     assert limits() == Limits(threads=7, batch_tokens=3_000_000,
                               max_batch=8, idle_unload_s=60.0,
                               fetch_concurrency=3, min_free_mb=2048,

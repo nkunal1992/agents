@@ -20,6 +20,9 @@ from urllib.parse import urlparse
 from .client import AccessError, ConfluenceClient
 
 _PERMANENT_MARKERS = ("401", "403", "404", "permission", "not found")
+# Bound a single flush's pending pop — pages are popped until ~128 chunks so
+# a dense page can't put a multi-hundred-chunk buffer behind one embed call
+FLUSH_MAX_CHUNKS = 128
 
 
 def _permanent(err: Exception) -> bool:
@@ -355,7 +358,15 @@ class Crawler:
             nonlocal pending
             if not pending:
                 return True
-            buf, pending = pending, []
+            # cap each flush at ~FLUSH_MAX_CHUNKS: pages are popped from the
+            # head until the cap is hit, the rest stay pending — bounds a
+            # single flush's embed time and the fetch buffer's growth even
+            # when a page itself carries 200+ chunks (gap audit #2)
+            buf, n_chunks = [], 0
+            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
+                pid, pg, chunks, warns, h = pending.pop(0)
+                buf.append((pid, pg, chunks, warns, h))
+                n_chunks += len(chunks)
             vecs = sp = None
             if self.embedder is not None:
                 if self.control is not None:
@@ -367,8 +378,11 @@ class Crawler:
                 texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
                          for _, pg, chunks, _, _ in buf for c in chunks]
                 if texts:
+                    tick_t0 = time.monotonic()
+
                     def _embed_tick(done: int, total: int,
                                     _c=self.control) -> None:
+                        nonlocal tick_t0
                         """Heartbeats + progress inside a dense-page embed —
                         a big flush used to freeze the visible job for
                         minutes, indistinguishable from a wedged crawl."""
@@ -378,6 +392,13 @@ class Crawler:
                                             # CrawlCancelled MUST propagate
                         _c.progress.note = \
                             f"embedding {done}/{total} chunks"
+                        # battery saver, bounded per micro-batch — ~duty-cycle
+                        # pauses in ≤1s steps keep the heartbeat tight; the
+                        # old post-flush sleep compounded quadratically on
+                        # dense pages (gap audit #1)
+                        if _c.battery_saver():
+                            time.sleep(min(time.monotonic() - tick_t0, 1.0))
+                            tick_t0 = time.monotonic()
                     t0 = time.monotonic()
                     import inspect as _ins
                     if "on_batch" in _ins.signature(
@@ -393,11 +414,6 @@ class Crawler:
                         sp = self.sparse.embed(texts)
                         stats["sparse_ms"] += \
                             (time.monotonic() - t0) * 1000
-                    if self.control is not None and \
-                            self.control.battery_saver():
-                        # ~50% duty cycle while on battery — halves sustained
-                        # CPU/heat; sessions can't retune threads post-build
-                        time.sleep(max(0.0, time.monotonic() - t0))
             off = 0
             for pid, pg, chunks, warns, h in buf:
                 n = len(chunks)
