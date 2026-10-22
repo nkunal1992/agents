@@ -50,6 +50,25 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+import atexit as _atexit
+import subprocess as _sp
+
+
+def _atexit_stop(env: dict) -> None:
+    """Stop the shared daemon/watchdog this run may have spawned — CI
+    leaves no orphans (post-checkout kills them and marks the job failed
+    on Windows)."""
+    _env = dict(env)
+    # the script imports via sys.path — a plain interpreter doesn't see
+    # the package; put src on PYTHONPATH for the stop call
+    _env["PYTHONPATH"] = os.pathsep.join(
+        [str(Path(__file__).resolve().parents[1] / "src")]
+        + ([_env["PYTHONPATH"]] if _env.get("PYTHONPATH") else []))
+    _atexit.register(lambda: _sp.run(
+        [sys.executable, "-m", "confluence_knowledge.cli", "stop"],
+        env=_env, capture_output=True, timeout=30, check=False))
+
 from _e2e_common import TOKEN, check, serve
 
 
@@ -82,6 +101,7 @@ class FakeIDE:
                     "CONF_KNOWLEDGE_HOME": str(home),
                     "CONF_KNOWLEDGE_WORKDIR": str(work),
                     **env_extra}
+        _atexit_stop(self.env)
         self.stack = None
         self.session = None
         self.vars: dict[str, str] = {}

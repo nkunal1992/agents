@@ -200,6 +200,20 @@ def check(cond, msg, detail=None):
         _os._exit(1)  # skip the client's teardown traceback noise
 
 
+def stop_shared_daemon(cli: Path, env: dict) -> None:
+    """CI leaves no orphans: register/doctor spawn the shared daemon +
+    watchdog under the script's sandboxed KNOWLEDGE_SHARED_HOME — the
+    runner's post-checkout cleanup would otherwise have to kill them
+    (and on Windows that marks the job failed). Best-effort, never
+    raises — called via atexit by every e2e script."""
+    try:
+        import subprocess as _sp
+        _sp.run([str(cli), "stop"], env=env, capture_output=True,
+                timeout=30, check=False)
+    except Exception:                       # noqa: BLE001,S110 —
+        pass                                 # teardown is best-effort
+
+
 async def call(session, name, args=None, timeout=20):
     t = _time.monotonic()
     r = await session.call_tool(

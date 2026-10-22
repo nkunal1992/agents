@@ -29,7 +29,9 @@ from mcp.client.stdio import stdio_client
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]
                     / "confluence-knowledge" / "scripts"))
-from _e2e_common import call, check
+import atexit
+
+from _e2e_common import call, check, stop_shared_daemon
 from _fake_graph_server import TOKEN, serve
 
 REPO_SVC = Path(__file__).resolve().parents[1]
@@ -86,6 +88,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     vpy = venv_bin(venv_dir) / ("python.exe" if os.name == "nt" else "python")
     cli = venv_bin(venv_dir) / ("sharepoint-knowledge.exe"
                               if os.name == "nt" else "sharepoint-knowledge")
+    atexit.register(stop_shared_daemon, cli, env)
 
     # engine: --engine-spec <whl|dir> → install it + service --no-deps;
     # "index" → let pip resolve; default → repo source (not yet on index)

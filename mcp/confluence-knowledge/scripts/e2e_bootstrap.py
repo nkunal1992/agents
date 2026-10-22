@@ -33,7 +33,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _e2e_common import TOKEN, call, check, serve
+import atexit
+
+from _e2e_common import TOKEN, call, check, serve, stop_shared_daemon
 
 REPO_SVC = Path(__file__).resolve().parents[1]
 BUNDLE_SVC = REPO_SVC.parents[1] / "dist" / "confluence-knowledge-bundle" / "service"
@@ -86,6 +88,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     vpy = venv_bin(venv_dir) / ("python.exe" if os.name == "nt" else "python")
     cli = venv_bin(venv_dir) / ("confluence-knowledge.exe" if os.name == "nt"
                               else "confluence-knowledge")
+    atexit.register(stop_shared_daemon, cli, env)
     if spec:
         src_spec = spec
     elif use_wheel:

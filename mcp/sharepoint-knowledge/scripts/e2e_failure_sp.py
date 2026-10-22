@@ -18,7 +18,9 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]
                     / "confluence-knowledge" / "scripts"))
-from _e2e_common import check
+import atexit
+
+from _e2e_common import check, stop_shared_daemon
 from _fake_graph_server import TOKEN, serve
 
 REPO_SVC = Path(__file__).resolve().parents[1]
@@ -59,6 +61,7 @@ def main() -> None:
     vpy = bindir / ("python.exe" if os.name == "nt" else "python")
     cli = bindir / ("sharepoint-knowledge.exe" if os.name == "nt"
                     else "sharepoint-knowledge")
+    atexit.register(stop_shared_daemon, cli, env)
     engine_spec = (sys.argv[sys.argv.index("--engine-spec") + 1]
                    if "--engine-spec" in sys.argv else None)
     spec = sys.argv[sys.argv.index("--spec") + 1] \

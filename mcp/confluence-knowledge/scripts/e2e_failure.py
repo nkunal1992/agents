@@ -21,7 +21,9 @@ import venv
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _e2e_common import check, serve
+import atexit
+
+from _e2e_common import check, serve, stop_shared_daemon
 
 REPO_SVC = Path(__file__).resolve().parents[1]
 
@@ -59,6 +61,7 @@ def main() -> None:
     vpy = bindir / ("python.exe" if os.name == "nt" else "python")
     cli = bindir / ("confluence-knowledge.exe" if os.name == "nt"
                     else "confluence-knowledge")
+    atexit.register(stop_shared_daemon, cli, env)
     spec = sys.argv[sys.argv.index("--spec") + 1] \
         if "--spec" in sys.argv else str(REPO_SVC) + "[models]"
     run([str(vpy), "-m", "pip", "install", spec], env,
