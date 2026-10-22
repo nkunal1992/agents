@@ -167,8 +167,16 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     check("colleague-server" in merged["servers"]
           and "local-knowledge" in merged["servers"],
           "register: merged existing .vscode/mcp.json without clobbering")
-    check(merged["servers"]["local-knowledge"]["command"] == str(vpy),
-          "register: points at the venv python")
+    entry = merged["servers"]["local-knowledge"]
+    if entry.get("type") == "http":
+        check(entry["url"].endswith("/local-knowledge/mcp")
+              and entry.get("headers", {}).get("Authorization",
+                                               "").startswith("Bearer "),
+              "register: http entry points at the daemon's local path",
+              entry)
+    else:
+        check(entry["command"] == str(vpy),
+              "register: points at the venv python")
 
     doctor = run([str(cli), "doctor"], env, "doctor: models ready")
     check('"flag": "model_embed"' in doctor.stdout and

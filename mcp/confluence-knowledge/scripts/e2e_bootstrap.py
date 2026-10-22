@@ -141,7 +141,17 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
           and "confluence-knowledge" in merged["servers"],
           "register: merged existing .vscode/mcp.json without clobbering")
     entry = merged["servers"]["confluence-knowledge"]
-    check(entry["command"] == str(vpy), "register: points at the venv python")
+    if entry.get("type") == "http":
+        # #206 — daemon-hosted endpoint: url + bearer, no command
+        check(entry["url"].endswith("/confluence-knowledge/mcp")
+              and "127.0.0.1" in entry["url"]
+              and entry.get("headers", {}).get("Authorization",
+                                               "").startswith("Bearer "),
+              "register: http entry points at the daemon's confluence path",
+              entry)
+    else:
+        check(entry["command"] == str(vpy),
+              "register: points at the venv python")
 
     # post-register doctor: all flags green → exit 0
     doctor = run([str(cli), "doctor"], env,

@@ -23,9 +23,8 @@ import tempfile
 import venv
 from pathlib import Path
 
-from mcp.client.stdio import stdio_client
-
 from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]
@@ -162,6 +161,16 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
     check("sharepoint-knowledge" in merged["servers"],
           "register: merged into .vscode/mcp.json")
+    entry = merged["servers"]["sharepoint-knowledge"]
+    if entry.get("type") == "http":
+        check(entry["url"].endswith("/sharepoint-knowledge/mcp")
+              and entry.get("headers", {}).get("Authorization",
+                                               "").startswith("Bearer "),
+              "register: http entry points at the daemon's sp path",
+              entry)
+    else:
+        check(entry["command"] == str(vpy),
+              "register: points at the venv python")
 
     doctor = run([str(cli), "doctor"], env, "doctor: models + auth path")
     check('"configured": true' in doctor.stdout,
