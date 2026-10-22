@@ -175,18 +175,78 @@ def _rerank_eval(np):
               f"  ({time.monotonic() - t0:.1f}s for {len(PROBES)}×{len(texts)})")
 
 
+def _chunk_size_eval(np, sizes: list[int]):
+    """Same pages chunked at each token size → probes. The question:
+    does a bigger chunk keep the same top-1 recall?"""
+    repo, rel = ("nomic-ai/nomic-embed-text-v1.5",
+                 "onnx/model_quantized.onnx")
+    sess, tok = _load(repo, rel,
+                      Path.home() / ".confluence-knowledge" / "models")
+    print(f"{'chunk_tokens':>12}  {'chunks':>7}  {'ms/chunk':>9}  "
+          f"{'probes':>7}")
+    for size in sizes:
+        texts, _owner = _corpus_at(max(1, int(size * 0.75)))
+        vecs, _ = _embed(sess, tok, texts, np)
+        hits = 0
+        for q, must in PROBES:
+            qv, _ = _embed(sess, tok, [q], np)
+            best = max(range(len(texts)),
+                       key=lambda i: float(np.dot(vecs[i], qv[0])))
+            hits += int(must in texts[best])
+        t0 = time.monotonic()
+        _embed(sess, tok, texts[:8], np)
+        dt = (time.monotonic() - t0) / min(8, len(texts))
+        print(f"{size:>12}  {len(texts):>7}  {dt * 1000:>9.0f}  "
+              f"{hits}/{len(PROBES)}")
+
+
+def _corpus_at(step: int) -> tuple[list[str], list[int]]:
+    """Same pages as _corpus, re-chunked at `step` words (~tokens*0.75)."""
+    pages = [
+        seed_cloud.prose("Failover Runbook", "the failover runbook", [
+            ("The failover threshold is 3,000 milliseconds; standby "
+             "promotion triggers after the third missed heartbeat."),
+            "The runbook owner pages the on-call escalation lead."]),
+        seed_cloud.prose("Blue Deployment Guide", "the blue deployment", [
+            ("Step 3: direct 10% of traffic to the blue deployment, "
+             "then ramp to 50% and 100% while error budgets hold."),
+            "Rollback restores the green deployment in one action."]),
+        seed_cloud.prose("Escalation Ladder", "the escalation ladder", [
+            ("Sev-1 escalation: the escalation owner is the on-call "
+             "incident commander; escalation moves to the duty manager "
+             "at +30 minutes.")]),
+        seed_cloud.long_dense_body("Extended Audit Record", sections=6)
+        + seed_cloud.macro("info", "Audit codeword: WAVE2_CANARY_7711"),
+    ]
+    texts, owner = [], []
+    for pi, body in enumerate(pages):
+        c = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
+        words = c.split()
+        for i in range(0, len(words), step):
+            texts.append(" ".join(words[i:i + step]))
+            owner.append(pi)
+    return texts, owner
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default=None)
     ap.add_argument("--pages", type=int, default=30)
     ap.add_argument("--rerank", action="store_true",
                     help="evaluate reranker candidates instead")
+    ap.add_argument("--chunk-sizes", default=None,
+                    help="comma list e.g. 448,800 — probe recall vs "
+                         "chunk size on the current model")
     args = ap.parse_args()
 
     import numpy as np
 
     if args.rerank:
         _rerank_eval(np)
+        return 0
+    if args.chunk_sizes:
+        _chunk_size_eval(np, [int(x) for x in
+                              args.chunk_sizes.split(",")])
         return 0
 
     texts, owner = _corpus()

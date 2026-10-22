@@ -118,6 +118,7 @@ def _ort_opts(ort):
     CPU memory arena is off so a transient peak isn't held for the
     process lifetime."""
     so = ort.SessionOptions()
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     so.intra_op_num_threads = limits().threads
     so.inter_op_num_threads = 1
     so.log_severity_level = 3  # errors only
@@ -180,46 +181,78 @@ class LocalEmbedder:
         if not texts:
             return np.zeros((0, getattr(self, "_dim", 1024)),
                             dtype=np.float32)
-        enc = self._tok.encode_batch(texts, add_special_tokens=True)
-        lim = limits()
-        out = None
-        batches = plan_batches([len(e.ids) for e in enc],
-                               lim.batch_tokens, lim.max_batch)
-        done = 0
-        for batch in batches:
-            maxlen = max(len(enc[i].ids) for i in batch)
-            ids = np.zeros((len(batch), maxlen), dtype=np.int64)
-            mask = np.zeros((len(batch), maxlen), dtype=np.int64)
-            for j, i in enumerate(batch):
-                ids[j, :len(enc[i].ids)] = enc[i].ids
-                mask[j, :len(enc[i].attention_mask)] = \
-                    enc[i].attention_mask
-            feed = {"input_ids": ids, "attention_mask": mask}
-            # BERT-family graphs (e.g. nomic) declare a segment-ids input;
-            # single-segment pairs → zeros. Feeding it unconditionally is
-            # wrong too — ModernBERT exports reject unknown inputs.
-            if getattr(self, "_needs_token_types", False):
-                feed["token_type_ids"] = np.zeros_like(ids)
-            if getattr(self, "_has_sentence_emb", True):
-                v = np.asarray(self._sess.run(
-                    ["sentence_embedding"], feed)[0],
-                    dtype=np.float32)
-            else:
-                # nomic-style export: hidden states only → masked mean
-                # pooling (the model card's pooling, not CLS)
-                h = np.asarray(self._sess.run(
-                    ["last_hidden_state"], feed)[0], dtype=np.float32)
-                m = mask[:, :, None].astype(np.float32)
-                v = (h * m).sum(axis=1) / np.maximum(m.sum(axis=1), 1e-9)
-            if out is None:
-                out = np.empty((len(enc), v.shape[1]), dtype=np.float32)
-            for j, i in enumerate(batch):
-                out[i] = v[j]
-            done += len(batch)
+        # content-hash dedup — template/boilerplate strings repeat across
+        # enterprise pages and embed identically; cache by sha256 so each
+        # unique text pays the ONNX cost once per daemon life
+        import hashlib
+        cache = getattr(self, "_vec_cache", None)
+        if cache is None:
+            cache = self._vec_cache = {}
+        keys = [hashlib.sha256(t.encode()).digest() for t in texts]
+        miss_idx = [i for i, k in enumerate(keys) if k not in cache]
+        uniq_texts, uniq_keys = [], []
+        seen = set()
+        for i in miss_idx:
+            if keys[i] not in seen:
+                seen.add(keys[i])
+                uniq_texts.append(texts[i])
+                uniq_keys.append(keys[i])
+
+        if uniq_texts:
+            enc = self._tok.encode_batch(uniq_texts,
+                                         add_special_tokens=True)
+            lim = limits()
+            out = None
+            batches = plan_batches([len(e.ids) for e in enc],
+                                   lim.batch_tokens, lim.max_batch)
+            done = 0
+            for batch in batches:
+                maxlen = max(len(enc[i].ids) for i in batch)
+                ids = np.zeros((len(batch), maxlen), dtype=np.int64)
+                mask = np.zeros((len(batch), maxlen), dtype=np.int64)
+                for j, i in enumerate(batch):
+                    ids[j, :len(enc[i].ids)] = enc[i].ids
+                    mask[j, :len(enc[i].attention_mask)] = \
+                        enc[i].attention_mask
+                feed = {"input_ids": ids, "attention_mask": mask}
+                # BERT-family graphs (e.g. nomic) declare a segment-ids
+                # input; single-segment pairs → zeros. Feeding it
+                # unconditionally is wrong too — ModernBERT exports
+                # reject unknown inputs.
+                if getattr(self, "_needs_token_types", False):
+                    feed["token_type_ids"] = np.zeros_like(ids)
+                if getattr(self, "_has_sentence_emb", True):
+                    v = np.asarray(self._sess.run(
+                        ["sentence_embedding"], feed)[0],
+                        dtype=np.float32)
+                else:
+                    # nomic-style export: hidden states only → masked
+                    # mean pooling (the model card's pooling, not CLS)
+                    h = np.asarray(self._sess.run(
+                        ["last_hidden_state"], feed)[0],
+                        dtype=np.float32)
+                    m = mask[:, :, None].astype(np.float32)
+                    v = (h * m).sum(axis=1) / np.maximum(
+                        m.sum(axis=1), 1e-9)
+                if out is None:
+                    out = np.empty((len(enc), v.shape[1]),
+                                   dtype=np.float32)
+                for j, i in enumerate(batch):
+                    out[i] = v[j]
+                done += len(batch)
+                if on_batch is not None:
+                    on_batch(done, len(enc))
+            n = np.linalg.norm(out, axis=1, keepdims=True)
+            out = out / (n + 1e-9)  # defensive — quantized graphs drift
+            for k, v in zip(uniq_keys, out):
+                cache[k] = v
+        else:
+            enc = []
             if on_batch is not None:
-                on_batch(done, len(enc))
-        n = np.linalg.norm(out, axis=1, keepdims=True)
-        return out / (n + 1e-9)  # defensive normalize — quantized graphs drift
+                on_batch(0, 0)
+        # map every input back through the cache — duplicates share the
+        # one computed vector (identical text ⇒ identical embedding)
+        return np.stack([cache[k] for k in keys])
 
 
 class LocalSparseEmbedder:
