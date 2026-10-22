@@ -27,8 +27,22 @@ def _fake_eps(monkeypatch, names: list[str]):
             self.name = n
             self.value = modules[n]
 
+    # sibling dists aren't installed on this leg — the contract under
+    # test is entry-point → module resolution, so stub the import too
+    import importlib
+    import types
+    real_import = importlib.import_module
+
+    def fake_import(name, *a, **kw):
+        if name in modules.values():
+            m = types.ModuleType(name)
+            m.mcp = object()           # discovery only checks it exists
+            return m
+        return real_import(name, *a, **kw)
+
     monkeypatch.setattr(md, "entry_points",
                         lambda group=None: [EP(n) for n in names])
+    monkeypatch.setattr(importlib, "import_module", fake_import)
 
 
 @pytest.mark.parametrize("names", [
