@@ -1,2 +1,5 @@
 [console_scripts]
 sharepoint-knowledge = sharepoint_knowledge.cli_sp:main
+
+[knowledge.services]
+sharepoint-knowledge = sharepoint_knowledge.server_sp

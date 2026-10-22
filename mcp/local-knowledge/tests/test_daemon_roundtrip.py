@@ -17,7 +17,7 @@ SELF = str(Path(__file__).resolve().parents[1] / "src")
 PKG = str(MCP_ROOT / "confluence-knowledge" / "src")
 
 
-def _daemon(home, work, idx_root, log):
+def _daemon(home, work, dhome, log):
     """stderr goes to a file, not DEVNULL — a failed daemon's traceback
     is the only way to see WHY a CI leg died."""
     env = {**os.environ,
@@ -25,11 +25,12 @@ def _daemon(home, work, idx_root, log):
            "LOCAL_KNOWLEDGE_HOME": str(home),
            "LOCAL_KNOWLEDGE_WORKDIR": str(work),
            "KNOWLEDGE_DAEMON_ROLE": "1",
-           "KNOWLEDGE_FAKE_EMBEDDINGS": "1"}
+           "KNOWLEDGE_FAKE_EMBEDDINGS": "1",
+           "KNOWLEDGE_SHARED_HOME": str(dhome.parent.parent)}
     fh = open(log, "wb")                                  # noqa: SIM115
     return subprocess.Popen(
         [sys.executable, "-m", "confluence_knowledge.daemon",
-         "local_knowledge.server_local", str(idx_root)],
+         str(dhome)],
         env=env, stdout=subprocess.DEVNULL, stderr=fh)
 
 
@@ -47,6 +48,8 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_KNOWLEDGE_HOME", str(home))
     monkeypatch.setenv("LOCAL_KNOWLEDGE_WORKDIR", str(work))
     monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "1")
+    monkeypatch.setenv("KNOWLEDGE_SHARED_HOME",
+                       str(tmp_path / "shared"))
     monkeypatch.setenv("KNOWLEDGE_FAKE_EMBEDDINGS", "1")
 
     import importlib
@@ -55,8 +58,11 @@ def rig(tmp_path, monkeypatch):
 
     import local_knowledge.server_local as srv
     importlib.reload(srv)          # pick up fresh env/global state
-    rpc = RpcDb(idx_root / "rpc.db")
-    proc = _daemon(home, work, idx_root, home / "daemon-stderr.log")
+    from confluence_knowledge.settings import daemon_home
+    dhome = daemon_home()
+    dhome.mkdir(parents=True, exist_ok=True)
+    rpc = RpcDb(dhome / "rpc.db")
+    proc = _daemon(home, work, dhome, home / "daemon-stderr.log")
     deadline = time.monotonic() + 20
     while not rpc.daemon_alive() and time.monotonic() < deadline:
         time.sleep(0.2)

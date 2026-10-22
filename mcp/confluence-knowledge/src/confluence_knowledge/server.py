@@ -24,7 +24,7 @@ from .feedback import FeedbackStore
 from .index import Index
 from .jobs import CrawlCancelled, LeaseOwner, Progress, crawl_control
 from .mcp_async import heartbeat, tool
-from .models import ModelPool
+from .models import shared_pool, shared_ready
 from .notify import notify
 from .reporting import audit, current_rss_mb, pulse, stages
 from .resources import lower_priority
@@ -40,6 +40,7 @@ from .rpc import DaemonUnavailable, RpcDb, daemon_enabled, ensure_daemon
 from .settings import (
     SetupError,
     SiteProfile,
+    daemon_home,
     default_home,
     extract_page_id,
     resolve_workdir,
@@ -96,7 +97,7 @@ _cancel_flags: dict[str, threading.Event] = {}  # job_id → cancel requested
 _EMBEDDER = None
 _RERANKER = None
 _SPARSE = None
-_models_ready = threading.Event()
+_models_ready = shared_ready()
 _warm_lock = threading.Lock()
 _warm_started = False
 
@@ -174,9 +175,8 @@ def _on_models_unloaded() -> None:
         idx.drop_search_cache()
 
 
-_pool = ModelPool(_home, "confluence-knowledge", busy_fn=_any_worker_alive,
-                  on_unload=_on_models_unloaded,
-                  ready_event=_models_ready)
+_pool = shared_pool(_home, "confluence-knowledge", busy_fn=_any_worker_alive,
+                  on_unload=_on_models_unloaded,)
 
 
 def _embedder():
@@ -283,6 +283,29 @@ def status() -> dict:
         checks.append({"flag": "creds_valid", "ok": ok, "detail": detail,
                        "remediation": None if ok else
                        "confluence-knowledge setup (rotate the token)"})
+    if _daemon_on():
+        # the http endpoint is the reconnectable transport (#206): the IDE
+        # points at the daemon's URL — a dead daemon or stale port means
+        # tools go unreachable until doctor self-heals it
+        try:
+            from .registration import _http_meta
+            meta = _http_meta()
+            up = False
+            if meta:
+                import socket as _sock
+                with _sock.socket() as probe:
+                    probe.settimeout(2)
+                    probe.connect(("127.0.0.1", meta["port"]))
+                    up = True
+            checks.append({
+                "flag": "daemon_http", "ok": up,
+                "detail": ("mcp endpoint listening on 127.0.0.1:"
+                           f"{meta['port']}" if up else
+                           "no http endpoint — daemon down or pre-#206"),
+                "remediation": None if up else
+                "confluence-knowledge doctor (self-heals the daemon)"})
+        except Exception:                       # noqa: BLE001,S110 —
+            pass                                # status must never fail
     last = None
     try:
         # the freshest scope index carries the most recent job — enough
@@ -491,7 +514,7 @@ def _daemon_on() -> bool:
 def _rpc() -> RpcDb:
     global _RPC
     if _RPC is None:
-        _RPC = RpcDb(workspace_index_root(_workdir()) / "rpc.db")
+        _RPC = RpcDb(daemon_home() / "rpc.db")
     return _RPC
 
 
@@ -502,9 +525,9 @@ def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
         return None
     try:
         rpc = _rpc()
-        ensure_daemon(rpc, "confluence_knowledge.server",
-                  workspace_index_root(_workdir()))
-        rid = rpc.submit(name, args, timeout)
+        ensure_daemon(rpc)
+        rid = rpc.submit(name, args, timeout,
+                         service="confluence-knowledge")
         return rpc.wait(rid, timeout,
                         on_tick=lambda: heartbeat(
                             0, message=f"daemon {name}"))
@@ -585,7 +608,7 @@ def _resume_worker(s: dict, job_id: str) -> None:
     (safeguard 2)."""
     if _daemon_on():
         try:
-            ensure_daemon(_rpc(), "confluence_knowledge.server", index_root())
+            ensure_daemon(_rpc())
         except DaemonUnavailable:
             pass                       # job stays 'running' — retry
     else:
@@ -744,7 +767,8 @@ def crawl_step(scope_handle: str, job_id: str) -> dict:
 def wait_for_crawl(scope_handle: str, job_id: str,
                    wait_s: int = 25, ctx: Context | None = None) -> dict:
     """Long-poll for a crawl change — returns as soon as the state or
-    progress changes, or after `wait_s` (capped at 120). Each poll emits
+    progress changes, or after `wait_s` (hard-capped at 45 s — a longer
+    in-flight request outlives any IDE tool timeout, #206). Each poll emits
     an MCP progress notification — a keep-alive that resets the client's
     request timeout without knowing its value; the 25 s default also
     returns well under typical IDE tool timeouts. `changed` tells
@@ -758,12 +782,26 @@ def wait_for_crawl(scope_handle: str, job_id: str,
         if not _daemon_on() and not _models_ready.is_set():
             _start_warmup()
         _resume_worker(s, job_id)   # resume after a server restart too
-    wait_s = max(1, min(int(wait_s), 120))
+    # 45s ceiling: a longer in-flight request outlives any client request
+    # timeout (the field's -32001) — beyond it we return changed:false
+    # and the agent re-calls (#206). The wait_s param still controls the
+    # intended wait up to the cap.
+    wait_s = max(1, min(int(wait_s), 45))
     deadline = time.monotonic() + wait_s
+    wall_deadline = time.time() + wait_s + 10
+    last_wall = time.time()
     prev = _progress_for(idx, job_id)
-    while prev["state"] == "running" and time.monotonic() < deadline:
+    while prev["state"] == "running" and time.monotonic() < deadline             and time.time() < wall_deadline:
         time.sleep(2)
+        now = time.time()
         cur = _progress_for(idx, job_id)
+        if now - last_wall > 15:
+            # wall-clock jump = the machine suspended mid-wait — hand the
+            # agent something honest instead of a client-side timeout
+            return {**cur, "changed": False,
+                    "note": "the computer slept — the crawl kept running "
+                            "in the background; poll again"}
+        last_wall = now
         moved = (cur["state"] != prev["state"]
                  or cur.get("phase") != prev.get("phase")
                  or cur.get("pages_done") != prev.get("pages_done"))

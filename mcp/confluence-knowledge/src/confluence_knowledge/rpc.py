@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS rpc_requests(
     id TEXT PRIMARY KEY,
     tool TEXT NOT NULL,
     args TEXT NOT NULL DEFAULT '{}',
+    service TEXT NOT NULL DEFAULT '',
     created_at REAL,
     deadline REAL,
     claimed_by TEXT,
@@ -75,15 +76,21 @@ class RpcDb:
         self.db.execute("PRAGMA busy_timeout=5000")
         with self.db:
             self.db.executescript(_SCHEMA)
+            try:
+                self.db.execute("ALTER TABLE rpc_requests "
+                                "ADD COLUMN service TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # pre-#206 db already carries the column
         self.lock = threading.Lock()
 
     # ---- client (proxy) side ----
-    def submit(self, tool: str, args: dict, timeout_s: float) -> str:
+    def submit(self, tool: str, args: dict, timeout_s: float,
+               service: str = "") -> str:
         rid = uuid.uuid4().hex[:16]
         with self.lock, self.db:
             self.db.execute(
-                "INSERT INTO rpc_requests VALUES (?,?,?,?,?,?,?)",
-                (rid, tool, json.dumps(args), time.time(),
+                "INSERT INTO rpc_requests VALUES (?,?,?,?,?,?,?,?)",
+                (rid, tool, json.dumps(args), service, time.time(),
                  time.time() + timeout_s, None, None))
         return rid
 
@@ -92,7 +99,11 @@ class RpcDb:
         """Poll for the response row; daemon death mid-wait raises
         DaemonUnavailable so the proxy can run the call locally."""
         deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
+        # wall-clock ceiling: time.monotonic can stall across an OS
+        # suspend (platform-dependent) — a request must still die at its
+        # real deadline instead of waking into a client timeout (#206)
+        wall_deadline = time.time() + timeout_s + 10
+        while time.monotonic() < deadline and time.time() < wall_deadline:
             with self.lock:
                 row = self.db.execute(
                     "SELECT result,error FROM rpc_responses WHERE id=?",
@@ -116,7 +127,7 @@ class RpcDb:
         now = time.time()
         with self.lock, self.db:
             rows = self.db.execute(
-                "SELECT id,tool,args FROM rpc_requests "
+                "SELECT id,tool,args,service FROM rpc_requests "
                 "WHERE claimed_by IS NULL AND deadline > ?", (now,)
             ).fetchall()
             self.db.executemany(
@@ -127,7 +138,7 @@ class RpcDb:
                 "UPDATE rpc_requests SET claimed_by=NULL, claimed_at=NULL "
                 "WHERE claimed_at < ? AND id NOT IN "
                 "(SELECT id FROM rpc_responses)", (now - _LEASE_STALE_S * 4,))
-        return [(r[0], r[1], json.loads(r[2])) for r in rows]
+        return [(r[0], r[1], json.loads(r[2]), r[3]) for r in rows]
 
     def respond(self, rid: str, result: dict | None = None,
                 error: str | None = None) -> None:
@@ -224,16 +235,19 @@ def lease_label(owner: str | None) -> str:
     return "another server process"
 
 
-def ensure_daemon(rpc: RpcDb, module: str, workdir: Path,
-                  env: dict | None = None) -> None:
-    """Spawn the daemon lazily if no live owner holds the lease. Racing
-    proxies may double-spawn — self-correcting: the loser's
+def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
+    """Spawn the shared daemon lazily if no live owner holds the lease.
+    Racing proxies may double-spawn — self-correcting: the loser's
     acquire_daemon fails and it exits. The proxy never manages the
     lifecycle beyond this — a dead lease means the next request simply
-    respawns it."""
+    respawns it. The daemon anchors at daemon_home(): one process per
+    interpreter serving every installed knowledge service (#206)."""
     if rpc.daemon_alive():
         return
     try:
+        from .settings import daemon_home
+        workdir = daemon_home()
+        workdir.mkdir(parents=True, exist_ok=True)
         pid_path = workdir / ".daemon.pid"
         cli_env = dict(os.environ)
         cli_env["KNOWLEDGE_DAEMON_ROLE"] = "1"   # the brain never proxies
@@ -241,7 +255,7 @@ def ensure_daemon(rpc: RpcDb, module: str, workdir: Path,
             cli_env.update(env)
         proc = subprocess.Popen(
             [sys.executable, "-m", "confluence_knowledge.daemon",
-             module, str(workdir)],
+             str(workdir)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             # fd stays open for the child's lifetime — Popen owns it
             stderr=open(workdir / "daemon.log", "ab"),   # noqa: SIM115
@@ -255,6 +269,22 @@ def ensure_daemon(rpc: RpcDb, module: str, workdir: Path,
             time.sleep(0.1)
         if not rpc.daemon_alive():
             raise DaemonUnavailable("daemon spawned but never took lease")
+        # the http endpoint binds right after the lease — and the meta
+        # file is written BEFORE uvicorn accepts, so probe the socket,
+        # not the file: a caller reading a stale/unbound port once is a
+        # failed first connection (#206 cold-boot race)
+        import json as _json
+        import socket as _sock
+        http_deadline = time.monotonic() + 8
+        while time.monotonic() < http_deadline:
+            try:
+                meta = _json.loads((workdir / "http.json").read_text())
+                with _sock.socket() as sock:
+                    sock.settimeout(0.5)
+                    sock.connect(("127.0.0.1", meta["port"]))
+                break
+            except Exception:                   # noqa: BLE001 —
+                time.sleep(0.1)                  # file or bind pending
     except DaemonUnavailable:
         raise
     except Exception as e:

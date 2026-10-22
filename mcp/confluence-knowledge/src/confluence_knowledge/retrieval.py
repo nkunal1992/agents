@@ -58,7 +58,15 @@ CHUNK_TOKENS = 448       # token-aware split target — leaves room for
 
 
 def _models_dir(home: Path) -> Path:
-    return home / "models"
+    """Where the pinned local models live. Three services share the same
+    byte-identical ONNX set — a per-service copy is ~2.6 GB of duplicated
+    download and disk. KNOWLEDGE_MODELS_DIR overrides; otherwise one
+    shared store under the shared runtime home (#206)."""
+    env = os.environ.get("KNOWLEDGE_MODELS_DIR")
+    if env:
+        return Path(env).expanduser()
+    from .settings import shared_home
+    return shared_home() / "models"
 
 
 def _model_home(home: Path, repo: str) -> Path:

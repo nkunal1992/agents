@@ -26,7 +26,7 @@ from confluence_knowledge.jobs import (
     crawl_control,
 )
 from confluence_knowledge.mcp_async import heartbeat, tool
-from confluence_knowledge.models import ModelPool
+from confluence_knowledge.models import shared_pool, shared_ready
 from confluence_knowledge.notify import notify
 from confluence_knowledge.reporting import (
     audit,
@@ -49,7 +49,7 @@ from confluence_knowledge.rpc import (
     daemon_enabled,
     ensure_daemon,
 )
-from confluence_knowledge.settings import SetupError
+from confluence_knowledge.settings import SetupError, daemon_home
 from mcp.server.fastmcp import Context, FastMCP
 
 from .crawl_local import LocalCrawler, resolve_root
@@ -70,7 +70,7 @@ _cancel_flags: dict[str, threading.Event] = {}  # job_id → cancel requested
 _EMBEDDER = None
 _RERANKER = None
 _SPARSE = None
-_models_ready = threading.Event()
+_models_ready = shared_ready()
 _warm_lock = threading.Lock()
 _warm_started = False
 
@@ -118,9 +118,8 @@ def _on_models_unloaded() -> None:
         idx.drop_search_cache()
 
 
-_pool = ModelPool(home, APP_NAME, busy_fn=_any_worker_alive,
-                  on_unload=_on_models_unloaded,
-                  ready_event=_models_ready)
+_pool = shared_pool(home, APP_NAME, busy_fn=_any_worker_alive,
+                  on_unload=_on_models_unloaded,)
 
 
 def _embedder():
@@ -191,6 +190,11 @@ def _scope(scope_handle: str) -> dict:
 _RPC: RpcDb | None = None
 
 
+def daemon_models_ready() -> dict:
+    """RPC-only callable — _daemon_call routes here; the daemon answers
+    its own warmup state. Not an MCP tool (no @tool)."""
+    return {"ready": _models_ready.is_set()}
+
 def _daemon_on() -> bool:
     """Proxy mode (#189): opt-in via LOCAL_KNOWLEDGE_DAEMON=1 — off by
     default in v1 so the architecture proves itself before becoming the
@@ -202,7 +206,7 @@ def _daemon_on() -> bool:
 def _rpc() -> RpcDb:
     global _RPC
     if _RPC is None:
-        _RPC = RpcDb(index_root() / "rpc.db")
+        _RPC = RpcDb(daemon_home() / "rpc.db")
     return _RPC
 
 
@@ -213,8 +217,9 @@ def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
         return None
     try:
         rpc = _rpc()
-        ensure_daemon(rpc, "local_knowledge.server_local", index_root())
-        rid = rpc.submit(name, args, timeout)
+        ensure_daemon(rpc)
+        rid = rpc.submit(name, args, timeout,
+                         service="local-knowledge")
         return rpc.wait(rid, timeout,      # keep the MCP request alive
                         on_tick=lambda: heartbeat(
                             0, message=f"daemon {name}"))
@@ -259,6 +264,32 @@ def status() -> dict:
         cfg = {"error": str(e)}
     from confluence_knowledge.health import health_checks
     root = index_root()
+    checks = health_checks(home(), workdir(), APP_NAME, "local-knowledge",
+                           index_root=root)
+
+    if _daemon_on():
+        # the http endpoint is the reconnectable transport (#206): the IDE
+        # points at the daemon's URL — a dead daemon or stale port means
+        # tools go unreachable until doctor self-heals it
+        try:
+            from confluence_knowledge.registration import _http_meta
+            meta = _http_meta()
+            up = False
+            if meta:
+                import socket as _sock
+                with _sock.socket() as probe:
+                    probe.settimeout(2)
+                    probe.connect(("127.0.0.1", meta["port"]))
+                    up = True
+            checks.append({
+                "flag": "daemon_http", "ok": up,
+                "detail": ("mcp endpoint listening on 127.0.0.1:"
+                           f"{meta['port']}" if up else
+                           "no http endpoint — daemon down or pre-#206"),
+                "remediation": None if up else
+                "doctor self-heals the daemon"})
+        except Exception:                       # noqa: BLE001,S110 —
+            pass                                # status must never fail
     last = None
     try:
         cands = sorted((x for x in root.glob("*.db")
@@ -271,10 +302,11 @@ def status() -> dict:
     return {
         "configured": "error" not in cfg,
         "profile": cfg,
-        "checks": health_checks(home(), workdir(), APP_NAME, "local-knowledge",
-                                index_root=root),
-        "models_loaded": _models_ready.is_set() and
-        (_EMBEDDER is not None or _pool.is_loaded()),
+        "checks": checks,
+        "models_loaded": ((_daemon_call("daemon_models_ready", {}, 10)
+                          or {}).get("ready", False) if _daemon_on()
+                          else _models_ready.is_set()
+                          and (_EMBEDDER is not None or _pool.is_loaded())),
         "index_root": str(root),
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
@@ -418,7 +450,7 @@ def _resume_worker(s: dict, job_id: str) -> None:
     (safeguard 2)."""
     if _daemon_on():
         try:
-            ensure_daemon(_rpc(), "local_knowledge.server_local", index_root())
+            ensure_daemon(_rpc())
         except DaemonUnavailable:
             pass                       # job stays 'running' — retry
     else:
@@ -585,12 +617,27 @@ def wait_for_crawl(scope_handle: str, job_id: str,
         if not _models_ready.is_set():
             _start_warmup()
         _resume_worker(s, job_id)
-    wait_s = max(1, min(int(wait_s), 120))
+    # 45s ceiling: a longer in-flight request outlives any client request
+    # timeout (the field's -32001) — beyond it we return changed:false
+    # and the agent re-calls (#206). The wait_s param still controls the
+    # intended wait up to the cap.
+    wait_s = max(1, min(int(wait_s), 45))
     deadline = time.monotonic() + wait_s
+    wall_deadline = time.time() + wait_s + 10
+    last_wall = time.time()
     prev = _progress_for(idx, job_id)
-    while prev["state"] == "running" and time.monotonic() < deadline:
+    while prev["state"] == "running" and time.monotonic() < deadline \
+            and time.time() < wall_deadline:
         time.sleep(2)
+        now = time.time()
         cur = _progress_for(idx, job_id)
+        if now - last_wall > 15:
+            # wall-clock jump = the machine suspended mid-wait — hand the
+            # agent something honest instead of a client-side timeout
+            return {**cur, "changed": False,
+                    "note": "the computer slept — the crawl kept running "
+                            "in the background; poll again"}
+        last_wall = now
         moved = (cur["state"] != prev["state"]
                  or cur.get("phase") != prev.get("phase")
                  or cur.get("pages_done") != prev.get("pages_done"))

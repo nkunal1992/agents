@@ -143,3 +143,42 @@ class ModelPool:
 
         threading.Thread(target=loop, name="model-reaper",
                          daemon=True).start()
+
+
+# ----------------------------------------------------------------------
+# Shared pool — one model set per process (#206 consolidation). All three
+# services pin byte-identical ONNX models; three daemons used to hold
+# ~6 GB of duplicate sessions when all warm. Under the multi-service
+# daemon the mounted modules share a single pool; standalone daemons get
+# the same object via the same call. Per-service callbacks compose:
+# every busy_fn must report quiet before the reaper unloads, and every
+# on_unload runs so each module can drop its cached handles.
+
+_SHARED_READY = threading.Event()
+_SHARED_POOL: ModelPool | None = None
+_SHARED_BUSY: list[Callable[[], bool]] = []
+_SHARED_UNLOAD: list[Callable[[], None]] = []
+
+
+def shared_ready() -> threading.Event:
+    """The one 'models warm' event every mounted module should expose —
+    a service that shares the pool shares its readiness."""
+    return _SHARED_READY
+
+
+def shared_pool(home_fn: Callable[[], Path], cli: str,
+                busy_fn: Callable[[], bool] | None = None,
+                on_unload: Callable[[], None] | None = None,
+                clock: Callable[[], float] = time.monotonic) -> ModelPool:
+    global _SHARED_POOL
+    if busy_fn is not None and busy_fn not in _SHARED_BUSY:
+        _SHARED_BUSY.append(busy_fn)
+    if on_unload is not None and on_unload not in _SHARED_UNLOAD:
+        _SHARED_UNLOAD.append(on_unload)
+    if _SHARED_POOL is None:
+        _SHARED_POOL = ModelPool(
+            home_fn, cli,
+            busy_fn=lambda: any(f() for f in _SHARED_BUSY),
+            on_unload=lambda: [f() for f in _SHARED_UNLOAD],
+            ready_event=_SHARED_READY, clock=clock)
+    return _SHARED_POOL

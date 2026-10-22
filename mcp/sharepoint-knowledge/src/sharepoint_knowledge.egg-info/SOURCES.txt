@@ -16,4 +16,9 @@ src/sharepoint_knowledge.egg-info/top_level.txt
 tests/test_agent_doc_consistency.py
 tests/test_client_sp.py
 tests/test_crawl_sp.py
+tests/test_daemon_roundtrip_sp.py
+tests/test_daemon_routing_contract_sp.py
+tests/test_rag_audit_sp.py
 tests/test_server_flow_sp.py
+tests/test_server_lazy_start_sp.py
+tests/test_verify_daemon_route.py

@@ -20,11 +20,11 @@ config, and asks for one reload.
 Manual install (same commands the agent runs):
 
 ```bash
-python3 -m venv ~/.local-knowledge/venv
-~/.local-knowledge/venv/bin/python -m pip install "local-knowledge[models]"
-~/.local-knowledge/venv/bin/local-knowledge prepare-models   # ~1.4 GB, once
-~/.local-knowledge/venv/bin/local-knowledge register --ide auto --workspace "$PWD"
-~/.local-knowledge/venv/bin/local-knowledge doctor           # verify
+python3 -m venv ~/.knowledge/venv
+~/.knowledge/venv/bin/python -m pip install "local-knowledge[models]"
+~/.knowledge/venv/bin/local-knowledge prepare-models   # ~1.4 GB, once
+~/.knowledge/venv/bin/local-knowledge register --ide auto --workspace "$PWD"
+~/.knowledge/venv/bin/local-knowledge doctor           # verify
 ```
 
 ## Use

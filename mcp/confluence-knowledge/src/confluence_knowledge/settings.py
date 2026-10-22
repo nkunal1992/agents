@@ -205,3 +205,22 @@ def extract_page_id(root: str) -> str:
         "can't resolve the root page ID from that URL — provide the numeric pageId "
         "(open the page → Copy Link → look for pageId=…)"
     )
+
+
+def shared_home() -> Path:
+    """User-level root for cross-service runtime state (#206
+    consolidation): one daemon slot per interpreter, one model store.
+    Separate from each service's home — credentials and indexes stay
+    per-service."""
+    env = os.environ.get("KNOWLEDGE_SHARED_HOME")
+    return Path(env).expanduser() if env else Path.home() / ".knowledge"
+
+
+def daemon_home() -> Path:
+    """Per-venv daemon slot — same-venv services share ONE daemon process
+    (the multi-mount http endpoint); a foreign-venv install can't import
+    this venv's modules anyway, so it gets its own slot and port."""
+    import hashlib
+    import sys
+    key = hashlib.sha256(sys.prefix.encode()).hexdigest()[:10]
+    return shared_home() / "daemon" / key

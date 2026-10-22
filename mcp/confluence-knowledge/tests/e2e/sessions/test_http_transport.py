@@ -1,0 +1,153 @@
+"""#206 — the daemon-hosted HTTP endpoint is the reconnectable transport.
+
+The field failure: a stdio proxy dies mid-request (sleep/timeout) and only
+an IDE reload recovers it. Over HTTP there's no child to kill — the client
+re-POSTs per request. These sessions exercise the real MCP streamable-http
+protocol against a live daemon: connect → tools → daemon kill → doctor
+self-heal → same URL answers → SIGSTOP/SIGCONT (the sleep simulation).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+pytestmark = pytest.mark.e2e
+
+
+def _spawn_daemon(workdir: Path) -> subprocess.Popen:
+    env = dict(os.environ, KNOWLEDGE_FAKE_EMBEDDINGS="1")
+    return subprocess.Popen(
+        [sys.executable, "-m", "confluence_knowledge.daemon",
+         str(workdir)],
+        env=env, stdout=subprocess.DEVNULL,
+        stderr=open(workdir / "daemon.log", "ab"))
+
+
+def _wait_http(workdir: Path, timeout: float = 12) -> dict:
+    """Wait for the endpoint to actually accept connections — http.json is
+    written before uvicorn finishes binding, so the file alone races."""
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        f = workdir / "http.json"
+        if f.exists():
+            meta = json.loads(f.read_text())
+            try:
+                with socket.socket() as probe:
+                    probe.settimeout(0.5)
+                    probe.connect(("127.0.0.1", meta["port"]))
+                return meta
+            except OSError:
+                pass
+        time.sleep(0.1)
+    raise AssertionError("daemon http endpoint never came up")
+
+
+async def _call(url: str, token: str, tool: str, args: dict) -> dict:
+    """One MCP session — reconnect-per-request is the point, so each call
+    opens a fresh streamable-http session like a fresh IDE request."""
+    headers = {"Authorization": f"Bearer {token}"}
+    async with streamablehttp_client(url, headers=headers) as (r, w, _):
+        async with ClientSession(r, w) as session:
+            await session.initialize()
+            res = await session.call_tool(tool, args)
+            text = "".join(c.text for c in res.content
+                           if getattr(c, "type", "") == "text")
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return {"raw": text}
+
+
+def _url(meta: dict) -> str:
+    return f"http://127.0.0.1:{meta['port']}/mcp"
+
+
+@pytest.fixture
+def daemon(workdir):
+    proc = _spawn_daemon(workdir)
+    yield proc
+    proc.terminate()
+    try:
+        proc.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+@pytest.fixture
+def workdir(tmp_path):
+    return tmp_path
+
+
+def test_http_endpoint_answers_tools(daemon, workdir):
+    meta = _wait_http(workdir)
+    out = asyncio.run(_call(_url(meta), meta["token"], "status", {}))
+    assert isinstance(out, dict)
+    # unauthorized is refused — loopback is a multi-user surface
+    async def unauth():
+        try:
+            async with streamablehttp_client(
+                    _url(meta), headers={"Authorization": "Bearer x"}
+            ) as (r, w, _):
+                async with ClientSession(r, w) as s:
+                    await s.initialize()
+                    return "connected"
+        except Exception:
+            return "rejected"
+    assert asyncio.run(unauth()) == "rejected"
+
+
+def test_daemon_restart_same_url(daemon, workdir):
+    meta = _wait_http(workdir)
+    asyncio.run(_call(_url(meta), meta["token"], "status", {}))
+    # kill the daemon — SIGKILL, the field's worst case
+    daemon.send_signal(signal.SIGKILL)
+    daemon.wait(timeout=8)
+    # the URL is now dead — a real client gets connection refused
+    try:
+        asyncio.run(asyncio.wait_for(
+            _call(_url(meta), meta["token"], "status", {}), 5))
+        dead = False
+    except Exception:
+        dead = True
+    assert dead, "killed daemon still answering"
+    # doctor's heal path — respawn + same port re-binds
+    proc2 = _spawn_daemon(workdir)
+    try:
+        meta2 = _wait_http(workdir)
+        assert meta2["port"] == meta["port"], \
+            "daemon restart must re-bind the registered port"
+        assert meta2["token"] == meta["token"]
+        out = asyncio.run(_call(_url(meta2), meta2["token"], "status", {}))
+        assert isinstance(out, dict) and "configured" in out
+    finally:
+        proc2.terminate()
+        proc2.wait(timeout=8)
+
+
+def test_suspend_wake_no_reload(daemon, workdir):
+    """SIGSTOP suspends the daemon — the laptop-lock simulation. The client
+    times out mid-wait; on SIGCONT the next request just answers — no
+    respawn, no reload."""
+    if not hasattr(signal, "SIGSTOP"):
+        pytest.skip("no SIGSTOP on this platform")
+    meta = _wait_http(workdir)
+    daemon.send_signal(signal.SIGSTOP)
+    try:
+        with pytest.raises(Exception):
+            asyncio.run(asyncio.wait_for(
+                _call(_url(meta), meta["token"], "status", {}), 4))
+    finally:
+        daemon.send_signal(signal.SIGCONT)
+    out = asyncio.run(_call(_url(meta), meta["token"], "status", {}))
+    assert isinstance(out, dict) and "configured" in out

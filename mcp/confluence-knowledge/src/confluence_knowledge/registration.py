@@ -20,7 +20,20 @@ SERVER_MODULE = "confluence_knowledge.server"
 WORKDIR_ENV = "CONF_KNOWLEDGE_WORKDIR"
 
 
-def _server_entry(workdir: Path | None, module: str, env_var: str) -> dict:
+def _server_entry(workdir: Path | None, module: str, env_var: str,
+                  transport: str = "stdio",
+                  server_id: str = SERVER_ID) -> dict:
+    if transport == "http":
+        # daemon-hosted endpoint — the client reconnects per request, so a
+        # dead/suspended session never needs an IDE reload (#206). Each
+        # service mounts under /<server_id>/ on the shared daemon. Falls
+        # back to stdio when the daemon's http.json isn't reachable.
+        meta = _http_meta(workdir)
+        if meta:
+            return {"type": "http",
+                    "url": f"http://127.0.0.1:{meta['port']}/"
+                           f"{server_id}/mcp",
+                    "headers": {"Authorization": f"Bearer {meta['token']}"}}
     entry = {
         "command": sys.executable,  # the venv python — no PATH guessing
         "args": ["-m", module],
@@ -28,6 +41,22 @@ def _server_entry(workdir: Path | None, module: str, env_var: str) -> dict:
     if workdir is not None:
         entry["env"] = {env_var: str(workdir)}
     return entry
+
+
+def _http_meta(workdir: Path | None = None) -> dict | None:
+    """The daemon's {port, token} — written at daemon boot in the
+    venv-keyed daemon home; absent means no HTTP endpoint is up."""
+    import json as _json
+
+    from .settings import daemon_home
+    root = workdir if workdir is not None else daemon_home()
+    try:
+        meta = _json.loads((root / "http.json").read_text())
+        if isinstance(meta.get("port"), int) and meta.get("token"):
+            return meta
+    except Exception:                           # noqa: BLE001,S110
+        pass
+    return None
 
 
 def _platform_appdata() -> Path | None:
@@ -110,10 +139,72 @@ def _merge(path: Path, entry: dict | None, server_id: str = SERVER_ID) -> str:
     return action
 
 
+def _mounted_services(meta: dict) -> list[str]:
+    """Probe the daemon's /_services endpoint — registered mounts. An
+    unreachable daemon means 'not mounted' — register's caller decides."""
+    import json as _json
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{meta['port']}/_services",
+            headers={"Authorization": f"Bearer {meta['token']}"})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return _json.loads(r.read()).get("services", [])
+    except Exception:                           # noqa: BLE001 — probe is
+        return []                                # best-effort
+
+
+def _restart_daemon() -> None:
+    """SIGTERM the daemon holding the lease so the next ensure_daemon
+    respawns it with the freshly-installed service mounted (#206 —
+    install-order: a daemon booted before this package can't serve it)."""
+    import signal
+    import sqlite3 as _sq
+    import time as _t
+
+    from .settings import daemon_home
+    try:
+        db = _sq.connect(daemon_home() / "rpc.db", timeout=5)
+        row = db.execute("SELECT pid FROM daemon_lease").fetchone()
+        db.close()
+        if row and row[0]:
+            os.kill(row[0], signal.SIGTERM)
+            deadline = _t.monotonic() + 8
+            while _t.monotonic() < deadline:
+                try:
+                    os.kill(row[0], 0)
+                except OSError:
+                    break
+                _t.sleep(0.2)
+    except Exception:                           # noqa: BLE001,S110 —
+        pass                                     # best-effort restart
+
+
+def ensure_mounted(service_name: str) -> bool:
+    """True when the venv daemon serves `service_name` at its URL. If the
+    daemon is up but predates this install, restart it once and re-probe —
+    the respawn discovers the new entry point."""
+    meta = _http_meta()
+    if not meta:
+        return False
+    if service_name in _mounted_services(meta):
+        return True
+    _restart_daemon()
+    import time as _t
+    deadline = _t.monotonic() + 15
+    while _t.monotonic() < deadline:
+        meta2 = _http_meta()
+        if meta2 and service_name in _mounted_services(meta2):
+            return True
+        _t.sleep(0.5)
+    return False
+
+
 def register(ide: str = "auto", workspace: Path | None = None,
              workdir: Path | None = None, remove: bool = False,
              server_id: str = SERVER_ID, module: str = SERVER_MODULE,
-             env_var: str = WORKDIR_ENV) -> list[tuple[Path, str]]:
+             env_var: str = WORKDIR_ENV,
+             transport: str = "stdio") -> list[tuple[Path, str]]:
     """Write/remove our server entry in each target. Returns (path, action)."""
     if ide not in ("auto", "all", "vscode", "jetbrains"):
         raise SetupError(f"unknown --ide '{ide}' (auto|all|vscode|jetbrains)")
@@ -121,7 +212,17 @@ def register(ide: str = "auto", workspace: Path | None = None,
     if not files:
         raise SetupError("no IDE config locations found — no Copilot/JetBrains "
                          "or VS Code profile detected")
-    entry = None if remove else _server_entry(workdir, module, env_var)
+    if transport == "http" and not remove and not ensure_mounted(server_id):
+        # never write a dead URL — a daemon that won't mount this service
+        # gets the stdio fallback plus a loud fix path (#206)
+        import sys as _sys
+        print(f"warning: {server_id} is not mounted on the shared daemon "
+              f"— writing the stdio entry instead; run '<cli> doctor' to "
+              f"repair the http endpoint", file=_sys.stderr)
+        transport = "stdio"
+    entry = None if remove else _server_entry(
+        workdir, module, env_var, transport=transport,
+        server_id=server_id)
     out = []
     for f in files:
         # a workspace-scoped mcp.json lands inside the user's repo — guard

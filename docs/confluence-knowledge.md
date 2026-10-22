@@ -78,12 +78,12 @@ Prefer to run it manually? Equivalent commands — note the `python -m pip`
 form: a bare `pip` is often not on PATH even when Python is:
 
 ```bash
-python3.11+ -m venv ~/.confluence-knowledge/venv       # or: python / py
-~/.confluence-knowledge/venv/bin/python -m pip install \
+python3.11+ -m venv ~/.knowledge/venv       # or: python / py
+~/.knowledge/venv/bin/python -m pip install \
   "confluence-knowledge[models] @ git+https://github.com/nkunal1992/agents.git#subdirectory=mcp/confluence-knowledge"
-~/.confluence-knowledge/venv/bin/confluence-knowledge setup      # guided: env, URL, hidden token entry
-~/.confluence-knowledge/venv/bin/confluence-knowledge prepare-models
-~/.confluence-knowledge/venv/bin/confluence-knowledge doctor     # must be green
+~/.knowledge/venv/bin/confluence-knowledge setup      # guided: env, URL, hidden token entry
+~/.knowledge/venv/bin/confluence-knowledge prepare-models
+~/.knowledge/venv/bin/confluence-knowledge doctor     # must be green
 ```
 
 `setup` asks Cloud vs Data Center, shows you where to
@@ -100,7 +100,7 @@ Register the server — one command writes every config Copilot reads
 (JetBrains `github-copilot/intellij/mcp.json`, VS Code user + workspace):
 
 ```bash
-~/.confluence-knowledge/venv/bin/confluence-knowledge register --ide auto \
+~/.knowledge/venv/bin/confluence-knowledge register --ide auto \
     --workspace "<this repo>"        # use --remove to undo
 ```
 
@@ -110,7 +110,7 @@ Manual fallback — `.vscode/mcp.json`:
 {
   "servers": {
     "confluence-knowledge": {
-      "command": "~/.confluence-knowledge/venv/bin/python",   // .exe on Windows
+      "command": "~/.knowledge/venv/bin/python",   // .exe on Windows
       "args": ["-m", "confluence_knowledge.server"]
     }
   }
@@ -296,7 +296,7 @@ The server is designed to stay out of the way on a developer laptop:
 |---|---|
 | `setup error: no Confluence profile configured` | run `confluence-knowledge setup` |
 | `SSL: CERTIFICATE_VERIFY_FAILED` (Confluence or huggingface.co) | v0.1.5+ ships `pip-system-certs` so requests/httpx use the OS cert store — should be automatic. On older installs: `python -m pip install pip-system-certs`, or point `REQUESTS_CA_BUNDLE` at your corporate root CA |
-| `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.confluence-knowledge/models/` from an internal mirror) |
+| `local model ... not prepared` | run `confluence-knowledge prepare-models` (or drop the model dirs into `~/.knowledge/models/` from an internal mirror) |
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
 | `index database was locked` | fixed in v0.1.6. Earlier versions deadlocked themselves on the first crawl (an uncommitted write per connection). Upgrade: `python -m pip install --upgrade "<bundle>\service[models]"`, restart the IDE |
 | `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.2.1: the crawl runs in a background thread server-side and `crawl_step` is an instant progress poll — a request timeout can no longer stall or lose a crawl; progress checkpoints continuously and a server restart auto-resumes |

@@ -93,6 +93,9 @@ def _setup() -> int:
     return 0
 
 
+
+MODULE = "sharepoint_knowledge.server_sp"
+ENV_VAR = "SP_KNOWLEDGE_WORKDIR"
 def _doctor() -> int:
     from confluence_knowledge.update import check
 
@@ -125,6 +128,26 @@ def _doctor() -> int:
             line += (f" — {upd['pending']['version']} soaking until "
                      f"{upd['pending']['offered_after']}")
         print(line)
+
+    # self-heal the daemon http endpoint (#206): a dead daemon or a stale
+    # port in the registered URL is what leaves the IDE with dead tools —
+    # restarting the daemon + rewriting the entry recovers it, no reload
+    if any(c["flag"] == "daemon_http" and not c["ok"]
+           for c in s.get("checks", [])):
+        try:
+            from confluence_knowledge.registration import register
+            from confluence_knowledge.rpc import RpcDb, ensure_daemon
+            from confluence_knowledge.settings import daemon_home
+            root = daemon_home()
+            ensure_daemon(RpcDb(root / "rpc.db"))
+            results = register(transport="http", workdir=root,
+                               server_id=APP_NAME, module=MODULE,
+                               env_var=ENV_VAR)
+            print(f"self-heal: daemon restarted, http entry refreshed "
+                  f"in {len(results)} config(s)")
+        except Exception as e:                  # noqa: BLE001
+            print(f"self-heal failed: {e} — run "
+                  "register --transport http", file=sys.stderr)
     if upd["update_available"]:
         print("update available: run `sharepoint-knowledge update` "
               "(soaked release, self-tested, rolls back on failure)")
@@ -156,6 +179,12 @@ def main() -> None:
                      default="auto")
     reg.add_argument("--workspace", default=None,
                      help="repo dir for the workspace .vscode/mcp.json")
+    reg.add_argument("--transport", choices=["http", "stdio"],
+                     default="http",
+                     help="server entry type — http (default): the daemon's "
+                          "localhost endpoint; the IDE reconnects per request "
+                          "so a dead or suspended session never needs a "
+                          "reload (#206). stdio: per-window child process")
     reg.add_argument("--remove", action="store_true",
                      help="remove our server entry instead of adding it")
     sub.add_parser("serve", help="run the stdio MCP server")
@@ -183,8 +212,16 @@ def main() -> None:
         print(__import__("json").dumps(rep, indent=2))
         sys.exit(0 if rep["ok"] else 1)
     if args.cmd == "register":
+        wd = None
+        if args.transport == "http":
+            from confluence_knowledge.rpc import RpcDb, ensure_daemon
+            from confluence_knowledge.settings import daemon_home
+            wd = daemon_home()
+            ensure_daemon(RpcDb(wd / "rpc.db"))
         results = _register(
             ide=args.ide,
+            transport=args.transport,
+            workdir=wd,
             workspace=Path(args.workspace) if args.workspace else None,
             remove=args.remove,
             server_id=APP_NAME,

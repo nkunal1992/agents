@@ -95,12 +95,14 @@ def test_readonly_index_refuses_writes(tmp_path):
 def test_dispatch_whitelist(tmp_path):
     """Daemon serves only real callables on the module."""
     from confluence_knowledge.daemon import Daemon
-    d = Daemon("local_knowledge.server_local", tmp_path)
-    import local_knowledge.server_local as srv
-    d.rpc.submit("nonexistent_tool", {}, 30)
+    d = Daemon(tmp_path, only_module="local_knowledge.server_local")
+    d.services = d.services or __import__(
+        "confluence_knowledge.daemon", fromlist=["x"]).discover_services(
+        "local_knowledge.server_local")
+    d.rpc.submit("nonexistent_tool", {}, 30, service="local-knowledge")
     reqs = d.rpc.poll_requests(d.owner)
-    for rid, tool, args in reqs:
-        d._dispatch(srv, rid, tool, args)
+    for rid, tool, args, service in reqs:
+        d._dispatch(rid, tool, args, service)
     time.sleep(0.2)
     row = d.rpc.db.execute(
         "SELECT error FROM rpc_responses").fetchone()

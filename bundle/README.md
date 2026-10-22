@@ -85,11 +85,11 @@ input, same credential store.)
 Manual install (if preferred):
 
 ```powershell
-py -m venv %USERPROFILE%\.confluence-knowledge\venv           # python3 -m venv ~/.confluence-knowledge/venv on macOS/Linux
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\python -m pip install "C:\path\to\service[models]"
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~1.4 GB, MIT/Apache-2.0 ONNX models
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe setup            # env + site URL + PAT (hidden input)
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
+py -m venv %USERPROFILE%\.knowledge\venv           # python3 -m venv ~/.knowledge/venv on macOS/Linux
+%USERPROFILE%\.knowledge\venv\Scripts\python -m pip install "C:\path\to\service[models]"
+%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~1.4 GB, MIT/Apache-2.0 ONNX models
+%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe setup            # env + site URL + PAT (hidden input)
+%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
 ```
 
 Install sources, in the order the agent tries them: `service/` source → the
@@ -176,7 +176,7 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
 | "loading local models" | First call per session warms the models; retry the tool call |
 | `no stored token` | Ask the agent to register again — it reads the token from your clipboard. Terminal: `confluence-knowledge setup` |
 | Two `python.exe` processes on Windows | Normal — a venv `python.exe` is a launcher that starts the base interpreter as its child |
-| Model download blocked | Copy the `bge-m3`, `bge-reranker-v2-m3-ONNX`, and `fastembed` dirs into `~/.confluence-knowledge/models/` from a colleague or mirror |
+| Model download blocked | Copy the `bge-m3`, `bge-reranker-v2-m3-ONNX`, and `fastembed` dirs into `~/.knowledge/models/` from a colleague or mirror |
 | doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |
 
 `confluence-knowledge doctor` is the first diagnostic — it checks config,
@@ -185,7 +185,7 @@ credentials, models and the connection in one shot.
 ## Uninstalling
 
 ```powershell
-%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe clean   # delete the local index
+%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe clean   # delete the local index
 Remove-Item -Recurse -Force %USERPROFILE%\.confluence-knowledge                    # everything: venv, models, profile
 ```
 

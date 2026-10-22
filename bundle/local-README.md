@@ -48,7 +48,7 @@ or replacing search when you just need a filename.
    bundled `.whl` → `pip install local-knowledge[models]` (PyPI or your
    internal mirror) → asks where the zip was extracted, in that order.
 4. One reload — done. `prepare-models` fetches the ONNX models (~1.4 GB, MIT/Apache-2.0)
-   (~1.4 GB) into `~/.local-knowledge/models/`.
+   (~1.4 GB) into `~/.knowledge/models/`.
 
 Install sources, in the order the agent tries them: `service/` source → the
 bundled `local_knowledge-*.whl` → `pip install local-knowledge[models]` → a

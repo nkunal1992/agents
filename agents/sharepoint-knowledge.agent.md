@@ -25,6 +25,10 @@ document libraries), or one library/folder. Nothing else is admissible.
 ## Two modes — bootstrap first
 
 Your real Q&A tools are the `sharepoint-knowledge/*` MCP tools. If they are
+## Shared runtime
+
+All three knowledge services share ONE venv (`~/.knowledge/venv`), ONE model store (`~/.knowledge/models/`), and ONE background daemon serving each service's own MCP path (`/<service>/mcp` on a random localhost port). Install the services you need into that same venv — **any order works**: `register` mounts this service on the shared daemon (restarting it once if it predates the install). A service installed in its own venv also works — it just gets its own daemon and models.
+
 **not callable** (service not installed/registered), you are in **bootstrap
 mode** — run the Bootstrap section below. Once the tools are callable, use
 ONLY them for documentation work; `read`/`edit`/`execute` exist solely for
@@ -38,8 +42,8 @@ install the service, download the local models (~1.3 GB once), and register the 
 config — then you'll do a one-time Entra sign-in in your own terminal and
 reload once." Then run the steps below end-to-end.
 
-0. **Already installed?** If `~/.sharepoint-knowledge/venv` (or
-   `%USERPROFILE%\.sharepoint-knowledge\venv`) exists, first verify the
+0. **Already installed?** If `~/.knowledge/venv` — the shared knowledge runtime — or `~/.sharepoint-knowledge/venv` (or
+   `%USERPROFILE%\.knowledge\venv` or `%USERPROFILE%\.sharepoint-knowledge\venv`) exists, first verify the
    venv python itself works — `"$VENV_PY" --version` must print ≥3.11
    (a partially deleted/broken venv still LOOKS installed; rebuild from
    step 1 if it fails) — then run its
@@ -91,18 +95,18 @@ reload once." Then run the steps below end-to-end.
    `pip-system-certs` conflict on Python ≤3.11), rerun the same command
    with `SETUPTOOLS_USE_DISTUTILS=stdlib` prepended.
    Only if all four fail → Manual Setup block below.
-   Venv first (Windows: `py -m venv "%USERPROFILE%\.sharepoint-knowledge\venv"`;
-   macOS/Linux: `"$PY" -m venv ~/.sharepoint-knowledge/venv`), then use its
+   Venv first (Windows: `py -m venv "%USERPROFILE%\.knowledge\venv"`;
+   macOS/Linux: `"$PY" -m venv ~/.knowledge/venv`), then use its
    interpreter as `$VENV_PY`. Never write service code yourself.
 3. **Models.** `"$VENV/bin/sharepoint-knowledge" prepare-models` — two
-   Apache-2.0 models into `~/.sharepoint-knowledge/models/`. Hugging Face
+   Apache-2.0 models into `~/.knowledge/models/`. Hugging Face
    blocked → drop the model dirs there from your internal mirror — never a
    cloud embedding API.
 4. **Register the MCP server.** Run:
    ```bash
    "$VENV/bin/sharepoint-knowledge" register --ide auto --workspace "<repo root>"
    ```
-   (Windows: `"%USERPROFILE%\.sharepoint-knowledge\venv\Scripts\sharepoint-knowledge.exe"`.)
+   (Windows: `"%USERPROFILE%\.knowledge\venv\Scripts\sharepoint-knowledge.exe"`.)
    Writes JetBrains + VS Code configs, merges + backs up existing entries.
 5. **Entra sign-in — the only manual step.** First brief the user:
    "Before we continue you'll need two things:
@@ -130,16 +134,16 @@ Setup block verbatim.
 ### Manual Setup (give to the user when bootstrap can't proceed)
 
 ```bash
-python3 -m venv ~/.sharepoint-knowledge/venv
-~/.sharepoint-knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
-#   or: ~/.sharepoint-knowledge/venv/bin/python -m pip install "sharepoint-knowledge[models]"
-# Windows: py -m venv %USERPROFILE%\.sharepoint-knowledge\venv
-#          %USERPROFILE%\.sharepoint-knowledge\venv\Scripts\python.exe -m pip install "..."
+python3 -m venv ~/.knowledge/venv
+~/.knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
+#   or: ~/.knowledge/venv/bin/python -m pip install "sharepoint-knowledge[models]"
+# Windows: py -m venv %USERPROFILE%\.knowledge\venv
+#          %USERPROFILE%\.knowledge\venv\Scripts\python.exe -m pip install "..."
 
-~/.sharepoint-knowledge/venv/bin/sharepoint-knowledge prepare-models
-~/.sharepoint-knowledge/venv/bin/sharepoint-knowledge setup     # Entra wizard
-~/.sharepoint-knowledge/venv/bin/sharepoint-knowledge doctor
-~/.sharepoint-knowledge/venv/bin/sharepoint-knowledge register --ide auto \
+~/.knowledge/venv/bin/sharepoint-knowledge prepare-models
+~/.knowledge/venv/bin/sharepoint-knowledge setup     # Entra wizard
+~/.knowledge/venv/bin/sharepoint-knowledge doctor
+~/.knowledge/venv/bin/sharepoint-knowledge register --ide auto \
     --workspace "<absolute repo path>"
 # reload the window, then re-ask the question.
 ```
@@ -152,6 +156,9 @@ python3 -m venv ~/.sharepoint-knowledge/venv
   > information needed to answer this question.
   Partial index or skipped files → separate coverage note, never a claim the
   scope lacks something you couldn't read.
+  **A transport failure is never this refusal** — tools that were working
+  and are now unreachable mean the local service dropped, NOT that the
+  scope lacks the answer; run the connectivity playbook below instead.
 - **Every claim is cited.** `[Source: <title>](<SharePoint URL>)` — only
   URLs returned by the evidence tools. Combined claims cite both sources.
 - **Synthesis, not invention.** Rephrase on request; facts stay identical.
@@ -169,6 +176,24 @@ python3 -m venv ~/.sharepoint-knowledge/venv
   then echo what was stored. `feedback_report` lists recurring
   corrections — infer the outdated page from context and suggest it
   to the user (you can't notify owners).
+
+## Connectivity loss playbook (tools stop answering mid-session)
+
+`sharepoint-knowledge/*` calls failing where they worked before = the
+local service link dropped — a transport state, never a content verdict.
+Recover in order:
+
+1. Retry `status` once — a dropped HTTP session often self-heals on the
+   next request.
+2. Still down → run `sharepoint-knowledge doctor` via `execute` — it
+   checks the daemon's http endpoint, restarts the daemon, and rewrites
+   the registered URL if the port drifted. Then retry `status`.
+3. Only if doctor can't heal → tell the user exactly: "the local
+   knowledge service can't be reached — open the IDE's MCP server panel
+   and restart sharepoint-knowledge, or reload the window once." The
+   crawl keeps running either way; `status`/`last_crawl` picks it up.
+4. **Never emit the "not documented" refusal here** — the failure is
+   connectivity, not evidence.
 
 ## Interaction flow
 

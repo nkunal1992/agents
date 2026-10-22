@@ -1,2 +1,5 @@
 [console_scripts]
 local-knowledge = local_knowledge.cli_local:main
+
+[knowledge.services]
+local-knowledge = local_knowledge.server_local

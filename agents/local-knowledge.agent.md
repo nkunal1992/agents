@@ -22,6 +22,10 @@ beneath it. Nothing else is admissible evidence.
 ## Two modes — bootstrap first
 
 Your real Q&A tools are the `local-knowledge/*` MCP tools. If they are
+## Shared runtime
+
+All three knowledge services share ONE venv (`~/.knowledge/venv`), ONE model store (`~/.knowledge/models/`), and ONE background daemon serving each service's own MCP path (`/<service>/mcp` on a random localhost port). Install the services you need into that same venv — **any order works**: `register` mounts this service on the shared daemon (restarting it once if it predates the install). A service installed in its own venv also works — it just gets its own daemon and models.
+
 **not callable** (service not installed/registered), you are in **bootstrap
 mode** — run the Bootstrap section below. Once the tools are callable, use
 ONLY them for documentation work; `read`/`edit`/`execute` exist solely for
@@ -35,8 +39,8 @@ environment, install the service, download the local models (~1.3 GB once), and
 register the IDE config — then reload once. **No credentials needed.**"
 Then run the steps below end-to-end without pausing.
 
-0. **Already installed?** If `~/.local-knowledge/venv` (or
-   `%USERPROFILE%\.local-knowledge\venv`) exists, first verify the
+0. **Already installed?** If `~/.knowledge/venv` — the shared knowledge runtime — or `~/.local-knowledge/venv` (or
+   `%USERPROFILE%\.knowledge\venv` or `%USERPROFILE%\.local-knowledge\venv`) exists, first verify the
    venv python itself works — `"$VENV_PY" --version` must print ≥3.11
    (a partially deleted/broken venv still LOOKS installed; rebuild from
    step 1 if it fails) — then run its
@@ -92,21 +96,21 @@ Then run the steps below end-to-end without pausing.
    Only if all four fail, give the Manual Setup block below.
 
    First create the venv once (Windows: `py -m venv
-   "%USERPROFILE%\.local-knowledge\venv"`; macOS/Linux:
-   `"$PY" -m venv ~/.local-knowledge/venv`), then use its interpreter as
+   "%USERPROFILE%\.knowledge\venv"`; macOS/Linux:
+   `"$PY" -m venv ~/.knowledge/venv`), then use its interpreter as
    `$VENV_PY` (`…/venv/Scripts/python.exe` or `…/venv/bin/python`).
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
 3. **Models.** `"$HOME/.local-knowledge/venv/bin/local-knowledge"
    prepare-models` — downloads two Apache-2.0 models (embedding + reranker)
-   into `~/.local-knowledge/models/`. If the network blocks Hugging Face,
+   into `~/.knowledge/models/`. If the network blocks Hugging Face,
    tell the user to drop the model dirs there from their internal mirror —
    never switch to a cloud embedding API.
 4. **Register the MCP server — the command writes the config itself.** Run:
    ```bash
    "$VENV/bin/local-knowledge" register --ide auto --workspace "<repo root>"
    ```
-   (Windows: `"%USERPROFILE%\.local-knowledge\venv\Scripts\local-knowledge.exe"`.)
+   (Windows: `"%USERPROFILE%\.knowledge\venv\Scripts\local-knowledge.exe"`.)
    Same merging/backup behaviour as the Confluence agent's `register`.
 5. **Verify then hand off.** `"$VENV/bin/local-knowledge" doctor` — models
    ready. Then tell the user: **reload the window / restart the MCP server**
@@ -123,18 +127,18 @@ the **Manual Setup** block below verbatim.
 
 ```bash
 # 1. install (bundled copy preferred when present, else PyPI/mirror)
-python3 -m venv ~/.local-knowledge/venv
-~/.local-knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
-#    or: ~/.local-knowledge/venv/bin/python -m pip install "local-knowledge[models]"
-# Windows: py -m venv %USERPROFILE%\.local-knowledge\venv
-#          %USERPROFILE%\.local-knowledge\venv\Scripts\python.exe -m pip install "..."
+python3 -m venv ~/.knowledge/venv
+~/.knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
+#    or: ~/.knowledge/venv/bin/python -m pip install "local-knowledge[models]"
+# Windows: py -m venv %USERPROFILE%\.knowledge\venv
+#          %USERPROFILE%\.knowledge\venv\Scripts\python.exe -m pip install "..."
 
 # 2. models + verify
-~/.local-knowledge/venv/bin/local-knowledge prepare-models
-~/.local-knowledge/venv/bin/local-knowledge doctor
+~/.knowledge/venv/bin/local-knowledge prepare-models
+~/.knowledge/venv/bin/local-knowledge doctor
 
 # 3. register the IDE config automatically:
-~/.local-knowledge/venv/bin/local-knowledge register --ide auto \
+~/.knowledge/venv/bin/local-knowledge register --ide auto \
     --workspace "<absolute repo path>"
 # 4. reload the window, then re-ask the question.
 ```
@@ -152,6 +156,9 @@ accounts — the entire install is local files + models.
   > needed to answer this question.
   If the index is partial or files were skipped, add a separate coverage
   note — never claim the whole folder lacks something you couldn't read.
+  **A transport failure is never this refusal** — tools that were working
+  and are now unreachable mean the local service dropped, NOT that the
+  files lack the answer; run the connectivity playbook below instead.
 - **Every claim is cited.** Each factual statement ends with a clickable
   file citation — `[Source: <filename>](<file:// URL>)` — using only URLs
   returned by the evidence tools. A claim combining two files cites both.
@@ -172,6 +179,24 @@ accounts — the entire install is local files + models.
 - **Skipped secrets are a feature, not a failure.** If coverage warnings list
   secret-looking files (.env, keys, credentials), say they were excluded by
   design — do not index or read them even if asked.
+
+## Connectivity loss playbook (tools stop answering mid-session)
+
+`local-knowledge/*` calls failing where they worked before = the local
+service link dropped — a transport state, never a content verdict.
+Recover in order:
+
+1. Retry `status` once — a dropped HTTP session often self-heals on the
+   next request.
+2. Still down → run `local-knowledge doctor` via `execute` — it checks
+   the daemon's http endpoint, restarts the daemon, and rewrites the
+   registered URL if the port drifted. Then retry `status`.
+3. Only if doctor can't heal → tell the user exactly: "the local
+   knowledge service can't be reached — open the IDE's MCP server panel
+   and restart local-knowledge, or reload the window once." The crawl
+   keeps running either way; `status`/`last_crawl` picks it back up.
+4. **Never emit the "not documented" refusal here** — the failure is
+   connectivity, not evidence.
 
 ## Interaction flow
 

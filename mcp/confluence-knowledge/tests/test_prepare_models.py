@@ -54,6 +54,10 @@ def test_snapshot_download_callable_kwargs():
 
 
 def test_prepare_models_downloads_locked_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
+    # a seeded shared store on the dev machine must not hijack the test's
+    # model root — the env seam is the designed override (#206)
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
     calls = _fake_hf(monkeypatch, lambda d: (
         (d / "m.onnx").write_bytes(b"x"),
         (d / "r.onnx").write_bytes(b"x"),
@@ -70,6 +74,7 @@ def test_prepare_models_downloads_locked_files(monkeypatch, tmp_path):
 
 
 def test_model_card_license_accepted(monkeypatch, tmp_path):
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
     _fake_hf(monkeypatch, lambda d: (
         (d / "m.onnx").write_bytes(b"x"),
         (d / "r.onnx").write_bytes(b"x"),
@@ -83,6 +88,7 @@ def test_model_card_license_accepted(monkeypatch, tmp_path):
 
 
 def test_partial_download_is_retried(monkeypatch, tmp_path):
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
     calls = _fake_hf(monkeypatch, lambda d: (
         (d / "m.onnx").write_bytes(b"x"),
         (d / "r.onnx").write_bytes(b"x"),
@@ -104,6 +110,7 @@ def test_partial_download_is_retried(monkeypatch, tmp_path):
 
 
 def test_missing_license_rejected(monkeypatch, tmp_path):
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
     _fake_hf(monkeypatch, lambda d: (
         (d / "m.onnx").write_bytes(b"x"),
         (d / "tokenizer.json").write_text("{}"),

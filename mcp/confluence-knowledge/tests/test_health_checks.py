@@ -17,6 +17,7 @@ def _flag(checks, name):
 
 def test_models_complete_flags_partial_download(tmp_path, monkeypatch):
     home = tmp_path / "home"
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     # partial bge-m3: dir exists, onnx missing — the old shallow check
     # reported this as "ready"
     (home / "models" / "bge-m3").mkdir(parents=True)
@@ -26,8 +27,9 @@ def test_models_complete_flags_partial_download(tmp_path, monkeypatch):
     assert emb["ok"] is False and "prepare-models" in emb["remediation"]
 
 
-def test_models_complete_green_when_full(tmp_path):
+def test_models_complete_green_when_full(tmp_path, monkeypatch):
     home = tmp_path / "home"
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     for name, files in (
             ("bge-m3", ["onnx/sentence_transformers_quantized.onnx",
                         "tokenizer.json", "tokenizer_config.json",

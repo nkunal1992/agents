@@ -18,16 +18,16 @@ PKG = str(Path(__file__).resolve().parents[2]
 SELF = str(Path(__file__).resolve().parents[1] / "src")
 
 
-def _daemon_proc(home, workdir):
+def _daemon_proc(home, workdir, dhome):
     env = {**os.environ,
            "PYTHONPATH": f"{SELF}{os.pathsep}{PKG}",
            "LOCAL_KNOWLEDGE_HOME": str(home),
            "LOCAL_KNOWLEDGE_WORKDIR": str(workdir),
-           "KNOWLEDGE_DAEMON_ROLE": "1"}
+           "KNOWLEDGE_DAEMON_ROLE": "1",
+           "KNOWLEDGE_SHARED_HOME": str(dhome.parent.parent)}
     return subprocess.Popen(
         [sys.executable, "-m", "confluence_knowledge.daemon",
-         "local_knowledge.server_local",
-         str(workdir / ".local_knowledge_index")],
+         str(dhome)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -43,14 +43,17 @@ def test_daemon_claims_and_answers(daemon_home):
     """A spawned daemon takes the lease and answers a whitelisted tool."""
     from confluence_knowledge.rpc import RpcDb
     home, work, idx_root = daemon_home
-    rpc = RpcDb(idx_root / "rpc.db")
-    proc = _daemon_proc(home, work)
+    from confluence_knowledge.settings import daemon_home
+    dhome = daemon_home()
+    dhome.mkdir(parents=True, exist_ok=True)
+    rpc = RpcDb(dhome / "rpc.db")
+    proc = _daemon_proc(home, work, dhome)
     try:
         deadline = time.monotonic() + 15
         while not rpc.daemon_alive() and time.monotonic() < deadline:
             time.sleep(0.2)
         assert rpc.daemon_alive(), "daemon never took the lease"
-        rid = rpc.submit("status", {}, 30)
+        rid = rpc.submit("status", {}, 30, service="local-knowledge")
         out = rpc.wait(rid, 30)
         assert "configured" in out or "_error" not in out
     finally:
@@ -62,8 +65,11 @@ def test_daemon_lease_survives_proxy_death(daemon_home):
     the next proxy attaches to the same owner (#189's core promise)."""
     from confluence_knowledge.rpc import RpcDb
     home, work, idx_root = daemon_home
-    rpc = RpcDb(idx_root / "rpc.db")
-    proc = _daemon_proc(home, work)
+    from confluence_knowledge.settings import daemon_home
+    dhome = daemon_home()
+    dhome.mkdir(parents=True, exist_ok=True)
+    rpc = RpcDb(dhome / "rpc.db")
+    proc = _daemon_proc(home, work, dhome)
     try:
         deadline = time.monotonic() + 15
         while not rpc.daemon_alive() and time.monotonic() < deadline:

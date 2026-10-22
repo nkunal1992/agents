@@ -19,7 +19,7 @@ sys.path.insert(0, SCRIPTS)
 from _e2e_common import TOKEN, serve
 
 
-def _daemon(home, work, idx_root, base):
+def _daemon(home, work, dhome, base):
     env = {**os.environ,
            "PYTHONPATH": PKG,
            "CONF_KNOWLEDGE_HOME": str(home),
@@ -27,10 +27,11 @@ def _daemon(home, work, idx_root, base):
            "CONF_KNOWLEDGE_TOKEN": TOKEN,
            "KNOWLEDGE_DAEMON_ROLE": "1",
            "KNOWLEDGE_FAKE_EMBEDDINGS": "1",
+           "KNOWLEDGE_SHARED_HOME": str(dhome.parent.parent),
            "CONF_KNOWLEDGE_BASE_URL": base}
     return subprocess.Popen(
         [sys.executable, "-m", "confluence_knowledge.daemon",
-         "confluence_knowledge.server", str(idx_root)],
+         str(dhome)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -44,6 +45,8 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setenv("CONF_KNOWLEDGE_HOME", str(home))
     monkeypatch.setenv("CONF_KNOWLEDGE_WORKDIR", str(work))
     monkeypatch.setenv("CONF_KNOWLEDGE_DAEMON", "1")
+    monkeypatch.setenv("KNOWLEDGE_SHARED_HOME",
+                       str(tmp_path / "shared"))
     monkeypatch.setenv("KNOWLEDGE_FAKE_EMBEDDINGS", "1")
     monkeypatch.setenv("CONF_KNOWLEDGE_TOKEN", TOKEN)
 
@@ -56,8 +59,11 @@ def rig(tmp_path, monkeypatch):
     import confluence_knowledge.server as csrv
     from confluence_knowledge.rpc import RpcDb
     importlib.reload(csrv)
-    rpc = RpcDb(idx_root / "rpc.db")
-    proc = _daemon(home, work, idx_root, base)
+    from confluence_knowledge.settings import daemon_home
+    dhome = daemon_home()
+    dhome.mkdir(parents=True, exist_ok=True)
+    rpc = RpcDb(dhome / "rpc.db")
+    proc = _daemon(home, work, dhome, base)
     deadline = time.monotonic() + 20
     while not rpc.daemon_alive() and time.monotonic() < deadline:
         time.sleep(0.2)

@@ -13,5 +13,12 @@ src/local_knowledge.egg-info/requires.txt
 src/local_knowledge.egg-info/top_level.txt
 tests/test_agent_doc_consistency.py
 tests/test_crawl_local.py
+tests/test_daemon_integration.py
+tests/test_daemon_roundtrip.py
+tests/test_daemon_routing_contract_local.py
 tests/test_extract_files.py
+tests/test_parity_local.py
+tests/test_proxy_daemon.py
+tests/test_rag_audit_local.py
 tests/test_server_flow_local.py
+tests/test_server_lazy_start_local.py

@@ -24,6 +24,10 @@ accessible descendant pages. Nothing else is admissible evidence.
 ## Two modes — bootstrap first
 
 Your real Q&A tools are the `confluence-knowledge/*` MCP tools. If they are
+## Shared runtime
+
+All three knowledge services share ONE venv (`~/.knowledge/venv`), ONE model store (`~/.knowledge/models/`), and ONE background daemon serving each service's own MCP path (`/<service>/mcp` on a random localhost port). Install the services you need into that same venv — **any order works**: `register` mounts this service on the shared daemon (restarting it once if it predates the install). A service installed in its own venv also works — it just gets its own daemon and models.
+
 **not callable** (service not installed/registered), you are in **bootstrap
 mode** — run the Bootstrap section below. Once the tools are callable, use
 ONLY them for documentation work; `read`/`edit`/`execute` exist solely for
@@ -40,8 +44,8 @@ I'll read it straight from the clipboard; it never enters the
 conversation." Then run the steps below end-to-end without
 pausing between them; the user sees each command anyway.
 
-0. **Already installed?** If `~/.confluence-knowledge/venv` (or
-   `%USERPROFILE%\.confluence-knowledge\venv`) exists, first verify the
+0. **Already installed?** If `~/.knowledge/venv` — the shared knowledge runtime — or `~/.confluence-knowledge/venv` (or
+   `%USERPROFILE%\.knowledge\venv` or `%USERPROFILE%\.confluence-knowledge\venv`) exists, first verify the
    venv python itself works — `"$VENV_PY" --version` must print ≥3.11
    (a partially deleted/broken venv still LOOKS installed; rebuild from
    step 1 if it fails) — then run its
@@ -102,21 +106,21 @@ pausing between them; the user sees each command anyway.
    Only if all four fail, give the Manual Setup block below.
 
    First create the venv once (Windows: `py -m venv
-   "%USERPROFILE%\.confluence-knowledge\venv"`; macOS/Linux:
-   `"$PY" -m venv ~/.confluence-knowledge/venv`), then use its interpreter as
+   "%USERPROFILE%\.knowledge\venv"`; macOS/Linux:
+   `"$PY" -m venv ~/.knowledge/venv`), then use its interpreter as
    `$VENV_PY` (`…/venv/Scripts/python.exe` or `…/venv/bin/python`).
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
 3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
    prepare-models` — downloads the pinned local models — bge-m3 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
-   into `~/.confluence-knowledge/models/`. If the network blocks Hugging
+   into `~/.knowledge/models/`. If the network blocks Hugging
    Face, tell the user to drop the model dirs there from their internal
    mirror — never switch to a cloud embedding API.
 4. **Register the MCP server — the command writes the config itself.** Run:
    ```bash
    "$VENV/bin/confluence-knowledge" register --ide auto --workspace "<repo root>"
    ```
-   (Windows: `"%USERPROFILE%\.confluence-knowledge\venv\Scripts\confluence-knowledge.exe"`.)
+   (Windows: `"%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe"`.)
    It writes the user-level JetBrains Copilot config (`github-copilot/intellij/
    mcp.json`) and the workspace `.vscode/mcp.json`, merging with any existing
    servers and backing up first. If it reports "backup-replaced", tell the
@@ -182,24 +186,24 @@ what you're trying next.
 ```bash
 # 1. install the service (use your python: python3 / python / py)
 #    bundled copy (from the agent zip) preferred when present:
-python3 -m venv ~/.confluence-knowledge/venv
-~/.confluence-knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
+python3 -m venv ~/.knowledge/venv
+~/.knowledge/venv/bin/python -m pip install "<bundle>/service[models]"
 #    or via your configured pip index (internal mirror must carry the package):
-~/.confluence-knowledge/venv/bin/python -m pip install "confluence-knowledge[models]"
-# Windows: py -m venv %USERPROFILE%\.confluence-knowledge\venv
-#          %USERPROFILE%\.confluence-knowledge\venv\Scripts\python.exe -m pip install "...same spec..."
+~/.knowledge/venv/bin/python -m pip install "confluence-knowledge[models]"
+# Windows: py -m venv %USERPROFILE%\.knowledge\venv
+#          %USERPROFILE%\.knowledge\venv\Scripts\python.exe -m pip install "...same spec..."
 
 # 2. credentials + models + verify
-~/.confluence-knowledge/venv/bin/confluence-knowledge setup
-~/.confluence-knowledge/venv/bin/confluence-knowledge prepare-models
-~/.confluence-knowledge/venv/bin/confluence-knowledge doctor
+~/.knowledge/venv/bin/confluence-knowledge setup
+~/.knowledge/venv/bin/confluence-knowledge prepare-models
+~/.knowledge/venv/bin/confluence-knowledge doctor
 
 # 3. register the IDE config automatically:
-~/.confluence-knowledge/venv/bin/confluence-knowledge register --ide auto \
+~/.knowledge/venv/bin/confluence-knowledge register --ide auto \
     --workspace "<absolute repo path>"
 #    manual fallback (writes .vscode/mcp.json by hand):
 #    {"servers": {"confluence-knowledge": {
-#       "command": "~/.confluence-knowledge/venv/bin/python",
+#       "command": "~/.knowledge/venv/bin/python",
 #       "args": ["-m", "confluence_knowledge.server"]}}}
 #    JetBrains without the register command: same command/args in Copilot's
 #    MCP settings.
@@ -221,6 +225,9 @@ wheel path for the install step — everything else is identical.
   > information needed to answer this question.
   If the index is partial or pages were inaccessible, add a separate coverage
   note — never claim the full subtree lacks something you couldn't fully read.
+  **A transport failure is never this refusal** — tools that were working
+  and are now unreachable mean the local service dropped, NOT that the
+  docs lack the answer; run the connectivity playbook below instead.
 - **Every claim is cited.** Each factual statement ends with a clickable page
   citation — `[Source: <Page Title>](<page_url>)` — using only URLs returned
   by the evidence tools. A claim combining two pages cites both.
@@ -239,6 +246,25 @@ wheel path for the install step — everything else is identical.
   then echo what was stored. `feedback_report` lists recurring
   corrections — infer the outdated page from the corrected question and
   suggest it to the user (you can't notify owners).
+
+## Connectivity loss playbook (tools stop answering mid-session)
+
+`confluence-knowledge/*` calls failing where they worked before = the
+local service link dropped — a transport state, never a content verdict.
+Recover in order:
+
+1. Retry `status` once — a dropped HTTP session often self-heals on the
+   next request.
+2. Still down → run `confluence-knowledge doctor` via `execute` — it
+   checks the daemon's http endpoint, restarts the daemon, and rewrites
+   the registered URL if the port drifted. Then retry `status`.
+3. Only if doctor can't heal → tell the user exactly: "the local
+   knowledge service can't be reached — open the IDE's MCP server
+   panel and restart confluence-knowledge, or reload the window once."
+   The crawl and its progress are daemon-side — they keep running
+   either way, and `status`/`last_crawl` picks the job back up.
+4. **Never emit the "not documented" refusal here** — the failure is
+   connectivity, not evidence. Say what broke and what you're doing.
 
 ## Interaction flow
 
@@ -263,8 +289,11 @@ wheel path for the install step — everything else is identical.
    and posts a desktop notification when it finishes. Say what started:
    "Indexing the subtree in the background — I'll keep you posted."
    Then drive progress with `wait_for_crawl` — it blocks ≤ `wait_s`
-   (default 25s, cap 120) and returns early whenever the phase or page
-   count moves. Call it in a loop and relay one concise line per change.
+   (default 25s — never pass more than 45; longer waits outlive the
+   client's request timeout) and returns early whenever the phase or
+   page count moves. Call it in a loop and relay one concise line per
+   change. If it returns a `note` (e.g. "the computer slept"), relay it
+   verbatim and keep polling — the crawl is daemon-side and kept going.
    **Report `pulse`, not internals** — the response carries a ready-made
    human line (`pulse`, e.g. "fetching pages · 410 done · ~6/min · ~2 min
    left") and a `stages` breakdown; relay those verbatim-ish in plain

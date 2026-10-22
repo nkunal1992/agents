@@ -18,7 +18,7 @@ sys.path.insert(0, str(SP_ROOT / "scripts"))
 from _fake_graph_server import TOKEN, serve
 
 
-def _daemon(home, work, idx_root, graph_base):
+def _daemon(home, work, dhome, graph_base):
     env = {**os.environ,
            "PYTHONPATH": f"{SELF}{os.pathsep}{PKG}",
            "SP_KNOWLEDGE_HOME": str(home),
@@ -26,10 +26,11 @@ def _daemon(home, work, idx_root, graph_base):
            "SP_KNOWLEDGE_TOKEN": TOKEN,
            "SP_KNOWLEDGE_GRAPH_BASE": graph_base,
            "KNOWLEDGE_DAEMON_ROLE": "1",
+           "KNOWLEDGE_SHARED_HOME": str(dhome.parent.parent),
            "KNOWLEDGE_FAKE_EMBEDDINGS": "1"}
     return subprocess.Popen(
         [sys.executable, "-m", "confluence_knowledge.daemon",
-         "sharepoint_knowledge.server_sp", str(idx_root)],
+         str(dhome)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -43,6 +44,8 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setenv("SP_KNOWLEDGE_HOME", str(home))
     monkeypatch.setenv("SP_KNOWLEDGE_WORKDIR", str(work))
     monkeypatch.setenv("SP_KNOWLEDGE_DAEMON", "1")
+    monkeypatch.setenv("KNOWLEDGE_SHARED_HOME",
+                       str(tmp_path / "shared"))
     monkeypatch.setenv("SP_KNOWLEDGE_GRAPH_BASE", graph_base)
     monkeypatch.setenv("SP_KNOWLEDGE_TOKEN", TOKEN)
     monkeypatch.setenv("KNOWLEDGE_FAKE_EMBEDDINGS", "1")
@@ -59,8 +62,11 @@ def rig(tmp_path, monkeypatch):
     import sharepoint_knowledge.server_sp as sp
     from confluence_knowledge.rpc import RpcDb
     importlib.reload(sp)
-    rpc = RpcDb(idx_root / "rpc.db")
-    proc = _daemon(home, work, idx_root, graph_base)
+    from confluence_knowledge.settings import daemon_home
+    dhome = daemon_home()
+    dhome.mkdir(parents=True, exist_ok=True)
+    rpc = RpcDb(dhome / "rpc.db")
+    proc = _daemon(home, work, dhome, graph_base)
     deadline = time.monotonic() + 20
     while not rpc.daemon_alive() and time.monotonic() < deadline:
         time.sleep(0.2)
