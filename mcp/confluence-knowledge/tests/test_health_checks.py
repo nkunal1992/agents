@@ -43,13 +43,15 @@ def test_models_complete_green_when_full(tmp_path, monkeypatch):
                                         "tokenizer_config.json",
                                         "config.json",
                                         "special_tokens_map.json",
-                                        "quantize_config.json", "README.md"]),
+                                        "onnx/quantize_config.json",
+                                        "README.md"]),
             ("mxbai-rerank-base-v1", ["onnx/model_quantized.onnx",
                                       "tokenizer.json",
                                       "tokenizer_config.json",
                                       "config.json",
                                       "special_tokens_map.json",
-                                      "quantize_config.json", "README.md"])):
+                                      "onnx/quantize_config.json",
+                                      "README.md"])):
         for f in files:
             p = home / "models" / name / f
             p.parent.mkdir(parents=True, exist_ok=True)
