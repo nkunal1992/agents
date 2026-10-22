@@ -113,7 +113,7 @@ class Limits:
     idle_unload_s: float    # unload models after this much idle time (0=never)
     fetch_concurrency: int  # concurrent HTTP fetches during a crawl
     min_free_mb: int        # pause embedding below this much free RAM
-    battery_saver: bool     # halve fetch + embed duty-cycle on battery
+    battery_saver: bool     # opt-in (env): halve fetch + embed duty-cycle on battery
 
     def memory_ok(self) -> bool:
         """Enough free RAM that embedding won't push the box into swap —
@@ -175,7 +175,11 @@ def limits() -> Limits:
             _int_env("KNOWLEDGE_IDLE_UNLOAD_S", 600, 0, 86_400)),
         fetch_concurrency=_int_env("KNOWLEDGE_FETCH_CONCURRENCY", 6, 1, 16),
         min_free_mb=_min_free_mb(),
-        battery_saver=os.environ.get("KNOWLEDGE_BATTERY_SAVER", "1") != "0",
+        # battery duty-throttling is OFF by default — on the light
+        # 137M model the user wants full AC pace on battery. Opt back
+        # in with KNOWLEDGE_BATTERY_SAVER=1 (proportional duty sleep +
+        # fetch floor). The OOM guard is unrelated and always on.
+        battery_saver=os.environ.get("KNOWLEDGE_BATTERY_SAVER", "0") != "0",
     )
 
 
