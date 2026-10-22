@@ -374,7 +374,24 @@ jobs:
         env:
           CK_MODEL_CACHE: ~/.cache/ck-models/models
         run: |
-          SPEC="${{ needs.validate.outputs.pkg }}[models]==${{ needs.validate.outputs.version }}"
+          PKG="${{ needs.validate.outputs.pkg }}"
+          VER="${{ needs.validate.outputs.version }}"
+          # the upload returns 200 while the simple index still lags —
+          # poll the JSON API until the release is visible (was: verify
+          # raced ~50s after upload and pip found no such version)
+          for i in $(seq 1 12); do
+            python -c "
+          import json, urllib.request, sys
+          sys.exit(0 if '$VER' in json.load(urllib.request.urlopen(
+              'https://pypi.org/pypi/$PKG/json'))['releases'] else 1)" && break
+            echo "pypi index not yet showing $PKG==$VER ($i/12)"; sleep 15
+          done
+          python -c "
+          import json, urllib.request, sys
+          rels = json.load(urllib.request.urlopen(
+              'https://pypi.org/pypi/$PKG/json'))['releases']
+          sys.exit(0 if '$VER' in rels else 1)" || { echo "::error::$PKG==$VER never appeared on pypi"; exit 1; }
+          SPEC="$PKG[models]==$VER"
           case "${{ needs.validate.outputs.pkg }}" in
             confluence-knowledge)
               python mcp/confluence-knowledge/scripts/e2e_bootstrap.py \

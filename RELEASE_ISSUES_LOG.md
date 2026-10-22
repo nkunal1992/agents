@@ -50,3 +50,18 @@ Structured record of every failure hit during the RC runs and how each was resol
   borderline band. Docs-consistency pin updated 0.02→0.1.
 - **Verify**: `eval_rag.py` locally → recall 96% (≥80%), honesty 100%
   (4/4). Grounding + docs-consistency tests green (76 passed).
+
+## ISSUE-004 — verify-published raced PyPI index propagation
+
+- **Run**: `confluence-knowledge-v0.11.0rc1` (39823241830), job
+  `verify-published`.
+- **Failure**: `pip install confluence-knowledge[models]==0.11.0rc1` →
+  "No matching distribution found" ~50s after the upload's 200 OK.
+- **Root cause**: pypa publish returned success (release IS live at
+  pypi.org/project/confluence-knowledge/0.11.0rc1/) but the simple index
+  lags the JSON metadata by minutes; verify started instantly.
+- **Fix**: verify step now polls the PyPI JSON API for the version to
+  appear (12 × 15s bounded) before running the fresh-install e2e, and
+  fails clearly if it never does.
+- **Note**: `0.11.0rc1` is published and immutable — PyPI rejects
+  filename re-uploads, so the corrected RC run uses `rc2`.
