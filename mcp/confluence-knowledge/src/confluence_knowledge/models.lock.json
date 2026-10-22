@@ -2,11 +2,12 @@
   "comment": "Pinned ONNX model artifacts. Retrieval is local-only — torch and cloud embedding APIs are never used. 'files' limits the snapshot to what the runtime needs.",
   "models": {
     "embed": {
-      "repo": "onnx-community/granite-embedding-small-english-r2-ONNX",
-      "revision": "1dc7835ba0cb9c76a3618d0bf0c427c97671b3c8",
+      "repo": "nomic-ai/nomic-embed-text-v1.5",
+      "revision": "e9b6763023c676ca8431644204f50c2b100d9aab",
       "license": "Apache-2.0",
-      "note": "non-BAAI replacement for bge-m3 (workspace policy): 47M, 384-dim, 8192-ctx, ~5x faster CPU embeds at equal probe recall",
-      "files": ["onnx/model_quantized.onnx", "onnx/model_quantized.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"]
+      "sha256": {"onnx/model_quantized.onnx": "b4342336debaea79de872370664b0aaeb67dea4605513d00ee236ea871a81f27"},
+      "note": "non-BAAI replacement for bge-m3 (workspace policy): 137M, 768-dim, 8192-ctx, vendor-published ONNX — 4/4 corpus probes at ~2x faster embeds than bge-m3",
+      "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "README.md"]
     },
     "sparse": {
       "repo": "Qdrant/bm25",
@@ -18,6 +19,7 @@
       "repo": "mixedbread-ai/mxbai-rerank-xsmall-v1",
       "revision": "b5c6e9da73abc3711f593f705371cdbe9e0fe422",
       "license": "Apache-2.0",
+      "sha256": {"onnx/model_quantized.onnx": "15ef19a6de90be7d52b627f2c784107bd806e64826450f41fb75fa4f0179ab30"},
       "note": "non-BAAI replacement for bge-reranker-v2-m3 (workspace policy): 70M, equal probe recall on our corpus at ~3.3x faster scoring",
       "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"]
     },

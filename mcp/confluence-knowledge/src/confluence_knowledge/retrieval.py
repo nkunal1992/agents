@@ -5,9 +5,9 @@ Models load local-only from pinned artifacts; a missing model is a setup
 error, never a silent fallback.
 
 Backend layout (all under <home>/models/):
-  embed  — onnx-community/granite-embedding-small-english-r2-ONNX
+  embed  — nomic-ai/nomic-embed-text-v1.5
            onnx/model_quantized.onnx
-           (dense 384-dim, normalized, English, 8k ctx)
+           (dense 768-dim, normalized, English, 8k ctx)
   sparse — Qdrant/bm25 via fastembed SparseTextEmbedding
            (learned term-weight leg; BGE-M3's lexical head has no ONNX
            export, so a purpose-built sparse model fills that slot)
@@ -28,17 +28,16 @@ from .index import Index
 from .resources import limits, plan_batches
 from .settings import SetupError
 
-EMBED_REPO = ("onnx-community/"
-             "granite-embedding-small-english-r2-ONNX")   # Apache-2.0, non-BAAI
+EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5"  # Apache-2.0, non-BAAI
 EMBED_ONNX = "onnx/model_quantized.onnx"
-# external-data sibling — onnx-community splits weights out of the graph
-EMBED_ONNX_DATA = EMBED_ONNX + "_data"
+# nomic's quantized graph is self-contained — no external-data sibling
+EMBED_ONNX_DATA = None
 SPARSE_MODEL = "Qdrant/bm25"                            # MIT — via fastembed
 RERANK_REPO = "mixedbread-ai/mxbai-rerank-xsmall-v1"  # Apache-2.0
 RERANK_ONNX = "onnx/model_quantized.onnx"
 RERANK_BASE_REPO = "mixedbread-ai/mxbai-rerank-base-v1"  # heavier override
 
-EMBED_MODEL_ID = "granite-small-r2-onnx-quantized"
+EMBED_MODEL_ID = "nomic-embed-text-v1.5-onnx-quantized"
 SPARSE_MODEL_ID = "qdrant-bm25-fastembed"
 # Composite fingerprint of every model whose output is PERSISTED (dense +
 # sparse vectors). The reranker is deliberately absent: it only scores at
@@ -82,6 +81,19 @@ def _require(dest: Path, repo: str, cli: str, needed: list[str]) -> Path:
         raise SetupError(
             f"local model '{repo}' not prepared — run `{cli} prepare-models`. "
             "Cloud embeddings are never used.")
+    # sha256 spot-check: the lock pins content hashes — a corrupted or
+    # swapped artifact fails loudly rather than embedding garbage
+    spec = next((m for m in _load_lock()["models"].values()
+                 if m.get("repo") == repo), {})
+    for rel, want in (spec.get("sha256") or {}).items():
+        f = dest / rel
+        if f.exists():
+            import hashlib
+            got = hashlib.sha256(f.read_bytes()).hexdigest()
+            if got != want:
+                raise SetupError(
+                    f"model artifact {rel} sha256 mismatch — re-run "
+                    f"`{cli} prepare-models` to refetch")
     return dest
 
 
@@ -132,11 +144,19 @@ class LocalEmbedder:
     """BGE-M3 dense embeddings via ONNX (no torch). Same interface."""
 
     def __init__(self, home: Path, cli: str = "confluence-knowledge"):
+        needed = [EMBED_ONNX, "tokenizer.json"]
+        if EMBED_ONNX_DATA:
+            needed.append(EMBED_ONNX_DATA)
         dest = _require(_model_home(home, EMBED_REPO), EMBED_REPO, cli,
-                        [EMBED_ONNX, EMBED_ONNX_DATA, "tokenizer.json"])
+                        needed)
         self._sess = _ort_session(dest / EMBED_ONNX, cli)
-        # output dim is a session property — 384 on granite-small-r2
-        self._dim = int(self._sess.get_outputs()[-1].shape[-1] or 384)
+        # output dim is a session property — 768 on nomic-v1.5
+        self._dim = int(self._sess.get_outputs()[-1].shape[-1] or 768)
+        self._needs_token_types = any(
+            i.name == "token_type_ids" for i in self._sess.get_inputs())
+        self._has_sentence_emb = any(
+            o.name == "sentence_embedding" for o in
+            self._sess.get_outputs())
         self._tok = _tokenizer(dest)
         self._tok.no_padding()  # padding is applied per micro-batch
         self._tok.enable_truncation(EMBED_MAX_TOKENS)
@@ -174,10 +194,23 @@ class LocalEmbedder:
                 ids[j, :len(enc[i].ids)] = enc[i].ids
                 mask[j, :len(enc[i].attention_mask)] = \
                     enc[i].attention_mask
-            v = np.asarray(self._sess.run(
-                ["sentence_embedding"],
-                {"input_ids": ids, "attention_mask": mask})[0],
-                dtype=np.float32)
+            feed = {"input_ids": ids, "attention_mask": mask}
+            # BERT-family graphs (e.g. nomic) declare a segment-ids input;
+            # single-segment pairs → zeros. Feeding it unconditionally is
+            # wrong too — ModernBERT exports reject unknown inputs.
+            if getattr(self, "_needs_token_types", False):
+                feed["token_type_ids"] = np.zeros_like(ids)
+            if getattr(self, "_has_sentence_emb", True):
+                v = np.asarray(self._sess.run(
+                    ["sentence_embedding"], feed)[0],
+                    dtype=np.float32)
+            else:
+                # nomic-style export: hidden states only → masked mean
+                # pooling (the model card's pooling, not CLS)
+                h = np.asarray(self._sess.run(
+                    ["last_hidden_state"], feed)[0], dtype=np.float32)
+                m = mask[:, :, None].astype(np.float32)
+                v = (h * m).sum(axis=1) / np.maximum(m.sum(axis=1), 1e-9)
             if out is None:
                 out = np.empty((len(enc), v.shape[1]), dtype=np.float32)
             for j, i in enumerate(batch):

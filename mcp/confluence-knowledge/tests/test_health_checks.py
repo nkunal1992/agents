@@ -20,9 +20,9 @@ def test_models_complete_flags_partial_download(tmp_path, monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     # partial embed model: dir exists, onnx missing — the old shallow
     # check reported this as "ready"
-    (home / "models" / "granite-embedding-small-english-r2-ONNX") \
+    (home / "models" / "nomic-embed-text-v1.5") \
         .mkdir(parents=True)
-    (home / "models" / "granite-embedding-small-english-r2-ONNX"
+    (home / "models" / "nomic-embed-text-v1.5"
         / "tokenizer.json").write_text("{}")
     checks = health_checks(home, tmp_path / "work", "sid", "ck")
     emb = _flag(checks, "model_embed")
@@ -33,12 +33,11 @@ def test_models_complete_green_when_full(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     for name, files in (
-            ("granite-embedding-small-english-r2-ONNX",
+            ("nomic-embed-text-v1.5",
              ["onnx/model_quantized.onnx",
-              "onnx/model_quantized.onnx_data",
               "tokenizer.json", "tokenizer_config.json",
               "config.json", "special_tokens_map.json",
-              "quantize_config.json", "README.md"]),
+              "README.md"]),
             ("mxbai-rerank-xsmall-v1", ["onnx/model_quantized.onnx",
                                         "tokenizer.json",
                                         "tokenizer_config.json",

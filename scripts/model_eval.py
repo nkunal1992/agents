@@ -26,12 +26,16 @@ from confluence_knowledge.resources import plan_batches
 
 # (key, repo, onnx rel-path, params M) — ONNX+int8 verified on the hub
 CANDIDATES = [
-    ("bge-m3", "Xenova/bge-m3",
+    ("bge-m3 (old)", "Xenova/bge-m3",
      "onnx/sentence_transformers_quantized.onnx", 568),
-    ("granite-english-r2", "onnx-community/granite-embedding-english-r2-ONNX",
-     "onnx/model_quantized.onnx", 149),
     ("granite-small-r2", "onnx-community/granite-embedding-small-english-r2-ONNX",
      "onnx/model_quantized.onnx", 47),
+    ("snowflake-m-v1.5", "Snowflake/snowflake-arctic-embed-m-v1.5",
+     "onnx/model_quantized.onnx", 109),
+    ("nomic-v1.5", "nomic-ai/nomic-embed-text-v1.5",
+     "onnx/model_quantized.onnx", 137),
+    ("granite-english-r2", "onnx-community/granite-embedding-english-r2-ONNX",
+     "onnx/model_quantized.onnx", 149),
 ]
 
 # (query, substring the correct page's chunks must contain)
@@ -106,9 +110,13 @@ def _embed(sess, tok, texts: list[str], np) -> tuple:
             ids[j, :lens[i]] = enc[i].ids
             mask[j, :len(enc[i].attention_mask)] = enc[i].attention_mask
         t0 = time.monotonic()
+        feed = {"input_ids": ids, "attention_mask": mask}
+        feed["token_type_ids"] = np.zeros_like(ids) \
+            if "token_type_ids" in [i.name for i in
+                                    sess.get_inputs()] else None
+        feed = {k: v for k, v in feed.items() if v is not None}
         out = sess.run(["sentence_embedding"] if has_pooled else
-                       ["last_hidden_state"],
-                       {"input_ids": ids, "attention_mask": mask})[0]
+                       ["last_hidden_state"], feed)[0]
         dt_total += time.monotonic() - t0
         out = np.asarray(out, dtype=np.float32)
         for j, i in enumerate(batch):
