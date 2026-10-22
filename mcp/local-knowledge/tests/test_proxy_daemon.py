@@ -1,6 +1,19 @@
 """Proxy-daemon architecture (#189): rpc channel, lease takeover,
 read-only enforcement, daemon-mode dispatch."""
 
+import os as _os
+
+import pytest as _pt
+
+# Process-lifecycle tests are POSIX-signal-centric (daemon spawn, lease
+# recovery, SIGKILL respawn). On Windows runners the spawned daemon
+# shares pytest's console group — the unit leg dies on a stray console
+# interrupt ~6s into the first daemon test (reproducible on 3.11+3.13).
+# Windows daemon coverage lives in tests/e2e/sessions instead.
+pytestmark = _pt.mark.skipif(_os.name == "nt",
+                             reason="daemon lifecycle is POSIX-centric; "
+                                    "Windows coverage is in e2e sessions")
+
 import os
 import time
 

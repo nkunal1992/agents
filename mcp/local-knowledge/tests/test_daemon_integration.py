@@ -5,6 +5,19 @@ These spawn the actual daemon subprocess (KNOWLEDGE_DAEMON_ROLE=1) and
 drive connect/start_crawl/search through the RPC layer — the same path
 an IDE-launched proxy takes in production."""
 
+import os as _os
+
+import pytest as _pt
+
+# Process-lifecycle tests are POSIX-signal-centric (daemon spawn, lease
+# recovery, SIGKILL respawn). On Windows runners the spawned daemon
+# shares pytest's console group — the unit leg dies on a stray console
+# interrupt ~6s into the first daemon test (reproducible on 3.11+3.13).
+# Windows daemon coverage lives in tests/e2e/sessions instead.
+pytestmark = _pt.mark.skipif(_os.name == "nt",
+                             reason="daemon lifecycle is POSIX-centric; "
+                                    "Windows coverage is in e2e sessions")
+
 import os
 import subprocess
 import sys
