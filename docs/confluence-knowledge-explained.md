@@ -50,7 +50,7 @@ plain RAG fails in a predictable way:
 
 | Technique | What it does | Why basic RAG isn't enough |
 |---|---|---|
-| **Hybrid search** | Three retrieval legs: dense semantic vectors (bge-m3), learned sparse term-weights (bm25), and literal FTS5 keyword matching | Semantic search misses exact terms ("PCT-4213", error codes); keyword search misses paraphrases ("how do we ship" vs "release process"); the sparse leg catches rare identifiers dense vectors blur. Three legs cover all the ways people ask. |
+| **Hybrid search** | Three retrieval legs: dense semantic vectors (granite-small-r2), learned sparse term-weights (bm25), and literal FTS5 keyword matching | Semantic search misses exact terms ("PCT-4213", error codes); keyword search misses paraphrases ("how do we ship" vs "release process"); the sparse leg catches rare identifiers dense vectors blur. Three legs cover all the ways people ask. |
 | **Reciprocal-rank fusion** | Merges the three ranked lists fairly | Needed when combining independent ranking systems that don't share a score scale. |
 | **Cross-encoder reranking** | A second, deeper model re-reads the top-25 candidates and re-sorts them | The first pass is fast-but-shallow over thousands of chunks; the reranker is slow-but-accurate on a few. This two-stage pattern is the standard quality/cost trade in serious RAG systems. |
 | **Heading-aware chunking** | Splits pages at section boundaries, keeps each chunk's section path | Cutting at a fixed character count slices sentences in half and loses context. Knowing "this paragraph is under *Deployment > Windows*" makes both matching and citations better. |
@@ -125,7 +125,7 @@ because it slices mid-sentence and loses which section a chunk came from.
 ### 5. Embed & index
 
 **What:** every chunk is turned into a vector (a list of numbers that encodes
-its meaning) by a local ONNX model (`bge-m3`, quantized). Vectors go
+its meaning) by a local ONNX model (`granite-small-r2`, quantized). Vectors go
 into SQLite alongside a full-text (keyword) index. When a crawl finishes, the
 new set of pages is "published" atomically — a half-finished refresh never
 clobbers the last good index.

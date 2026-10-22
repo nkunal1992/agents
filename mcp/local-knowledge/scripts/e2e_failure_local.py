@@ -81,14 +81,14 @@ def main() -> None:
     cache = os.environ.get("CK_MODEL_CACHE")
     # #206 — models live in the SHARED store under the sandboxed HOME
     mdl = Path(env["HOME"]) / ".knowledge" / "models"
-    if cache and (Path(cache) / "bge-m3").exists():
+    if cache and (Path(cache) / "granite-embedding-small-english-r2-ONNX").exists():
         shutil.copytree(cache, mdl, dirs_exist_ok=True)
         print("PASS models seeded from cache")
     else:
         run([str(cli), "prepare-models"], env, "prepare-models")
 
     # break 1: partial model
-    (mdl / "bge-m3" / "tokenizer_config.json").unlink()
+    (mdl / "granite-embedding-small-english-r2-ONNX" / "tokenizer_config.json").unlink()
     d = run([str(cli), "doctor"], env, check_rc=False)
     check("model_embed" in d.stdout and d.returncode != 0,
           "partial model flagged + non-zero", d.stdout)

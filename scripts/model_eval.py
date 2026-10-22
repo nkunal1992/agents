@@ -117,13 +117,69 @@ def _embed(sess, tok, texts: list[str], np) -> tuple:
     return vecs, dt_total
 
 
+RERANK_CANDIDATES = [
+    ("bge-reranker-v2-m3 (old)", "onnx-community/bge-reranker-v2-m3-ONNX",
+     "onnx/model_quantized.onnx", 568),
+    ("mxbai-rerank-xsmall-v1", "mixedbread-ai/mxbai-rerank-xsmall-v1",
+     "onnx/model_quantized.onnx", 70),
+    ("mxbai-rerank-base-v1", "mixedbread-ai/mxbai-rerank-base-v1",
+     "onnx/model_quantized.onnx", 184),
+]
+
+
+def _rerank(sess, tok, query: str, docs: list[str], np) -> list[float]:
+    pairs = [[query, d] for d in docs]
+    enc = tok.encode_batch(pairs, add_special_tokens=True)
+    lens = [len(e.ids) for e in enc]
+    out = np.zeros(len(enc), dtype=np.float32)
+    for batch in plan_batches(lens, 2_500_000, 6):
+        maxlen = max(lens[i] for i in batch)
+        ids = np.zeros((len(batch), maxlen), dtype=np.int64)
+        mask = np.zeros((len(batch), maxlen), dtype=np.int64)
+        for j, i in enumerate(batch):
+            ids[j, :lens[i]] = enc[i].ids
+            mask[j, :len(enc[i].attention_mask)] = enc[i].attention_mask
+        logits = sess.run(None, {"input_ids": ids,
+                                 "attention_mask": mask})[0]
+        s = np.asarray(logits, dtype=np.float32).reshape(len(batch), -1)
+        for j, i in enumerate(batch):
+            out[i] = 1.0 / (1.0 + np.exp(-s[j, -1]))
+    return out.tolist()
+
+
+def _rerank_eval(np):
+    texts, _owner = _corpus()
+    root = Path.home() / ".confluence-knowledge" / "models"
+    print(f"{'reranker':<26}{'params':>7}  {'hits':>6}")
+    for name, repo, rel, params in RERANK_CANDIDATES:
+        try:
+            sess, tok = _load(repo, rel, root)
+        except Exception as e:  # noqa: BLE001
+            print(f"{name:<26}{params:>6}M  SKIP — {e}")
+            continue
+        hits = 0
+        t0 = time.monotonic()
+        for q, must in PROBES:
+            scores = _rerank(sess, tok, q, texts, np)
+            best = max(range(len(texts)), key=lambda i: scores[i])
+            hits += int(must in texts[best])
+        print(f"{name:<26}{params:>6}M  {hits}/{len(PROBES)}"
+              f"  ({time.monotonic() - t0:.1f}s for {len(PROBES)}×{len(texts)})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default=None)
     ap.add_argument("--pages", type=int, default=30)
+    ap.add_argument("--rerank", action="store_true",
+                    help="evaluate reranker candidates instead")
     args = ap.parse_args()
 
     import numpy as np
+
+    if args.rerank:
+        _rerank_eval(np)
+        return 0
 
     texts, owner = _corpus()
     print(f"eval corpus: {len(texts)} chunks across {max(owner) + 1} pages")

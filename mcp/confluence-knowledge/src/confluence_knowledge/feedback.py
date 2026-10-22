@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-# measured on real bge-m3: identical question 1.00, close paraphrase ~0.77,
+# measured on real dense embedder (bge-m3-era; re-verify on granite-small-r2): identical question 1.00, close paraphrase ~0.77,
 # same-topic different-intent ~0.68, unrelated ~0.39 → 0.75 catches natural
 # rephrases without leaking across topics
 DEFAULT_MIN_SIM = 0.75

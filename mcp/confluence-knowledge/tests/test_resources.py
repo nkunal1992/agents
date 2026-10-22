@@ -29,8 +29,10 @@ def test_default_threads_halve_under_pressure(monkeypatch):
     _calm(monkeypatch)
     monkeypatch.setattr(os, "cpu_count", lambda: 20)
     assert limits().threads == 10
+    # battery alone no longer halves — its throttle is the duty-cycle
+    # sleep in the embed loop, not smaller pools
     monkeypatch.setattr(resources, "_battery_active", lambda: True)
-    assert limits().threads == 5
+    assert limits().threads == 10
     monkeypatch.setattr(resources, "_battery_active", lambda: False)
     monkeypatch.setattr(resources, "_cpu_pct", lambda: 85.0)
     assert limits().threads == 5

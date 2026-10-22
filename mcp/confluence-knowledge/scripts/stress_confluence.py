@@ -868,9 +868,9 @@ def main() -> int:
     args = ap.parse_args()
 
     models = Path(args.models)
-    if not (models / "models" / "bge-m3").exists():
+    if not (models / "models" / "granite-small-r2").exists():
         raise SystemExit(f"models not prepared under {models} "
-                         "(need models/bge-m3)")
+                         "(need models/granite-embedding-small-english-r2-ONNX)")
 
     wanted = ([s for s in SCENARIOS] if args.scenarios == "all"
               else list(SCALE_SCENARIOS) if args.scenarios == "scale"

@@ -18,10 +18,12 @@ def _flag(checks, name):
 def test_models_complete_flags_partial_download(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
-    # partial bge-m3: dir exists, onnx missing — the old shallow check
-    # reported this as "ready"
-    (home / "models" / "bge-m3").mkdir(parents=True)
-    (home / "models" / "bge-m3" / "tokenizer.json").write_text("{}")
+    # partial embed model: dir exists, onnx missing — the old shallow
+    # check reported this as "ready"
+    (home / "models" / "granite-embedding-small-english-r2-ONNX") \
+        .mkdir(parents=True)
+    (home / "models" / "granite-embedding-small-english-r2-ONNX"
+        / "tokenizer.json").write_text("{}")
     checks = health_checks(home, tmp_path / "work", "sid", "ck")
     emb = _flag(checks, "model_embed")
     assert emb["ok"] is False and "prepare-models" in emb["remediation"]
@@ -31,22 +33,24 @@ def test_models_complete_green_when_full(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     for name, files in (
-            ("bge-m3", ["onnx/sentence_transformers_quantized.onnx",
-                        "tokenizer.json", "tokenizer_config.json",
-                        "config.json", "sentencepiece.bpe.model",
-                        "special_tokens_map.json", "README.md"]),
-            ("bge-reranker-v2-m3-ONNX", ["onnx/model_quantized.onnx",
-                                         "tokenizer.json",
-                                         "tokenizer_config.json",
-                                         "config.json",
-                                         "special_tokens_map.json",
-                                         "quantize_config.json", "README.md"]),
-            ("bge-reranker-base-ONNX", ["onnx/model_quantized.onnx",
+            ("granite-embedding-small-english-r2-ONNX",
+             ["onnx/model_quantized.onnx",
+              "onnx/model_quantized.onnx_data",
+              "tokenizer.json", "tokenizer_config.json",
+              "config.json", "special_tokens_map.json",
+              "quantize_config.json", "README.md"]),
+            ("mxbai-rerank-xsmall-v1", ["onnx/model_quantized.onnx",
                                         "tokenizer.json",
                                         "tokenizer_config.json",
                                         "config.json",
                                         "special_tokens_map.json",
-                                        "quantize_config.json", "README.md"])):
+                                        "quantize_config.json", "README.md"]),
+            ("mxbai-rerank-base-v1", ["onnx/model_quantized.onnx",
+                                      "tokenizer.json",
+                                      "tokenizer_config.json",
+                                      "config.json",
+                                      "special_tokens_map.json",
+                                      "quantize_config.json", "README.md"])):
         for f in files:
             p = home / "models" / name / f
             p.parent.mkdir(parents=True, exist_ok=True)

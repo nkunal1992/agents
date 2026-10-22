@@ -105,7 +105,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     cache = os.path.expanduser(cache) if cache else None
     # #206 — models live in the SHARED store under the sandboxed HOME
     models_dir = Path(env["HOME"]) / ".knowledge" / "models"
-    if cache and (Path(cache) / "bge-m3").exists():
+    if cache and (Path(cache) / "granite-embedding-small-english-r2-ONNX").exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")
     else:

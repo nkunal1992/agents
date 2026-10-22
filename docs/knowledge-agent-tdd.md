@@ -68,16 +68,16 @@ row 2: …
 
 | Component | Problem it solves |
 |---|---|
-| `Xenova/bge-m3` quantized ONNX (`sentence_transformers_quantized.onnx`, ~570 MB) | 1024-dim normalized dense vectors, multilingual, 8k-token context — token-aware chunk budget (448 tokens) plus the page title prepended to the embedded text; runtime input cap 2048 covers row-atomic oversize. |
+| `onnx-community/granite-embedding-small-english-r2-ONNX` quantized ONNX (`onnx/model_quantized.onnx` + `.onnx_data`, ~52 MB) | 384-dim normalized dense vectors, English, 8k-token context — token-aware chunk budget (448 tokens) plus the page title prepended to the embedded text; runtime input cap 2048 covers row-atomic oversize. |
 | `Qdrant/bm25` via fastembed `SparseTextEmbedding` | BM25 sparse leg — token weights + corpus IDF computed in SQLite `term_stats` at publish; queries encode via `query_embed`. (Honest substitution: no ONNX export of BGE-M3 exposes the lexical head — real BM25 fills the same RRF slot.) |
-| `onnx-community/bge-reranker-v2-m3-ONNX` quantized (~600 MB) | Cross-encoder reranker; `<APP>_RERANKER` env swaps to the ~4× lighter `bge-reranker-base` for weak hardware. |
+| `onnx-community/mxbai-rerank-xsmall-v1` quantized (~600 MB) | Cross-encoder reranker; `<APP>_RERANKER` env swaps to the ~4× lighter `mxbai-rerank-base` for weak hardware. |
 | ONNX Runtime + `tokenizers` | No torch/sentence-transformers (~2.4 GB → ~250 MB footprint); wheels exist for linux/win-arm64/macos arm64. |
 
 **Index** = SQLite per scope at `<workdir>/.<app>_index/<scope_key>.db`:
 
 - `pages(page_id, parent_id, title, url, level, version, content_hash, warnings)`
 - `chunks(chunk_id, page_id, heading_path, kind, ordinal, text)`
-- `vectors(chunk_id, vec BLOB)` — float32, dim varies by model (1024 for bge-m3)
+- `vectors(chunk_id, vec BLOB)` — float32, dim varies by model (384 for granite-small-r2)
 - `sparse_vectors(chunk_id, payload BLOB)` — int64 indices + float32 weights
   (int64 because `Qdrant/bm25` hashed term ids overflow int32 — found in
   the #101 hunt)
@@ -123,7 +123,7 @@ sequenceDiagram
     U->>A: question
     A->>S: search scope_handle q
     S->>I: active_chunks bounded at 100k
-    S->>D: embed q to 1024-dim vec
+    S->>D: embed q to 384-dim vec
     S->>B: embed q to term weights
     S->>F: FTS5 match max 16 terms
     S->>I: vectors_for and sparse_for active only
@@ -147,7 +147,7 @@ sequenceDiagram
 
 ### 2.2 Reranker
 
-Top-25 fused candidates → `bge-reranker-v2-m3` sigmoid scorer
+Top-25 fused candidates → `mxbai-rerank-xsmall-v1` sigmoid scorer
 (`RERANK_MAX_TOKENS = 2048`). Score tiers, measured on the real model:
 
 - `≥ 0.3` — confident evidence
@@ -319,7 +319,7 @@ flowchart TD
         API[Confluence REST v2 / DC /<br/>Graph / filesystem] --> CW[Crawler: BFS + resumable jobs]
         CW --> EX[extract_chunks<br/>HTML→text, macros skipped]
         EX --> TB[split_table_text<br/>row-atomic + header preserved]
-        TB --> EM[embed: bge-m3 ONNX + bm25 sparse]
+        TB --> EM[embed: granite-small-r2 ONNX + bm25 sparse]
         EM --> IX[("SQLite per scope<br/>pages+chunks+vectors+sparse+FTS5<br/>atomic publish")]
     end
     subgraph Retrieval["2 · Search"]

@@ -22,11 +22,11 @@ command or file where you can check the claim hands-on.
 flowchart TD
     Q["You ask a question in Copilot chat"] --> AG["Knowledge agent<br/>(instructions file)"]
     AG --> SE["search tool<br/>(local MCP service)"]
-    SE --> D["Leg 1: meaning match<br/>bge-m3 dense vectors"]
+    SE --> D["Leg 1: meaning match<br/>granite-small-r2 dense vectors"]
     SE --> SP["Leg 2: exact terms<br/>learned-sparse bm25"]
     SE --> FT["Leg 3: literal keywords<br/>SQLite FTS5"]
     D & SP & FT --> FU["RRF merge → top 30"]
-    FU --> RR["bge-reranker-v2-m3<br/>re-reads top 25"]
+    FU --> RR["mxbai-rerank-xsmall-v1<br/>re-reads top 25"]
     RR --> EV["evidence: up to 8 chunks<br/>+ coverage + corrections"]
     EV --> VC["verify_citations<br/>quote must literally exist"]
     VC --> FH["Failure Hunt:<br/>6 triggered probes"]
@@ -181,13 +181,13 @@ decides:
 
 ### Technical
 
-- **Dense leg** — `bge-m3` quantized ONNX (~565 MB): every chunk → a
-  1024-dimensional normalized *vector* (a point in "meaning space");
+- **Dense leg** — `granite-small-r2` quantized ONNX (~52 MB): every chunk → a
+  384-dimensional normalized *vector* (a point in "meaning space");
   questions get vectors too; nearest points by *cosine similarity* (angle
   between vectors — identical direction ≈ 1.0) come back.
 - **Sparse leg** — `Qdrant/bm25` learned sparse embeddings via fastembed:
   each chunk/query → `{term_id: weight}` where rare terms weigh more.
-  *(Honest engineering note: every public ONNX export of bge-m3 drops its
+  *(Honest engineering note: every public ONNX export of granite-small-r2 drops its
   lexical head, so the sparse leg uses bm25 — same role, ONNX-native.)*
 - **FTS leg** — SQLite FTS5 `MATCH`, first 16 whitespace terms, per-word
   quoting so punctuation can't break the query.
@@ -195,7 +195,7 @@ decides:
   `1/(60 + rank)` per result; the sum produces a top-30 candidate list.
   Score scales differ wildly between legs, so rank (position) is merged,
   not score.
-- **Reranker** — `bge-reranker-v2-m3` cross-encoder (a model that reads
+- **Reranker** — `mxbai-rerank-xsmall-v1` cross-encoder (a model that reads
   *question+chunk together* and outputs a relevance score — unlike the
   fast legs, it sees both sides at once) re-scores the top 25:
   - `≥ 0.3` → confident evidence
@@ -284,7 +284,7 @@ both.
 ### Technical
 
 - **Storage** — `submit_feedback(scope, question, correction, note)`
-  embeds the question with the same bge-m3 embedder and appends
+  embeds the question with the same granite-small-r2 embedder and appends
   `{id, question, qvec, correction, note, ts}` to
   `<index_root>/<scope>.feedback.db` (SQLite WAL — concurrent writers
   can't lose corrections). A legacy `.feedback.json` migrates on first open.
@@ -401,7 +401,7 @@ cd mcp/confluence-knowledge && CK_MODEL_HOME=~/.confluence-knowledge \
 
 | Term | Plain meaning |
 |---|---|
-| **Embedding / vector** | text → a fixed list of 1024 numbers; similar meaning → similar numbers |
+| **Embedding / vector** | text → a fixed list of 384 numbers; similar meaning → similar numbers |
 | **Cosine similarity** | how aligned two vectors are (1.0 = same direction = same topic) |
 | **Sparse embedding (bm25)** | per-word weights — rare IDs carry the signal |
 | **FTS5** | SQLite's built-in keyword index — literal term match |

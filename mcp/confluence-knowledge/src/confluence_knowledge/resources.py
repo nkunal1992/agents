@@ -68,15 +68,17 @@ def _avail_mb() -> float:
 
 
 def _pressured() -> bool:
-    """Machine busy or on battery → run at half-size; stays the polite
-    background service even on a big workstation."""
-    return _battery_active() or _cpu_pct() > 70
+    """An already-busy machine → run at half-size. Battery stays out of
+    this: its throttle is the proportional duty-cycle sleep in the embed
+    loop — a light embedder doesn't need threads halved just because the
+    machine is unplugged."""
+    return _cpu_pct() > 70
 
 
 def _default_threads() -> int:
     # ~half the cores, capped — sized per machine at session build.
     # A 20-core/32GB workstation gets 10, a 4-core laptop 2; halved when
-    # the machine is already busy or on battery. KNOWLEDGE_THREADS wins.
+    # the machine is already busy. KNOWLEDGE_THREADS wins.
     t = max(2, min(10, (os.cpu_count() or 4) // 2))
     return max(2, t // 2) if _pressured() else t
 
@@ -84,7 +86,7 @@ def _default_threads() -> int:
 def _default_max_batch() -> int:
     # Chunks per ONNX micro-batch — memory-driven: each item at ~512
     # tokens carries ~a few tens of MB of activations, so scale to the
-    # RAM that's actually free. Halved under pressure. KNOWLEDGE_MAX_
+    # RAM that's actually free. Halved under CPU pressure. KNOWLEDGE_MAX_
     # BATCH wins. batch_tokens still clamps every run.
     avail = _avail_mb()
     b = (4 if avail < 2048 else 8 if avail < 8192

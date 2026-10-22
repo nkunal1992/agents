@@ -23,6 +23,10 @@ _PERMANENT_MARKERS = ("401", "403", "404", "permission", "not found")
 # Bound a single flush's pending pop — pages are popped until ~128 chunks so
 # a dense page can't put a multi-hundred-chunk buffer behind one embed call
 FLUSH_MAX_CHUNKS = 128
+# Battery duty cycle — pause this fraction of each micro-batch's elapsed time
+# (capped 1s): scales with actual model cost, so a light model throttles
+# gently while a heavy one still backs off properly
+BATTERY_DUTY = 0.5
 
 
 def _permanent(err: Exception) -> bool:
@@ -392,12 +396,13 @@ class Crawler:
                                             # CrawlCancelled MUST propagate
                         _c.progress.note = \
                             f"embedding {done}/{total} chunks"
-                        # battery saver, bounded per micro-batch — ~duty-cycle
-                        # pauses in ≤1s steps keep the heartbeat tight; the
-                        # old post-flush sleep compounded quadratically on
-                        # dense pages (gap audit #1)
+                        # battery saver, proportional to real batch cost —
+                        # ~33% duty in ≤1s steps keeps the heartbeat tight
+                        # and shrinks naturally on the light model; the old
+                        # post-flush sleep compounded on dense pages
                         if _c.battery_saver():
-                            time.sleep(min(time.monotonic() - tick_t0, 1.0))
+                            el = time.monotonic() - tick_t0
+                            time.sleep(min(el * BATTERY_DUTY, 1.0))
                             tick_t0 = time.monotonic()
                     t0 = time.monotonic()
                     import inspect as _ins
@@ -407,6 +412,12 @@ class Crawler:
                             texts, on_batch=_embed_tick)
                     else:
                         vecs = self.embedder.embed(texts)
+                        if self.control is not None and \
+                                self.control.battery_saver():
+                            # no per-batch hook on this embedder — same
+                            # proportional duty pause, once per call
+                            time.sleep(min(
+                                (time.monotonic() - t0) * BATTERY_DUTY, 1.0))
                     stats["embed_ms"] += \
                         (time.monotonic() - t0) * 1000
                     if self.sparse is not None:

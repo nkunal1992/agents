@@ -5,12 +5,13 @@ Models load local-only from pinned artifacts; a missing model is a setup
 error, never a silent fallback.
 
 Backend layout (all under <home>/models/):
-  embed  — Xenova/bge-m3  onnx/sentence_transformers_quantized.onnx
-           (dense 1024-dim, normalized, multilingual, 8k ctx)
+  embed  — onnx-community/granite-embedding-small-english-r2-ONNX
+           onnx/model_quantized.onnx
+           (dense 384-dim, normalized, English, 8k ctx)
   sparse — Qdrant/bm25 via fastembed SparseTextEmbedding
            (learned term-weight leg; BGE-M3's lexical head has no ONNX
            export, so a purpose-built sparse model fills that slot)
-  rerank — onnx-community/bge-reranker-v2-m3-ONNX  onnx/model_quantized.onnx
+  rerank — mixedbread-ai/mxbai-rerank-xsmall-v1    onnx/model_quantized.onnx
            (sequence-classification logits → relevance score)
 """
 
@@ -27,14 +28,17 @@ from .index import Index
 from .resources import limits, plan_batches
 from .settings import SetupError
 
-EMBED_REPO = "Xenova/bge-m3"                            # Apache-2.0/MIT
-EMBED_ONNX = "onnx/sentence_transformers_quantized.onnx"
+EMBED_REPO = ("onnx-community/"
+             "granite-embedding-small-english-r2-ONNX")   # Apache-2.0, non-BAAI
+EMBED_ONNX = "onnx/model_quantized.onnx"
+# external-data sibling — onnx-community splits weights out of the graph
+EMBED_ONNX_DATA = EMBED_ONNX + "_data"
 SPARSE_MODEL = "Qdrant/bm25"                            # MIT — via fastembed
-RERANK_REPO = "onnx-community/bge-reranker-v2-m3-ONNX"  # MIT
+RERANK_REPO = "mixedbread-ai/mxbai-rerank-xsmall-v1"  # Apache-2.0
 RERANK_ONNX = "onnx/model_quantized.onnx"
-RERANK_BASE_REPO = "onnx-community/bge-reranker-base-ONNX"  # light override
+RERANK_BASE_REPO = "mixedbread-ai/mxbai-rerank-base-v1"  # heavier override
 
-EMBED_MODEL_ID = "bge-m3-onnx-quantized"
+EMBED_MODEL_ID = "granite-small-r2-onnx-quantized"
 SPARSE_MODEL_ID = "qdrant-bm25-fastembed"
 # Composite fingerprint of every model whose output is PERSISTED (dense +
 # sparse vectors). The reranker is deliberately absent: it only scores at
@@ -129,8 +133,10 @@ class LocalEmbedder:
 
     def __init__(self, home: Path, cli: str = "confluence-knowledge"):
         dest = _require(_model_home(home, EMBED_REPO), EMBED_REPO, cli,
-                        [EMBED_ONNX, "tokenizer.json"])
+                        [EMBED_ONNX, EMBED_ONNX_DATA, "tokenizer.json"])
         self._sess = _ort_session(dest / EMBED_ONNX, cli)
+        # output dim is a session property — 384 on granite-small-r2
+        self._dim = int(self._sess.get_outputs()[-1].shape[-1] or 384)
         self._tok = _tokenizer(dest)
         self._tok.no_padding()  # padding is applied per micro-batch
         self._tok.enable_truncation(EMBED_MAX_TOKENS)
@@ -152,7 +158,8 @@ class LocalEmbedder:
         heartbeats + reports progress through it so a multi-minute dense
         flush doesn't look like a wedged job."""
         if not texts:
-            return np.zeros((0, 1024), dtype=np.float32)
+            return np.zeros((0, getattr(self, "_dim", 1024)),
+                            dtype=np.float32)
         enc = self._tok.encode_batch(texts, add_special_tokens=True)
         lim = limits()
         out = None
@@ -227,10 +234,10 @@ class LocalSparseEmbedder:
 
 
 class LocalReranker:
-    """bge-reranker-v2-m3 via ONNX sequence-classification logits.
+    """mxbai-rerank-xsmall-v1 via ONNX sequence-classification logits.
 
-    Override with env `*_EMBED_RERANKER` = "onnx-community/bge-reranker-base-ONNX"
-    (lighter, English) for slow machines — doctor surfaces the hint.
+    Override with env `*_EMBED_RERANKER` = "mixedbread-ai/mxbai-rerank-base-v1"
+    (heavier, stronger) for quality-first scopes — doctor surfaces the hint.
     """
 
     def __init__(self, home: Path, cli: str = "confluence-knowledge"):

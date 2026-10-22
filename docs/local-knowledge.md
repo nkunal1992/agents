@@ -72,7 +72,7 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | Var | Purpose |
 |---|---|
 | `LOCAL_KNOWLEDGE_HOME` | installation root (default `~/.local-knowledge`) |
-| `LOCAL_KNOWLEDGE_RERANKER` | `onnx-community/bge-reranker-base-ONNX` for a faster English reranker |
+| `LOCAL_KNOWLEDGE_RERANKER` | `mixedbread-ai/mxbai-rerank-base-v1` for a heavier, stronger reranker |
 | `LOCAL_KNOWLEDGE_WORKDIR` | index location (default `~/.local-knowledge/work`) |
 | `KNOWLEDGE_THREADS` | native inference threads per session (default ≈ cores/4, max 4) |
 | `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 4 items |

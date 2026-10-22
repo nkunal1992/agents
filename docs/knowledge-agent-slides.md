@@ -97,8 +97,7 @@ that, not on parameters trained on the public internet.
 "Reset credentials" lands next to "forgotten password" — even though zero
 words overlap — because they *mean* similar things.
 
-**Technical:** `bge-m3` — 1024-dimensional dense vectors, multilingual
-(100+ languages), quantized ONNX, runs locally (~570 MB). Every chunk of
+**Technical:** `granite-small-r2` — 384-dimensional dense vectors (English), quantized ONNX, runs locally (~52 MB). Every chunk of
 every page gets a vector; questions get vectors; we fetch by cosine
 distance.
 
@@ -123,7 +122,7 @@ three legs, incomparable score scales, rank solves it).
 model then reads each candidate *against the question* and scores it —
 the final top-8 is what the answer is built on.
 
-**Technical:** `bge-reranker-v2-m3` cross-encoder. Measured tiers:
+**Technical:** `mxbai-rerank-xsmall-v1` cross-encoder. Measured tiers:
 `≥0.3` confident · `0.02–0.3` returned + flagged `low_confidence` ·
 `<0.02` dropped (never grounds an answer on noise).
 

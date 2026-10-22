@@ -30,8 +30,8 @@ answer with [Source: Page Title](url) on every claim
   non-GET request with a `SecurityException` before it reaches the network,
   and every path is checked against a read-only endpoint allowlist. The agent
   profile itself has no shell/edit/fetch tools — only the MCP operations.
-- **Local retrieval, always.** Embeddings (`bge-m3`, quantized ONNX) and reranking
-  (`bge-reranker-v2-m3`, quantized ONNX) run on your machine — MIT/Apache-2.0 licensed, pinned
+- **Local retrieval, always.** Embeddings (`granite-small-r2`, quantized ONNX) and reranking
+  (`mxbai-rerank-xsmall-v1`, quantized ONNX) run on your machine — MIT/Apache-2.0 licensed, pinned
   revisions. No document text ever goes to a cloud embedding API.
 - **One caveat to know:** the final answer is written by Copilot using the
   retrieved passages, so those passages do reach your company's approved
@@ -120,7 +120,7 @@ Manual fallback — `.vscode/mcp.json`:
 The index lives in `~/.confluence-knowledge/work` by default, shared by the CLI
 and the server. Set `"env": { "CONF_KNOWLEDGE_WORKDIR": "<folder>" }` only to
 put it elsewhere. For a faster English-only reranker on slow machines, set
-`"env": { "CONF_KNOWLEDGE_RERANKER": "onnx-community/bge-reranker-base-ONNX" }`.
+`"env": { "CONF_KNOWLEDGE_RERANKER": "onnx-community/mxbai-rerank-base-v1" }`.
 
 JetBrains: same command/args in Copilot's MCP settings (stdio). The agent
 writes the exact block for your OS during bootstrap if you prefer.
@@ -300,7 +300,7 @@ The server is designed to stay out of the way on a developer laptop:
 | 401 on heartbeat | token expired/wrong → re-run `setup` |
 | `index database was locked` | fixed in v0.1.6. Earlier versions deadlocked themselves on the first crawl (an uncommitted write per connection). Upgrade: `python -m pip install --upgrade "<bundle>\service[models]"`, restart the IDE |
 | `MCP error -32001: Request timeout` on `crawl_step` | fixed in v0.2.1: the crawl runs in a background thread server-side and `crawl_step` is an instant progress poll — a request timeout can no longer stall or lose a crawl; progress checkpoints continuously and a server restart auto-resumes |
-| fan loud / laptop sluggish during a crawl | `doctor` `resources` flag lists limits; close extra IDE windows (each runs its own server), set `KNOWLEDGE_THREADS=1`, or use the light reranker (`CONFLUENCE_KNOWLEDGE_RERANKER=onnx-community/bge-reranker-base-ONNX`) |
+| fan loud / laptop sluggish during a crawl | `doctor` `resources` flag lists limits; close extra IDE windows (each runs its own server), set `KNOWLEDGE_THREADS=1`, or use the light reranker (`CONFLUENCE_KNOWLEDGE_RERANKER=onnx-community/mxbai-rerank-base-v1`) |
 | `search` says "crawl … still running" | the background crawl hasn't finished; poll `crawl_step` for progress. The index is published only when the whole subtree is crawled |
 | `crawl_step` returns `state: abandoned` | the job was superseded by a newer crawl or its resume was fenced (e.g. model upgrade changed vector dims) — it can never finish; call `start_crawl` for a fresh job |
 | `crawl_step` returns `state: cancelled` | a user ran `cancel_crawl` — it never resumes; `start_crawl` for a fresh job (unchanged pages are reused) |

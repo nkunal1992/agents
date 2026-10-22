@@ -146,7 +146,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
 
     cache = os.environ.get("CK_MODEL_CACHE")
     models_dir = Path(env["HOME"]) / ".knowledge" / "models"
-    if cache and (Path(cache) / "bge-m3").exists():
+    if cache and (Path(cache) / "granite-embedding-small-english-r2-ONNX").exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")
     else:

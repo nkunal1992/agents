@@ -2,10 +2,11 @@
   "comment": "Pinned ONNX model artifacts. Retrieval is local-only — torch and cloud embedding APIs are never used. 'files' limits the snapshot to what the runtime needs.",
   "models": {
     "embed": {
-      "repo": "Xenova/bge-m3",
-      "revision": "4de13258303883538bd53b696b452bf8099f0858",
-      "license": "MIT",
-      "files": ["onnx/sentence_transformers_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "sentencepiece.bpe.model", "special_tokens_map.json", "README.md"]
+      "repo": "onnx-community/granite-embedding-small-english-r2-ONNX",
+      "revision": "1dc7835ba0cb9c76a3618d0bf0c427c97671b3c8",
+      "license": "Apache-2.0",
+      "note": "non-BAAI replacement for bge-m3 (workspace policy): 47M, 384-dim, 8192-ctx, ~5x faster CPU embeds at equal probe recall",
+      "files": ["onnx/model_quantized.onnx", "onnx/model_quantized.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"]
     },
     "sparse": {
       "repo": "Qdrant/bm25",
@@ -14,17 +15,18 @@
       "note": "downloaded through fastembed's own cache (models/fastembed)"
     },
     "rerank": {
-      "repo": "onnx-community/bge-reranker-v2-m3-ONNX",
-      "revision": "6f5ff65298512715a1e669753bc754d2bc8f367b",
-      "license": "MIT",
+      "repo": "mixedbread-ai/mxbai-rerank-xsmall-v1",
+      "revision": "b5c6e9da73abc3711f593f705371cdbe9e0fe422",
+      "license": "Apache-2.0",
+      "note": "non-BAAI replacement for bge-reranker-v2-m3 (workspace policy): 70M, equal probe recall on our corpus at ~3.3x faster scoring",
       "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"]
     },
     "rerank_light": {
-      "repo": "onnx-community/bge-reranker-base-ONNX",
-      "revision": "f131ae72114cb18333648a2ee6b0942849e8ab95",
-      "license": "MIT",
+      "repo": "mixedbread-ai/mxbai-rerank-base-v1",
+      "revision": "800f24c113213a187e65bde9db00c15a2bb12738",
+      "license": "Apache-2.0",
       "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "quantize_config.json", "README.md"],
-      "note": "downloaded only when *_RERANKER env selects it"
+      "note": "downloaded only when *_RERANKER env selects the heavier override"
     }
   }
 }

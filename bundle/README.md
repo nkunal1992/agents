@@ -176,7 +176,7 @@ Corporate TLS-inspecting proxies work out of the box (the service bundles
 | "loading local models" | First call per session warms the models; retry the tool call |
 | `no stored token` | Ask the agent to register again — it reads the token from your clipboard. Terminal: `confluence-knowledge setup` |
 | Two `python.exe` processes on Windows | Normal — a venv `python.exe` is a launcher that starts the base interpreter as its child |
-| Model download blocked | Copy the `bge-m3`, `bge-reranker-v2-m3-ONNX`, and `fastembed` dirs into `~/.knowledge/models/` from a colleague or mirror |
+| Model download blocked | Copy the `granite-small-r2`, `mxbai-rerank-xsmall-v1`, and `fastembed` dirs into `~/.knowledge/models/` from a colleague or mirror |
 | doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |
 
 `confluence-knowledge doctor` is the first diagnostic — it checks config,
