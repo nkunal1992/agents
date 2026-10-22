@@ -45,18 +45,20 @@ def wheel_stage(pkg: str, rows: list) -> bool:
     if not src.exists():
         rows.append((f"{pkg}:wheel", "SKIP", "no package dir"))
         return True
-    rc, out = run([sys.executable, "-m", "pip", "wheel", "-w",
-                   str(REPO / ".wheel-test"), "--no-deps", str(src)],
-                  timeout=600)
     whl_dir = REPO / ".wheel-test"
+    whl_dir.mkdir(exist_ok=True)
+    for stale in whl_dir.glob(f"{pkg.replace('-', '_')}-*.whl"):
+        stale.unlink()                       # don't match a stale wheel
+    rc, out = run([sys.executable, "-m", "pip", "wheel", "-w",
+                   str(whl_dir), "--no-deps", str(src)], timeout=600)
     whl = next(whl_dir.glob(f"{pkg.replace('-', '_')}-*.whl"), None)
     if rc != 0 or whl is None:
         rows.append((f"{pkg}:wheel", "FAIL", "build produced no wheel"))
         return False
     with tempfile.TemporaryDirectory() as td:
-        venv.create(td / "v", with_pip=True)
-        pip = str(td / "v" / "bin" / "pip")
-        py = str(td / "v" / "bin" / "python")
+        venv.create(Path(td) / "v", with_pip=True)
+        pip = str(Path(td) / "v" / "bin" / "pip")
+        py = str(Path(td) / "v" / "bin" / "python")
         rc, out = run([pip, "install", "--quiet", str(whl)], timeout=600)
         if rc != 0:
             rows.append((f"{pkg}:wheel", "FAIL",
