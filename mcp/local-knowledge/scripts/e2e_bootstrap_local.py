@@ -169,7 +169,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
           "register: merged existing .vscode/mcp.json without clobbering")
     entry = merged["servers"]["local-knowledge"]
     if entry.get("type") == "http":
-        check(f"/local-knowledge/mcp" in entry["url"]
+        check("/local-knowledge/mcp" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
               "register: http entry points at the daemon's local path",

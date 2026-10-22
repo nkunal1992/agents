@@ -163,7 +163,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
           "register: merged into .vscode/mcp.json")
     entry = merged["servers"]["sharepoint-knowledge"]
     if entry.get("type") == "http":
-        check(f"/sharepoint-knowledge/mcp" in entry["url"]
+        check("/sharepoint-knowledge/mcp" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
               "register: http entry points at the daemon's sp path",
