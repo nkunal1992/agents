@@ -144,6 +144,8 @@ class Daemon:
         self._http = self._serve_http()
         self._resume_orphans()
         last_gc = 0.0
+        last_probe = 0.0
+        probe_fails = 0
         from .watchdog import spawn_watchdog
         spawn_watchdog(self.workdir)   # it revives us; we revive it
         try:
@@ -159,6 +161,21 @@ class Daemon:
                     last_gc = time.time()
                     self._gc_leases()
                     spawn_watchdog(self.workdir)  # revive a dead sibling
+                if time.time() - last_probe > 10:
+                    last_probe = time.time()
+                    if self._probe_http():
+                        probe_fails = 0
+                    else:
+                        probe_fails += 1
+                        if probe_fails >= 2:
+                            # the MCP surface is wedged (e.g. the session
+                            # manager died across an OS suspend) — uvicorn
+                            # still answers TCP so nothing else can see
+                            # it. Self-eject: the watchdog respawns us on
+                            # the SAME url; one client retry, no reload.
+                            log.error("mcp surface wedged — self-eject "
+                                      "for watchdog respawn")
+                            return 5
                 time.sleep(_POLL_S)
         finally:
             if self._http is not None:
@@ -211,6 +228,7 @@ class Daemon:
             if not server.started:
                 log.error("http server did not start — rpc dispatch only")
                 return None
+            self._http_meta_v = meta
             log.info("mcp http endpoints: %s",
                      {n: f"http://127.0.0.1:{meta['port']}/{n}/mcp"
                       for n in apps})
@@ -218,6 +236,34 @@ class Daemon:
         except Exception:
             log.exception("http endpoint failed — rpc dispatch only")
             return None                          # optional
+
+    def _probe_http(self) -> bool:
+        """POST a real initialize at our own endpoint — the health check
+        that catches 'uvicorn alive, session manager dead' after a long
+        OS suspend. One mounted service is enough; they share the
+        manager lifecycle."""
+        meta = getattr(self, "_http_meta_v", None)
+        if not meta or not self.services:
+            return True                      # nothing served to check
+        import urllib.request
+        body = json.dumps({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26",
+                       "capabilities": {},
+                       "clientInfo": {"name": "self-probe",
+                                      "version": "0"}}}).encode()
+        svc = min(self.services)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{meta['port']}/{svc}/mcp", data=body,
+            headers={"Content-Type": "application/json",
+                     "Accept": "application/json, text/event-stream",
+                     "Authorization": f"Bearer {meta['token']}"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status == 200
+        except Exception:
+            log.warning("mcp self-probe failed", exc_info=True)
+            return False
 
     def _http_meta(self) -> dict:
         """Resolve {port, token} for the endpoint, persisted in the daemon

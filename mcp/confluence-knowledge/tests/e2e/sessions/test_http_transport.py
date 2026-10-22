@@ -70,24 +70,40 @@ async def _call(url: str, token: str, tool: str, args: dict) -> dict:
             return {"raw": text}
 
 
-def _url(meta: dict) -> str:
-    return f"http://127.0.0.1:{meta['port']}/mcp"
+def _url(meta: dict, svc: str = "confluence-knowledge") -> str:
+    return f"http://127.0.0.1:{meta['port']}/{svc}/mcp"
 
 
 @pytest.fixture
 def daemon(workdir):
     proc = _spawn_daemon(workdir)
     yield proc
+    (workdir / ".watchdog.stop").write_text("1")   # stop the respawn loop
     proc.terminate()
     try:
         proc.wait(timeout=8)
     except subprocess.TimeoutExpired:
         proc.kill()
+    try:                            # a watchdog-respawned daemon may be
+        import psutil  # running under a different pid
+        for p in psutil.process_iter(["cmdline"]):
+            if p.info["cmdline"] and "confluence_knowledge.daemon" \
+                    in " ".join(p.info["cmdline"]) and \
+                    str(workdir) in " ".join(p.info["cmdline"]):
+                p.terminate()
+    except Exception:               # noqa: BLE001,S110 — teardown is
+        pass                         # best-effort
 
 
 @pytest.fixture
 def workdir(tmp_path):
-    return tmp_path
+    # the watchdog respawns at daemon_home(), not an arbitrary dir — the
+    # fixture must live there for the self-eject → respawn cycle to be
+    # observable by the client (same port via the persisted http.json)
+    from confluence_knowledge.settings import daemon_home
+    d = daemon_home()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def test_http_endpoint_answers_tools(daemon, workdir):
