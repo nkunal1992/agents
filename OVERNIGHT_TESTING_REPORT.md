@@ -72,3 +72,4 @@ Started: 2026-10-21 ~22:30 local.
 | Real-model RAG | 100% recall@8, fact coverage, honesty (ONNX) |
 | Wheel quality | twine PASSED; fresh-venv install + journey on artifact green |
 | Field-found fixes | orphan-resume, start_crawl dedup, corrupt/busy tri-state, page-title indexing, auth-pause visibility, model-note masking, unflushed phases — all in 0.10.2 |
+| 08:35 | Phase 4 | local-knowledge + sharepoint-knowledge 0.7.1 staged | both 0.7.0 wheels predate the verify_citations daemon-routing fix (cadf21d landed post-tag). Bumped → rc1 tagged → publish queued |
