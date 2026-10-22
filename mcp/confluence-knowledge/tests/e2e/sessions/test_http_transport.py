@@ -21,7 +21,9 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-pytestmark = pytest.mark.e2e
+pytestmark = pytest.mark.skipif(
+    os.environ.get("KNOWLEDGE_E2E") != "1",
+    reason="e2e sessions run under KNOWLEDGE_E2E=1 (CI e2e leg)")
 
 
 def _spawn_daemon(workdir: Path) -> subprocess.Popen:

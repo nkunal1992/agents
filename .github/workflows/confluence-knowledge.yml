@@ -80,6 +80,13 @@ jobs:
           KNOWLEDGE_FAKE_EMBEDDINGS: "1"
         run: |
           python mcp/confluence-knowledge/scripts/ide_replay.py             mcp/confluence-knowledge/scripts/sessions/wrong-env-token.json             mcp/confluence-knowledge/scripts/sessions/auth-expiry-midcrawl.json             mcp/confluence-knowledge/scripts/sessions/corrupt-index.json             mcp/confluence-knowledge/scripts/sessions/two-windows.json             mcp/confluence-knowledge/scripts/sessions/cancel-refresh.json             mcp/confluence-knowledge/scripts/sessions/server-kill-midcall.json
+      - name: HTTP transport e2e — daemon endpoint, kill, suspend-wake
+        shell: bash
+        env:
+          KNOWLEDGE_E2E: "1"
+        run: |
+          cd mcp/confluence-knowledge
+          python -m pytest tests/e2e/sessions/ -x -q
       - name: Failure e2e — break the install, verify doctor flags + recovery
         shell: bash
         env:
