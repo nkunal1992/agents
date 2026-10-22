@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]
                     / "confluence-knowledge" / "scripts"))
 import atexit
 
-from _e2e_common import call, check, stop_shared_daemon
+from _e2e_common import call, check, stop_shared_daemon, fresh_venv
 from _fake_graph_server import TOKEN, serve
 
 REPO_SVC = Path(__file__).resolve().parents[1]
@@ -84,7 +84,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     check(py, f"preflight: python >=3.11 found ({py or 'none'})")
 
     venv_dir = sp_home / "venv"
-    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    fresh_venv(venv_dir)
     vpy = venv_bin(venv_dir) / ("python.exe" if os.name == "nt" else "python")
     cli = venv_bin(venv_dir) / ("sharepoint-knowledge.exe"
                               if os.name == "nt" else "sharepoint-knowledge")

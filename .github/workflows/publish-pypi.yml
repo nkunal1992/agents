@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
       - run: pip install pytest packaging
       - name: Gate unit tests
         run: pytest scripts/tests -q
@@ -60,6 +62,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
       - run: pip install build twine packaging
       - name: Inject rc version (rc builds only)
         if: needs.validate.outputs.is_rc == 'True'
@@ -94,6 +98,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
       - name: Install the built wheel into a fresh venv
         shell: bash
         run: |
@@ -146,6 +152,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
       - name: Install engine for model warmup
         run: pip install -e './mcp/confluence-knowledge[models]'
       - name: Cache model artifacts
@@ -218,6 +226,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
       - run: pip install packaging
       - name: Install engine for model warmup
         run: pip install -e './mcp/confluence-knowledge[models]'
@@ -326,6 +336,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
       - name: Wait for the release to be installable
         shell: bash
         # poll what pip actually sees — the simple index lags the JSON API

@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import atexit
 
-from _e2e_common import check, serve, stop_shared_daemon
+from _e2e_common import check, serve, stop_shared_daemon, fresh_venv
 
 REPO_SVC = Path(__file__).resolve().parents[1]
 
@@ -56,7 +56,7 @@ def main() -> None:
     print(f"sandbox: {sandbox}  fake: {base}")
 
     venv_dir = home / "venv"
-    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    fresh_venv(venv_dir)
     bindir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
     vpy = bindir / ("python.exe" if os.name == "nt" else "python")
     cli = bindir / ("confluence-knowledge.exe" if os.name == "nt"

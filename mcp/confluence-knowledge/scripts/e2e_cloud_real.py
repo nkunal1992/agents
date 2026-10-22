@@ -27,7 +27,7 @@ import venv
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _e2e_common import call, check
+from _e2e_common import call, check, fresh_venv
 
 ENV_FILE = Path.home() / ".config/agents/cloud.env"
 CANARY = "CONFLUENCE_CANARY_FACT_4482"
@@ -248,7 +248,7 @@ def main() -> int:
         vpy = cli.parent / "python"
     else:
         vdir = sandbox / "venv"
-        venv.EnvBuilder(with_pip=True).create(vdir)
+        fresh_venv(vdir)
         vpy = venv_bin(vdir) / ("python.exe" if os.name == "nt"
                                 else "python")
         src = Path(__file__).resolve().parents[1]

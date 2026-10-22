@@ -35,7 +35,7 @@ from mcp.client.stdio import stdio_client
 sys.path.insert(0, str(Path(__file__).parent))
 import atexit
 
-from _e2e_common import TOKEN, call, check, serve, stop_shared_daemon
+from _e2e_common import TOKEN, call, check, serve, stop_shared_daemon, fresh_venv
 
 REPO_SVC = Path(__file__).resolve().parents[1]
 BUNDLE_SVC = REPO_SVC.parents[1] / "dist" / "confluence-knowledge-bundle" / "service"
@@ -84,7 +84,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
 
     # 2. venv + install from the service source — what the agent runs
     venv_dir = ck_home / "venv"
-    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    fresh_venv(venv_dir)
     vpy = venv_bin(venv_dir) / ("python.exe" if os.name == "nt" else "python")
     cli = venv_bin(venv_dir) / ("confluence-knowledge.exe" if os.name == "nt"
                               else "confluence-knowledge")

@@ -58,6 +58,17 @@ def wheel_stage(pkg: str, rows: list) -> bool:
         return False
     with tempfile.TemporaryDirectory() as td:
         venv.create(Path(td) / "v", with_pip=True)
+        # ensurepip's bundled pip trusts the compromised emSign
+        # intermediates (GHSA-6q48-6c7w-9gw2) — secure the venv's
+        # installer before it installs our wheel
+        try:
+            import certifi as _host_cert
+            _cert = ["--cert", _host_cert.where()]
+        except Exception:
+            _cert = []
+        run([str(Path(td) / "v" / "bin" / "python"), "-m",
+             "pip", "install", "--quiet", "-U",
+             "pip>=26.2.2", "certifi>=2026.10.19", *_cert], timeout=300)
         pip = str(Path(td) / "v" / "bin" / "pip")
         py = str(Path(td) / "v" / "bin" / "python")
         rc, out = run([pip, "install", "--quiet", str(whl)], timeout=600)

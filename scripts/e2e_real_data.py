@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parents[1]
 CK_SRC = REPO / "mcp" / "confluence-knowledge"
 LK_SRC = REPO / "mcp" / "local-knowledge"
 sys.path.insert(0, str(CK_SRC / "scripts"))
-from _e2e_common import call, check
+from _e2e_common import call, check, fresh_venv
 from _fake_dc_work import FakeTree, Hostility, serve
 
 LOCAL_CANARY = "LOCAL_CANARY_FACT_9921"
@@ -389,7 +389,7 @@ def main() -> int:
         vpy = cli.parent / "python"
     else:
         vdir = sandbox / "venv"
-        venv.EnvBuilder(with_pip=True).create(vdir)
+        fresh_venv(vdir)
         vpy = venv_bin(vdir) / ("python.exe" if os.name == "nt" else "python")
         cli = venv_bin(vdir) / ("confluence-knowledge.exe"
                                 if os.name == "nt" else "confluence-knowledge")

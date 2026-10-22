@@ -177,6 +177,42 @@ def serve(port: int = 0) -> tuple[ThreadingHTTPServer, str, list[str]]:
     return srv, f"http://127.0.0.1:{srv.server_port}", hits
 
 
+
+# --- venv hygiene ---------------------------------------------------
+# ensurepip ships pip<26.2.2 whose vendored certifi trusts the emSign
+# intermediates with compromised keys (GHSA-6q48-6c7w-9gw2). A fresh
+# venv must NOT pip-install anything before pip+certifi are current.
+
+
+def venv_bin(venv_dir: Path) -> Path:
+    """bin/ vs Scripts/ — the dir holding the venv's executables."""
+    import sys as _s
+    return venv_dir / ("Scripts" if _s.platform == "win32" else "bin")
+
+
+def fresh_venv(venv_dir: Path) -> Path:
+    """Create a venv and secure its installer before anything else runs —
+    upgrade pip>=26.2.2 + certifi>=2026.10.19 inside the venv so the
+    first `pip install` cannot chain through the compromised emSign
+    intermediates."""
+    import subprocess as _sp
+    import venv as _v
+    _v.EnvBuilder(with_pip=True).create(venv_dir)
+    py = str(venv_bin(venv_dir) / "python")
+    cmd = [py, "-m", "pip", "install", "--quiet", "-U",
+           "pip>=26.2.2", "certifi>=2026.10.19"]
+    # the venv's own pip still trusts emSign until upgraded — pin the
+    # TLS roots to the HOST's (already-fixed) certifi for this call so
+    # the bootstrap install itself can't chain to the bad intermediates
+    try:
+        import certifi as _cert
+        cmd += ["--cert", _cert.where()]
+    except Exception:
+        pass
+    _sp.run(cmd, check=True)
+    return venv_dir
+
+
 # --- shared MCP-client helpers (call/check used by both smoke and bootstrap) ---
 
 import json as _json
