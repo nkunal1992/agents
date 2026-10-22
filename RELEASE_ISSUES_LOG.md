@@ -65,3 +65,16 @@ Structured record of every failure hit during the RC runs and how each was resol
   fails clearly if it never does.
 - **Note**: `0.11.0rc1` is published and immutable — PyPI rejects
   filename re-uploads, so the corrected RC run uses `rc2`.
+
+## ISSUE-005 — propagation poll failed on CI macOS (loop skipped silently)
+
+- **Run**: rc2 (39827564146), verify-published (macos-latest).
+- **Failure**: `never appeared on pypi` ~0.8s into the step despite
+  `0.11.0rc2` being live — the bash poll loop produced no iterations,
+  then the post-loop check returned immediately.
+- **Root cause**: the `for i in $(seq 1 12)` loop + separate post-check
+  is fragile across runner environments (empty `$(seq)` output on the
+  macOS runner → loop skipped; exact stderr was not captured).
+- **Fix**: replaced the bash loop + second check with a single Python
+  call carrying its own 24×15s retry — no `seq`, no set -e interplay,
+  no split-check race. Verified against live PyPI.
