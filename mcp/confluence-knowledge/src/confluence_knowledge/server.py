@@ -336,6 +336,13 @@ def status() -> dict:
         "setup_cmd_clipboard": (
             f"{sys.executable} -m confluence_knowledge.cli setup "
             "--site <URL> --email <EMAIL> --env cloud --from-clipboard"),
+        # the off-switches — discoverable from the tool itself, because
+        # a `pkill` is NOT a control path (the watchdog respawns the
+        # daemon and the crawl resumes). `stop` shuts down the daemon
+        # + watchdog cleanly; `cancel_crawl` halts a running crawl and
+        # keeps the tools alive.
+        "stop_cmd": f"{sys.executable} -m confluence_knowledge.cli stop",
+        "cancel_crawl_tool": "cancel_crawl(scope_handle, job_id)",
     }
 
 
