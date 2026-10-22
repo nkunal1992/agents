@@ -10,7 +10,7 @@ from confluence_knowledge.retrieval import TOP_K_EVIDENCE, check_citations, retr
 class FakeEmbedder:
     """Deterministic 'embedding': hashed word bucket → fixed 8-dim vector."""
 
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         out = np.zeros((len(texts), 8), np.float32)
         for i, t in enumerate(texts):
             for w in t.lower().split():

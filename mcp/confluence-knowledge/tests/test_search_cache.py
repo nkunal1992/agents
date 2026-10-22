@@ -61,7 +61,7 @@ class _Emb:
     def __init__(self, v):
         self._v = v
 
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         return np.tile(self._v, (len(texts), 1))
 
 

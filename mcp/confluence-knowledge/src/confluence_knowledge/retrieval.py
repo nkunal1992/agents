@@ -304,7 +304,7 @@ class LocalSparseEmbedder:
                 f"sparse model '{SPARSE_MODEL}' not prepared — run "
                 f"`{cli} prepare-models`.") from e
 
-    def embed(self, texts: list[str]) -> list[dict[int, float]]:
+    def embed(self, texts: list[str], query: bool = False) -> list[dict[int, float]]:
         """One {token_idx: weight} dict per input — BM25 tf/saturation part
         (IDF is applied at query time from the index's term_stats)."""
         out = []
@@ -714,7 +714,7 @@ class HashEmbedder:
     def count_tokens(self, text: str) -> int:
         return max(1, len(text.split()))
 
-    def embed(self, texts: list[str]) -> np.ndarray:
+    def embed(self, texts: list[str], query: bool = False) -> np.ndarray:
         import hashlib
         out = np.zeros((len(texts), self.dim), dtype=np.float32)
         for i, text in enumerate(texts):
@@ -732,7 +732,7 @@ class HashSparse:
     def __init__(self, *_a, **_k):
         pass
 
-    def embed(self, texts: list[str]) -> list[dict[int, float]]:
+    def embed(self, texts: list[str], query: bool = False) -> list[dict[int, float]]:
         import hashlib
         out = []
         for text in texts:

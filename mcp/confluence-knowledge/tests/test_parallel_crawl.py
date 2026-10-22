@@ -70,7 +70,7 @@ class _CountEmbedder:
         self.n = 0
         self.texts = []
 
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         self.n += len(texts)
         self.texts.extend(texts)
         return np.ones((len(texts), 4), dtype=np.float32)

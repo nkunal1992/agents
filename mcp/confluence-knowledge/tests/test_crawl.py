@@ -68,7 +68,7 @@ class _FakeEmbedder:
     def __init__(self):
         self.inputs = []
 
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         import numpy as np
         self.inputs.extend(texts)
         return np.ones((len(texts), 4), dtype=np.float32)

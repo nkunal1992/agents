@@ -72,7 +72,7 @@ def test_search_latency_bound(rag_index):
 def test_sparse_leg_independent_of_dense(rag_index):
     """Zero dense recall — sparse+fts must still carry the answer."""
     class ZeroEmbedder:
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             import numpy as np
             return np.zeros((len(texts), 128), dtype=np.float32)
 

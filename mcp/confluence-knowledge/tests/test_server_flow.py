@@ -92,7 +92,7 @@ def test_background_crawl_worker_does_the_work(wired):
 
 
 class _FakeEmbedder:
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         import numpy as np
         return np.ones((len(texts), 4), dtype=np.float32)
 

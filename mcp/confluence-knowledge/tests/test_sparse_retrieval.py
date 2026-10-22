@@ -57,7 +57,7 @@ def test_sparse_leg_lifts_lexical_hit(tmp_path):
                     np.ones((1, 4), dtype=np.float32), [{42: 5.0}])
     idx.publish({"p1", "p2", "p3", "hit"})
 
-    emb = type("E", (), {"embed": lambda s, t: np.ones((len(t), 4),
+    emb = type("E", (), {"embed": lambda s, t, query=False: np.ones((len(t), 4),
                                                        dtype=np.float32)})
     spr = type("S", (), {"embed": lambda s, t: [{42: 5.0} for _ in t]})
     ev = retrieval.retrieve(idx, "zyx query", emb(), reranker=None, sparse=spr())
@@ -68,7 +68,7 @@ def test_sparse_leg_optional(tmp_path):
     idx = Index(tmp_path / "i.db")
     _page(idx, "p1", ["some text"])
     idx.publish({"p1"})
-    emb = type("E", (), {"embed": lambda s, t: np.ones((len(t), 4),
+    emb = type("E", (), {"embed": lambda s, t, query=False: np.ones((len(t), 4),
                                                        dtype=np.float32)})
     ev = retrieval.retrieve(idx, "text", emb())   # sparse=None — still works
     assert ev and ev[0]["chunk_id"] == "p1:c0"

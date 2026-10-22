@@ -13,7 +13,7 @@ from _fake_graph import BLOBS, SITE_ID, FakeGraph, site_routes
 
 
 class FakeEmbedder:
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         return np.random.rand(len(texts), 8).astype(np.float32)
 
 
@@ -26,7 +26,7 @@ class FakeReranker:
 
 
 class FakeSparse:
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         return [{} for _ in texts]
 
 

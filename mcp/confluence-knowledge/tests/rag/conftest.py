@@ -34,7 +34,7 @@ class HashEmbedder:
 
     DIM = 128
 
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         out = np.zeros((len(texts), self.DIM), dtype=np.float32)
         for r, t in enumerate(texts):
             for w in _tokens(t):
@@ -60,7 +60,7 @@ class OverlapReranker:
 class ToySparse:
     """Word-hash sparse embedder with the same API as LocalSparseEmbedder."""
 
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         out = []
         for t in texts:
             d: dict[int, float] = {}

@@ -109,7 +109,7 @@ def test_unchanged_items_skip_download_and_embedding(idx):
         def __init__(self):
             self.n = 0
 
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             self.n += len(texts)
             import numpy as np
             return np.ones((len(texts), 4), dtype=np.float32)

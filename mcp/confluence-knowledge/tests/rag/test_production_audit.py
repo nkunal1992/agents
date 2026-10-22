@@ -146,7 +146,7 @@ def test_first_crawl_resume_rejects_different_vector_dimension(index):
         def __init__(self, dim):
             self.dim = dim
 
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             return np.ones((len(texts), self.dim), dtype=np.float32)
 
     a = Tree(None, index, "cloud", embedder=Embedder(4))
@@ -186,7 +186,7 @@ def test_evidence_handles_remain_unique_after_eviction(module, index, monkeypatc
     monkeypatch.setattr(server, "_index_for", lambda key: index)
     monkeypatch.setattr(server, "_models_loaded", lambda wait: True)
     monkeypatch.setattr(server, "_embedder", lambda: type("E", (), {
-        "embed": lambda self, texts: np.ones((len(texts), 4), dtype=np.float32)})())
+        "embed": lambda self, texts, query=False: np.ones((len(texts), 4), dtype=np.float32)})())
     monkeypatch.setattr(server, "_reranker", lambda: None)
     monkeypatch.setattr(server, "_sparse", lambda: None)
     monkeypatch.setattr(server, "_feedback_for", lambda key: type("F", (), {
@@ -216,7 +216,7 @@ def test_search_exposes_hunt_metadata_and_page_boundary_fetch(module, index, mon
     monkeypatch.setattr(server, "_index_for", lambda key: index)
     monkeypatch.setattr(server, "_models_loaded", lambda wait: True)
     monkeypatch.setattr(server, "_embedder", lambda: type("E", (), {
-        "embed": lambda self, texts: np.ones((len(texts), 4), dtype=np.float32)})())
+        "embed": lambda self, texts, query=False: np.ones((len(texts), 4), dtype=np.float32)})())
     monkeypatch.setattr(server, "_reranker", lambda: None)
     monkeypatch.setattr(server, "_sparse", lambda: None)
     monkeypatch.setattr(server, "_feedback_for", lambda key: type("F", (), {
@@ -406,7 +406,7 @@ def test_page_title_is_in_embedded_context(index):
     recorded = []
 
     class Embedder:
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             recorded.extend(texts)
             return np.ones((len(texts), 4), dtype=np.float32)
 

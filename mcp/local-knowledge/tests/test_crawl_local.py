@@ -127,7 +127,7 @@ def test_unchanged_files_skip_extract_and_embed(tree, idx):
         def __init__(self):
             self.n = 0
 
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             self.n += len(texts)
             return np.ones((len(texts), 4), dtype=np.float32)
 
@@ -152,7 +152,7 @@ def test_changed_file_reembeds_only_itself(tree, idx):
         def __init__(self):
             self.texts = []
 
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             self.texts.extend(texts)
             return np.ones((len(texts), 4), dtype=np.float32)
 

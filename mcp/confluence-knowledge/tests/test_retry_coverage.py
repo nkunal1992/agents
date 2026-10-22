@@ -95,7 +95,7 @@ def test_retry_after_honored_for_5xx():
 
 
 class _Embed:
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         return np.ones((len(texts), 4), dtype=np.float32)
 
 

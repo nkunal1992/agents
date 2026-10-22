@@ -83,7 +83,7 @@ def test_embed_duty_cycle_on_battery(tmp_path, monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
 
     class BusyEmbed:
-        def embed(self, texts):
+        def embed(self, texts, query: bool = False):
             end = time.monotonic() + 0.15   # real busy-wait — real elapsed
             while time.monotonic() < end:
                 pass

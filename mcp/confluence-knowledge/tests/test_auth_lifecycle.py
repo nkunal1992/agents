@@ -30,7 +30,7 @@ def _page(pid, ancestors=None):
 
 
 class _Embed:
-    def embed(self, texts):
+    def embed(self, texts, query: bool = False):
         return np.ones((len(texts), 4), dtype=np.float32)
 
 
