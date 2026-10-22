@@ -195,6 +195,23 @@ Recover in order:
 4. **Never emit the "not documented" refusal here** — the failure is
    connectivity, not evidence.
 
+## Daemon lifecycle (the shared service behind the tools)
+
+- Home: `~/.knowledge/daemon/<venv-hash>/` — `http.json` (port + bearer
+  token), `rpc.db` (tool-call queue + lease), `daemon.log`,
+  `watchdog.log`. One daemon per Python env serves every installed
+  knowledge service — this service's path is `/sharepoint-knowledge/mcp`.
+- `X stop` stops the daemon AND its watchdog cleanly (`X` = the CLI name)
+  — the only shutdown that survives; a bare kill just gets respawned.
+- `X doctor` self-heals: restarts a dead daemon and rewrites the
+  registered URL if the port drifted.
+- The JetBrains IDE entry carries the token in the URL query
+  (`?token=…`) on purpose — the Copilot plugin drops `headers` there
+  (upstream bug). VS Code uses the header.
+- Config the daemon sees is file-based (`profile.json` under
+  `~/.sharepoint-knowledge/`); shell env vars only reach it if the spawning shell set
+  them — never rely on IDE-side env for config.
+
 ## Interaction flow
 
 1. **Status.** `sharepoint-knowledge/status` — not callable → bootstrap.

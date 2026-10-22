@@ -327,6 +327,7 @@ def main() -> None:
     reg.add_argument("--remove", action="store_true",
                      help="remove our entry instead of adding it")
     sub.add_parser("serve", help="run the stdio MCP server")
+    sub.add_parser("stop", help="stop the shared background daemon + watchdog")
     clean = sub.add_parser("clean", help="delete the local index for this repo")
     clean.add_argument("--yes", action="store_true")
     args = ap.parse_args()
@@ -358,16 +359,13 @@ def main() -> None:
             if args.transport == "http":
                 # the daemon's http.json lives in the venv-keyed daemon
                 # home — resolve the same path the daemon sees so the
-                # registered URL always points at the live endpoint
-                from .registration import SERVER_ID, ensure_mounted
+                # registered URL always points at the live endpoint.
+                # register() itself probes the mount and degrades to
+                # stdio if this service isn't served.
                 from .rpc import RpcDb, ensure_daemon
                 from .settings import daemon_home
                 wd = daemon_home()
                 ensure_daemon(RpcDb(wd / "rpc.db"))
-                if not ensure_mounted(SERVER_ID):
-                    print("warning: daemon is up but this service is not "
-                          "mounted — http registration may not serve",
-                          file=sys.stderr)
             else:
                 wd = (Path(os.environ["CONF_KNOWLEDGE_WORKDIR"])
                       .expanduser().resolve()
@@ -387,6 +385,14 @@ def main() -> None:
     if args.cmd == "serve":
         from .server import main as serve
         serve()
+        return
+    if args.cmd == "stop":
+        from confluence_knowledge.settings import daemon_home
+        from confluence_knowledge.watchdog import stop_daemon
+        out = stop_daemon(daemon_home())
+        state = "stopped" if out["daemon_down"] else "signalled"
+        print(f"daemon {state}; watchdog standing down"
+              f" (home: {daemon_home()})")
         return
     if args.cmd == "clean":
         import shutil

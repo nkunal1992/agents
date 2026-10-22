@@ -30,9 +30,12 @@ def _server_entry(workdir: Path | None, module: str, env_var: str,
         # back to stdio when the daemon's http.json isn't reachable.
         meta = _http_meta(workdir)
         if meta:
+            # ?token= as well as the header — JetBrains Copilot silently
+            # drops mcp.json headers (upstream #1579); the daemon accepts
+            # either. The token already lives in this file either way.
             return {"type": "http",
                     "url": f"http://127.0.0.1:{meta['port']}/"
-                           f"{server_id}/mcp",
+                           f"{server_id}/mcp?token={meta['token']}",
                     "headers": {"Authorization": f"Bearer {meta['token']}"}}
     entry = {
         "command": sys.executable,  # the venv python — no PATH guessing

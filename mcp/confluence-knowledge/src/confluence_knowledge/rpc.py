@@ -195,6 +195,23 @@ class RpcDb:
                 "DELETE FROM daemon_lease WHERE job_id='__daemon__' AND owner=?",
                 (owner,))
 
+    def daemon_pid(self) -> int | None:
+        """The leased daemon's pid when it's live, else None."""
+        with self.lock:
+            row = self.db.execute(
+                "SELECT pid,heartbeat FROM daemon_lease "
+                "WHERE job_id='__daemon__'").fetchone()
+        if row is None:
+            return None
+        pid, beat = int(row[0]), float(row[1])
+        if beat < time.time() - _LEASE_STALE_S:
+            return None
+        try:
+            import psutil
+            return pid if psutil.pid_exists(pid) else None
+        except Exception:                       # noqa: BLE001 —
+            return pid                           # trust the heartbeat
+
     def daemon_alive(self) -> bool:
         """A live heartbeat inside the staleness window — pid liveness is
         checked too so a wedged-but-alive daemon still counts as down."""
@@ -249,6 +266,10 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         workdir = daemon_home()
         workdir.mkdir(parents=True, exist_ok=True)
         pid_path = workdir / ".daemon.pid"
+        # a deliberate respawn means someone wants the daemon up — a
+        # stale stop-file from an earlier `X stop` must not leave this
+        # process watchdog-less forever
+        (workdir / ".watchdog.stop").unlink(missing_ok=True)
         cli_env = dict(os.environ)
         cli_env["KNOWLEDGE_DAEMON_ROLE"] = "1"   # the brain never proxies
         if env:

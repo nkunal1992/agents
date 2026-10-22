@@ -70,6 +70,14 @@ def _bearer_app(app, token: str):
             got = next((v for k, v in scope["headers"]
                         if k.lower() == b"authorization"), b"")
             if got.lower() != want:
+                # JetBrains Copilot silently drops mcp.json headers
+                # (upstream #1579) — its entries carry the token as a
+                # ?token= query param instead; loopback-only either way
+                from urllib.parse import parse_qs
+                qs = parse_qs(scope.get("query_string", b"").decode())
+                if (qs.get("token") or [""])[0] == token:
+                    await app(scope, receive, send)
+                    return
                 await send({"type": "http.response.start", "status": 401,
                             "headers": [(b"content-type", b"text/plain")]})
                 await send({"type": "http.response.body",

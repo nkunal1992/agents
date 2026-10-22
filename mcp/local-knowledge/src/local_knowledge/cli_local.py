@@ -115,6 +115,7 @@ def main() -> None:
                           "reload (#206). stdio: per-window child process")
     reg.add_argument("--remove", action="store_true")
     sub.add_parser("serve", help="run the stdio MCP server")
+    sub.add_parser("stop", help="stop the shared background daemon + watchdog")
     clean = sub.add_parser("clean", help="delete the local index")
     clean.add_argument("--yes", action="store_true")
     args = ap.parse_args()
@@ -165,6 +166,14 @@ def main() -> None:
     if args.cmd == "serve":
         from .server_local import main as serve
         serve()
+        return
+    if args.cmd == "stop":
+        from confluence_knowledge.settings import daemon_home
+        from confluence_knowledge.watchdog import stop_daemon
+        out = stop_daemon(daemon_home())
+        state = "stopped" if out["daemon_down"] else "signalled"
+        print(f"daemon {state}; watchdog standing down"
+              f" (home: {daemon_home()})")
         return
     if args.cmd == "clean":
         import shutil

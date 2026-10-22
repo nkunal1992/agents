@@ -151,6 +151,25 @@ def test_daemon_restart_same_url(daemon, workdir):
         proc2.wait(timeout=8)
 
 
+def test_jetbrains_query_token_auth(daemon, workdir):
+    """JetBrains Copilot drops mcp.json headers entirely (upstream
+    microsoft/copilot-intellij-feedback#1579) — its real request shape
+    is NO headers + ?token= in the URL. This replays that shape exactly:
+    zero headers, token in the query string."""
+    meta = _wait_http(workdir)
+    url = f"http://127.0.0.1:{meta['port']}/confluence-knowledge/mcp?token={meta['token']}"
+    async def noheaders():
+        async with streamablehttp_client(url) as (r, w, _), \
+                ClientSession(r, w) as session:
+            await session.initialize()
+            res = await session.call_tool("status", {})
+            return json.loads(
+                "".join(c.text for c in res.content
+                        if getattr(c, "type", "") == "text"))
+    out = asyncio.run(noheaders())
+    assert isinstance(out, dict) and "configured" in out
+
+
 def test_suspend_wake_no_reload(daemon, workdir):
     """SIGSTOP suspends the daemon — the laptop-lock simulation. The client
     times out mid-wait; on SIGCONT the next request just answers — no

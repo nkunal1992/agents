@@ -88,12 +88,20 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
     watchdog = _spawn_watchdog(home, shared)
     try:
         meta = _meta(home)
+        # assert the daemon mounted exactly what's importable in this
+        # env — CI legs vary in which wheels they install; the contract
+        # is "all installed services, any subset", not a fixed three
+        from confluence_knowledge.daemon import discover_services
+        expected = discover_services()
         svcs = _services(meta)
-        assert "confluence-knowledge" in svcs
-        assert "local-knowledge" in svcs
+        assert sorted(svcs) == sorted(expected), (svcs, expected)
+        assert "confluence-knowledge" in svcs   # this leg always has it
         t1 = _tools(meta, "confluence-knowledge")
-        t2 = _tools(meta, "local-knowledge")
-        assert "search" in t1 and "connect" in t2
+        assert "search" in t1
+        t2 = None
+        if "local-knowledge" in svcs:
+            t2 = _tools(meta, "local-knowledge")
+            assert "connect" in t2
 
         # SIGKILL — the watchdog (not the IDE) must bring it back
         os.kill(daemon.pid, signal.SIGKILL)
@@ -109,9 +117,10 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
             time.sleep(0.5)
         else:
             pytest.fail("watchdog never respawned the daemon")
-        # both surfaces still answer post-respawn
+        # every mounted surface still answers post-respawn
         assert "search" in _tools(meta, "confluence-knowledge")
-        assert "connect" in _tools(meta, "local-knowledge")
+        if t2 is not None:
+            assert "connect" in _tools(meta, "local-knowledge")
     finally:
         (home / ".watchdog.stop").write_text("1")
         watchdog.terminate()

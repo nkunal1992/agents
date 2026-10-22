@@ -408,6 +408,23 @@ def _install_then_verify(install_args: list[str], dist: str,
                 print("no snapshot — nothing restored", flush=True)
             return 3
         print(f"  {name}: ok", flush=True)
+    # a running daemon keeps serving the OLD code until it dies —
+    # signal it so the watchdog respawns the new version on the same
+    # persisted URL (registered IDE entries stay valid)
+    try:
+        import signal as _sig
+
+        from .rpc import RpcDb
+        from .settings import daemon_home
+        _rpc = RpcDb(daemon_home() / "rpc.db")
+        pid = _rpc.daemon_pid()
+        if pid:
+            os.kill(pid, _sig.SIGTERM)
+            print("daemon restarting on the new version (watchdog "
+                  "respawns it on the same URL)")
+    except Exception as exc:                  # noqa: BLE001 —
+        print(f"note: couldn't signal the daemon ({exc}) — it picks "
+              "the new version up on next restart")
     print(f"updated {prev or '?'} → {label}; self-test passed. "
           "Reload the IDE to run the new version.")
     return 0
