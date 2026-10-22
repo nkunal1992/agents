@@ -195,11 +195,12 @@ accounts — the entire install is local files + models.
    (blocks ≤ `wait_s`, default 25s, cap 120; returns early when phase or
    page count moves). Loop it and relay one concise line per change —
    report `pulse`/`stages`, the ready-made human lines ("scanning files ·
-   310 done · ~80/min"), not raw field names. Translate: "still scanning,
-   310 files so far" not "phase=fetching pages_seen=310"; "N files
-   couldn't be read" not `errors_n`. Use `crawl_step` only for an instant
-   snapshot between waits. Surface `warnings` (skipped secrets, unreadable
-   files, unsupported types) — disclose, never hide.
+   310 done · ~80/min"), never raw field names. Do NOT surface jargon
+   (`pages_done`, `rate_ppm`, `eta_s`, `fetch_cap`, `errors_n`) — translate:
+   "still scanning, 310 files so far" not "phase=fetching pages_seen=310";
+   "N files couldn't be read" not `errors_n`. Use `crawl_step` only for an
+   instant snapshot between waits. Surface `warnings` (skipped secrets,
+   unreadable files, unsupported types) — disclose, never hide.
    - `note: loading local models` or `phase: starting` → models warming —
      keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — waits

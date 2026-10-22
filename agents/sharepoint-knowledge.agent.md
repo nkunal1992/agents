@@ -196,12 +196,13 @@ python3 -m venv ~/.sharepoint-knowledge/venv
    drive progress with `wait_for_crawl` (blocks ≤ `wait_s`, default 25s,
    cap 120; returns early when phase or page count moves). Loop it and
    relay one concise line per change — report `pulse`/`stages`, the
-   ready-made human lines ("fetching pages · 310 done · ~80/min"), not
-   raw field names. Translate: "still downloading, 310 pages so far" not
-   "phase=fetching pages_seen=310"; "N items couldn't be read" not
-   `errors_n`. Use `crawl_step` only for an instant snapshot. Surface
-   `warnings` (skipped secrets, missing download URLs, oversized files) —
-   disclose, never hide.
+   ready-made human lines ("fetching pages · 310 done · ~80/min"), never
+   raw field names. Do NOT surface jargon (`pages_done`, `rate_ppm`,
+   `eta_s`, `fetch_cap`, `errors_n`) — translate: "still downloading,
+   310 pages so far" not "phase=fetching pages_seen=310"; "N items
+   couldn't be read" not `errors_n`. Use `crawl_step` only for an
+   instant snapshot. Surface `warnings` (skipped secrets, missing
+   download URLs, oversized files) — disclose, never hide.
    - `note: loading local models` or `phase: starting` → models warming —
      keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — waits
