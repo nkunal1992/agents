@@ -148,17 +148,34 @@ class Index:
         # crawl worker and tool-call threads share this one connection —
         # `self.lock` serializes every access so writes never interleave
         try:
-            if readonly:
-                # proxy mode (#189): every write attempt on this connection
-                # raises OperationalError — read-only is enforced by SQLite,
-                # not by convention
-                self.db = sqlite3.connect(
-                    f"file:{path}?mode=ro", uri=True, timeout=30,
-                    check_same_thread=False)
-            else:
-                self.db = sqlite3.connect(path, timeout=30,
-                                          check_same_thread=False)
-            self.db.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+            last_err = None
+            for attempt in range(6):
+                # a killed owner leaves a hot WAL journal — on Windows the
+                # recovery/probe can transiently fail while the dead
+                # process's file handles finish releasing. Retry only the
+                # transient class (locked/CANTOPEN/I/O → OperationalError);
+                # malformed/not-a-database stays a fast SetupError.
+                try:
+                    if readonly:
+                        # proxy mode (#189): every write attempt on this
+                        # connection raises OperationalError — read-only is
+                        # enforced by SQLite, not by convention
+                        self.db = sqlite3.connect(
+                            f"file:{path}?mode=ro", uri=True, timeout=30,
+                            check_same_thread=False)
+                    else:
+                        self.db = sqlite3.connect(path, timeout=30,
+                                                  check_same_thread=False)
+                    self.db.execute(
+                        "SELECT name FROM sqlite_master LIMIT 1").fetchone()
+                    break
+                except sqlite3.OperationalError as e:
+                    last_err = e
+                    if attempt == 5:
+                        raise
+                    time.sleep((0.05, 0.1, 0.2, 0.4, 0.8)[attempt])
+            else:                                   # pragma: no cover
+                raise last_err
         except sqlite3.DatabaseError as e:
             # close before raising — Windows keeps the file locked otherwise
             from contextlib import suppress
