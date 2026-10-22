@@ -103,8 +103,8 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
             t2 = _tools(meta, "local-knowledge")
             assert "connect" in t2
 
-        # SIGKILL — the watchdog (not the IDE) must bring it back
-        os.kill(daemon.pid, signal.SIGKILL)
+        # hard kill — the watchdog (not the IDE) must bring it back
+        daemon.kill()
         daemon.wait(timeout=5)
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:

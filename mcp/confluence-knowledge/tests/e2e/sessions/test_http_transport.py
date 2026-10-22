@@ -127,7 +127,7 @@ def test_daemon_restart_same_url(daemon, workdir):
     meta = _wait_http(workdir)
     asyncio.run(_call(_url(meta), meta["token"], "status", {}))
     # kill the daemon — SIGKILL, the field's worst case
-    daemon.send_signal(signal.SIGKILL)
+    daemon.kill()
     daemon.wait(timeout=8)
     # the URL is now dead — a real client gets connection refused
     try:
