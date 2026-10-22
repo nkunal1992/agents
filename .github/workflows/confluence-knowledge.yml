@@ -87,7 +87,7 @@ jobs:
         run: |
           # --no-build-isolation: pip's build-env setuptools trips
           # _distutils_hack on Windows 3.11 — ambient setuptools works
-          python -m pip install pytest setuptools wheel
+          python -m pip install -U pytest setuptools wheel
           python -m pip install --no-build-isolation             ./mcp/local-knowledge ./mcp/sharepoint-knowledge
           cd mcp/confluence-knowledge
           python -m pytest tests/e2e/sessions/ -x -q
