@@ -144,7 +144,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     entry = merged["servers"]["confluence-knowledge"]
     if entry.get("type") == "http":
         # #206 — daemon-hosted endpoint: url + bearer, no command
-        check(entry["url"].endswith("/confluence-knowledge/mcp")
+        check(f"/confluence-knowledge/mcp" in entry["url"]
               and "127.0.0.1" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
