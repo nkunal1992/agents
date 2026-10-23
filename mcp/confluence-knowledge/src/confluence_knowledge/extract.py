@@ -48,7 +48,11 @@ def split_oversized(text: str, budget: int = MAX_WORDS, measure=_word_count,
     measure the bound is enforced in model units."""
     if measure(text) <= budget:
         return [text]
-    return _pack_units(text.split(), budget, measure, overlap_words)
+    # overlap must stay below the budget — a sub-budget overlap window
+    # retains more than a segment may hold, so each segment advances by
+    # ~one word and the split explodes (#242)
+    return _pack_units(text.split(), budget, measure,
+                       min(overlap_words, budget // 2))
 
 
 @dataclass
@@ -120,6 +124,29 @@ def split_table_text(t: str, budget: int = MAX_WORDS,
     lines = t.split("\n")
     header, rows = lines[0], lines[1:]
     hw = measure(header)
+    if budget - hw - 2 < 16:
+        # the header nearly fills the budget — repeating it per segment
+        # fragments every row into ~1-word pieces (a wide table or a
+        # nested-table cell's text produces this — #242). Emit the header
+        # once and pack rows at the full budget instead.
+        segs = [header]
+        buf, w = [], 0
+        for r in rows:
+            rw = measure(r)
+            if buf and w + rw > budget:
+                segs.append("\n".join(buf))
+                buf, w = [], 0
+            if rw > budget:
+                if buf:
+                    segs.append("\n".join(buf))
+                    buf, w = [], 0
+                segs.extend(split_oversized(r, budget, measure))
+                continue
+            buf.append(r)
+            w += rw
+        if buf:
+            segs.append("\n".join(buf))
+        return segs
     segs, buf, w = [], [], hw + 2
     for r in rows:
         rw = measure(r)

@@ -105,9 +105,17 @@ def _docx_chunks(data: bytes, measure=_word_count,
         elif tag == "tbl":
             flush()
             rows = []
-            for tr in el.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr"):
+            # direct w:tr/w:tc children only — descendant iter() re-walks
+            # every nested table's rows as if they were the outer table's,
+            # and nested cells as extra outer cells: a small nested-table
+            # doc combinatorially explodes into tens of thousands of
+            # duplicated chunks (#242). Nested text still lands once via
+            # tc.iter("t") inside its enclosing cell.
+            for tr in el.findall(
+                    "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr"):
                 cells = []
-                for tc in tr.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc"):
+                for tc in tr.findall(
+                        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc"):
                     cells.append("".join(t.text or "" for t in tc.iter(
                         "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")).strip())
                 if any(cells):
