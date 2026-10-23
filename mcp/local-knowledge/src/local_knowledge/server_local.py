@@ -178,13 +178,33 @@ def _models_loaded(wait: float) -> bool:
 
 def _scope(scope_handle: str) -> dict:
     s = _scopes.get(scope_handle)
-    if s is None:
-        parts = scope_handle.split(":", 2)
-        if len(parts) == 3 and parts[0] == "scope" and \
-                connect(parts[2])["scope_handle"] == scope_handle:
+    if s is not None:
+        return s
+    # daemon/server restart dropped _scopes — re-bind from the persisted
+    # proof (connect() stamps root_path) instead of re-running connect():
+    # identical security (the meta exists only where a real connect
+    # created it) and zero side-effects (#229).
+    parts = scope_handle.split(":", 2)
+    if len(parts) == 3 and parts[0] == "scope":
+        key, root = parts[1], parts[2]
+        try:
+            if not (index_root() / f"{key}.db").exists():
+                raise SetupError("unknown scope — call connect first")
+            idx = _index_for(key)
+            if idx.meta_get("root_path") == root:
+                s = {"key": key, "root": Path(root)}
+                with _state_lock:
+                    _scopes[scope_handle] = s
+                return s
+        except Exception:                       # noqa: BLE001
+            pass
+        try:
+            out = connect(root)
+        except Exception:                       # noqa: BLE001
+            out = None
+        if isinstance(out, dict) and out.get("scope_handle") == scope_handle:
             return _scopes[scope_handle]
-        raise SetupError("unknown scope — call connect first")
-    return s
+    raise SetupError("unknown scope — call connect first")
 
 
 
