@@ -11,6 +11,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from _fake_graph import BLOBS, SITE_ID, FakeGraph, site_routes
 
+from confluence_knowledge.client import SecurityException
+
 
 class FakeEmbedder:
     def embed(self, texts, query: bool = False):
@@ -132,7 +134,7 @@ def test_verify_survives_restart(sp_env):
 def _routes_with_subtree() -> dict:
     """site_routes + a 'policies' folder holding two real files — the
     #240 alias-test subtree (item:{DRIVE_ID}:f1 → f4,f5 pages)."""
-    from _fake_graph import DRIVE_ID as _D, SITE_ID as _S
+    from _fake_graph import DRIVE_ID as _D
     r = site_routes()
     r[f"drives/{_D}/items/f1/children"] = {"value": [
         {"id": "f4", "name": "policy.md"},
@@ -150,7 +152,8 @@ def _routes_with_subtree() -> dict:
 
 def _sp_crawl(sp_env, monkeypatch):
     """Crawl the subtree fixture; returns the site connect dict."""
-    from _fake_graph import BLOBS as _B, FakeGraph
+    from _fake_graph import BLOBS as _B
+    from _fake_graph import FakeGraph
     _B["https://t.sharepoint.com/dl/policy.md"] = \
         b"# Policy\n\nApprovals need CAB sign-off.\n"
     _B["https://t.sharepoint.com/dl/handbook.md"] = \
@@ -178,7 +181,7 @@ def test_descendent_item_scope_answers_from_ancestor(sp_env, monkeypatch):
     assert res["evidence"]
     subtree = {f"file:{DRIVE_ID}:f4", f"file:{DRIVE_ID}:f5"}
     assert {e["page_id"] for e in res["evidence"]} <= subtree
-    with pytest.raises(Exception):
+    with pytest.raises(SecurityException):
         sp_env.get_evidence(c["scope_handle"], page_id=f"file:{DRIVE_ID}:f2")
 
 

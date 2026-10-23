@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from confluence_knowledge.client import SecurityException
 from local_knowledge import server_local
 from local_knowledge.settings_local import LocalProfile
 
@@ -168,7 +169,7 @@ def test_descendent_folder_answers_from_ancestor(tmp_path):
     assert res["evidence"]
     assert {e["page_id"] for e in res["evidence"]} <= \
         {"docs/sub/inner.md", "docs/sub/more.txt"}
-    with pytest.raises(Exception):
+    with pytest.raises(SecurityException):
         server_local.get_evidence(
             c["scope_handle"], page_id="docs/top.txt")
 
