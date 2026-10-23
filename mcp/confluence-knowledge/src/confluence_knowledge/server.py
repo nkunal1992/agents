@@ -264,7 +264,7 @@ def _scope(scope_handle: str) -> dict:
                 with _state_lock:
                     _scopes[scope_handle] = s
                 return s
-        except Exception:                       # noqa: BLE001 — meta
+        except Exception:                       # noqa: BLE001,S110 — meta
             pass                                # unreadable → old path
         try:
             out = connect(root)
