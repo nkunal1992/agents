@@ -92,7 +92,17 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
         # is "all installed services, any subset", not a fixed three
         from confluence_knowledge.daemon import discover_services
         expected = discover_services()
-        svcs = _services(meta)
+        # socket-bound ≠ routes-mounted — uvicorn's ASGI app can lag the
+        # bind by seconds on a congested runner; retry like the kill poll
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                svcs = _services(meta)
+                break
+            except Exception:                      # noqa: BLE001,S110
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.3)
         assert sorted(svcs) == sorted(expected), (svcs, expected)
         assert "confluence-knowledge" in svcs   # this leg always has it
         t1 = _tools(meta, "confluence-knowledge")
