@@ -190,6 +190,7 @@ def test_detached_spawn_kwargs_windows(monkeypatch):
     uses DETACHED_PROCESS + CREATE_NO_WINDOW (+ BREAKAWAY from Job
     objects) with no start_new_session."""
     import os
+
     import confluence_knowledge.rpc as rpc_mod
     monkeypatch.setattr(os, "name", "nt")
     kw = rpc_mod.detached_spawn_kwargs()
@@ -204,6 +205,7 @@ def test_daemon_http_status_flags_stale(tmp_path, monkeypatch):
     version than the installed one must read as not-ok — 'alive' is not
     'current'; `pip install -U` doesn't restart the running process."""
     import json
+
     from confluence_knowledge import registration as reg
     (tmp_path / "http.json").write_text(
         json.dumps({"port": 9, "token": "t"}))
@@ -270,6 +272,7 @@ def test_registered_transport(tmp_path, monkeypatch):
     """#226: doctor rewrites the entry with the user's own transport —
     url entries are http, command entries are stdio."""
     import json
+
     from confluence_knowledge import registration as reg
     mcp = tmp_path / "mcp.json"
     mcp.write_text(json.dumps(
@@ -287,6 +290,7 @@ def test_stdio_entry_prefers_pythonw_on_windows(tmp_path, monkeypatch):
     """#226: win32 proxies spawn per IDE window — python.exe would flash
     a console each time; pythonw.exe never does."""
     import sys
+
     from confluence_knowledge import registration as reg
     fake_py = tmp_path / "python.exe"
     fake_pyw = tmp_path / "pythonw.exe"
@@ -300,6 +304,7 @@ def test_stdio_entry_prefers_pythonw_on_windows(tmp_path, monkeypatch):
 def test_detached_spawn_kwargs_posix():
     """#220: POSIX keeps setsid — unchanged behaviour on macOS/Linux."""
     import os
+
     import confluence_knowledge.rpc as rpc_mod
     if os.name == "nt":
         return                     # covered by the windows case above
@@ -311,6 +316,7 @@ def test_popen_detached_breakaway_retry(monkeypatch):
     object disallows breakaway — the spawn must retry without it rather
     than fail the whole ensure_daemon."""
     import os
+
     import confluence_knowledge.rpc as rpc_mod
     monkeypatch.setattr(os, "name", "nt")
     class _Proc:

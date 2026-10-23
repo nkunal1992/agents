@@ -178,8 +178,10 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
               "register: http entry points at the daemon's local path",
               entry)
     else:
-        check(entry["command"] == str(vpy),
-              "register: points at the venv python")
+        check(Path(entry["command"]).resolve().parent ==
+              vpy.parent and
+              Path(entry["command"]).stem in ("python", "pythonw"),
+              "register: points at a venv interpreter")
 
     doctor = run([str(cli), "doctor"], env, "doctor: models ready")
     check('"flag": "model_embed"' in doctor.stdout and

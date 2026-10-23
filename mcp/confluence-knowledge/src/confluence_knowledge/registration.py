@@ -58,6 +58,7 @@ def _daemon_services_version(meta: dict) -> str | None:
     unreachable or the field is absent (pre-#226 daemons report only
     services). Loopback URL is built from our own http.json."""
     try:
+        import json as _json
         import urllib.request as _req
         req = _req.Request(
             f"http://127.0.0.1:{meta['port']}/_services",
@@ -66,7 +67,7 @@ def _daemon_services_version(meta: dict) -> str | None:
             return None
         with _req.urlopen(req, timeout=2) as r:     # nosec B310
             return _json.loads(r.read()).get("version")
-    except Exception:                               # noqa: BLE001,S110
+    except Exception:                               # noqa: BLE001
         return None
 
 

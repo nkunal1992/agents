@@ -250,8 +250,7 @@ def _doctor() -> int:
         if any(c["flag"] == "daemon_http" and not c["ok"]
                for c in s.get("checks", [])):
             try:
-                from .registration import (register,
-                                           registered_transport)
+                from .registration import register, registered_transport
                 from .settings import daemon_home
                 from .watchdog import restart_daemon
                 wdir = daemon_home()
