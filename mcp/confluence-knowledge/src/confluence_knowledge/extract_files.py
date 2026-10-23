@@ -52,9 +52,14 @@ def _decode_text(data: bytes) -> str:
 
 
 def _text_chunks(text: str, heading: str, kind: str = "text",
-                 measure=_word_count, budget: int = MAX_WORDS) -> list[Chunk]:
-    """Split plain text into bounded chunks (same shape as extract.py)."""
-    return [Chunk(seg, heading, kind, i)
+                 measure=_word_count, budget: int = MAX_WORDS,
+                 offset: int = 0) -> list[Chunk]:
+    """Split plain text into bounded chunks (same shape as extract.py).
+    `offset` carries the ordinal sequence across repeated calls into a
+    shared list — each call restarts at `offset`, not 0 (#207: docx/
+    pptx/pdf/md flush loops produced duplicate ordinals → UNIQUE
+    constraint on chunks_stage)."""
+    return [Chunk(seg, heading, kind, offset + i)
             for i, seg in enumerate(split_oversized(text, budget, measure))
             if seg.strip()]
 
@@ -75,7 +80,7 @@ def _docx_chunks(data: bytes, measure=_word_count,
         buf.clear()
         if text:
             chunks.extend(_text_chunks(text, " > ".join(heading),
-                                       measure=measure, budget=budget))
+                                       measure=measure, budget=budget, offset=len(chunks)))
 
     # top-level children only — iterating descendants would also emit the
     # w:p inside table cells as prose, breaking the table-only kind contract
@@ -149,7 +154,7 @@ def _pptx_chunks(data: bytes, measure=_word_count,
         text = "\n".join(t for t in texts if t and t.strip())
         if text.strip():
             chunks.extend(_text_chunks(text, f"Slide {i}",
-                                       measure=measure, budget=budget))
+                                       measure=measure, budget=budget, offset=len(chunks)))
     return chunks
 
 
@@ -196,7 +201,7 @@ def _pdf_chunks(data: bytes, measure=_word_count,
             continue
         if text.strip():
             chunks.extend(_text_chunks(text, f"Page {i}",
-                                       measure=measure, budget=budget))
+                                       measure=measure, budget=budget, offset=len(chunks)))
     if not chunks and not warns:
         warns.append("no extractable text — likely a scanned document (OCR not supported)")
     return chunks, warns
@@ -215,7 +220,7 @@ def _md_chunks(data: bytes, measure=_word_count,
         prose.clear()
         if body:
             chunks.extend(_text_chunks(body, "", measure=measure,
-                                       budget=budget))
+                                       budget=budget, offset=len(chunks)))
 
     lines = text.split("\n")
     i = 0

@@ -1,5 +1,7 @@
 """Storage-format extraction: headings, paragraphs, tables, macro gaps."""
 
+import pytest
+
 from confluence_knowledge.extract import extract_chunks
 
 STORAGE = """
@@ -63,3 +65,37 @@ def test_long_text_splits_with_overlap():
     w1 = chunks[0].text.split()
     assert chunks[1].text.split()[:10] == w1[-50:-40] or \
         chunks[1].text.split()[0] in w1
+
+
+def test_file_chunk_ordinals_never_repeat():
+    """#207: _text_chunks restarts ordinals at 0 per call — docx/pptx/
+    pdf/md flush loops extended a shared list, so paragraph-runs
+    between tables all got ordinal 0 and the staged insert died on
+    PRIMARY KEY (job_id, chunk_id). The user saw 'UNIQUE constraint
+    failed: chunks_stage' on a docx folder."""
+    import io
+    docx = pytest.importorskip("docx")
+    d = docx.Document()
+    d.add_heading("Guide", 0)
+    for i in range(6):
+        d.add_paragraph(f"paragraph {i} of configuration guidance text")
+        t = d.add_table(rows=2, cols=2)
+        t.rows[0].cells[0].text = f"h{i}"
+        t.rows[0].cells[1].text = f"h{i}b"
+    buf = io.BytesIO()
+    d.save(buf)
+    from confluence_knowledge.extract_files import extract_file_chunks
+    chunks, _ = extract_file_chunks("guide.docx", buf.getvalue())
+    ords = [c.ordinal for c in chunks]
+    assert len(ords) == len(set(ords)), \
+        f"duplicate ordinals — stage insert would violate the PK: {ords}"
+
+
+def test_md_chunk_ordinals_never_repeat():
+    """#207: markdown sections hit the same per-call ordinal reset."""
+    from confluence_knowledge.extract_files import extract_file_chunks
+    md = "# A\n\nbody one with enough words\n\n# B\n\nbody two more text\n\n# C\n\nbody three trailing"
+    chunks, _ = extract_file_chunks("g.md", md.encode())
+    ords = [c.ordinal for c in chunks]
+    assert len(ords) == len(set(ords)), \
+        f"duplicate ordinals: {ords}"
