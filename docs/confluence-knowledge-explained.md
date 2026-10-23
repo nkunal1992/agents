@@ -58,7 +58,7 @@ plain RAG fails in a predictable way:
 | **Coverage + freshness reporting** | Every answer states how many pages were indexed, when, and which were unreachable | Users know *which book* the open-book exam used — and whether some pages were missing. |
 | **Scoped indexes** | Each root page gets its own index partition | Questions about one space never leak into another; refresh of one scope doesn't touch the rest. |
 | **Resumable crawl** | The index queue/checkpoints live in the DB; an interrupted crawl resumes | Real corporate trees have hundreds of pages and flaky networks — losing everything at page 400 of 500 is unacceptable. |
-| **Local-only models** | Embeddings + reranker run on-device | The text never leaves the laptop; no per-call cost; works fully offline after a one-time ~1.4 GB download. |
+| **Local-only models** | Embeddings + reranker run on-device | The text never leaves the laptop; no per-call cost; works fully offline after a one-time ~500 MB download. |
 
 ## The steps, in order — what each does and why
 
@@ -167,7 +167,7 @@ trust at the exact point users care about.
 - **Zero inference cost per question** — the models run on the laptop; there
   are no paid API calls for embeddings, reranking, or generation of the index.
 - **No infrastructure** — no server, no database, no shared platform to run.
-  Costs = one venv, ~1.4 GB of models, ~1 GB of disk.
+  Costs = one venv, ~500 MB of models, ~1 GB of disk.
 - **Reuses what's already licensed** — it lives inside the Copilot seat
   people already have; no extra per-user SaaS bill (contrast with per-seat
   RAG/AI doc products).

@@ -14,7 +14,7 @@ read).
 Copy `agents/local-knowledge.agent.md` into `.github/agents/` of any repo.
 First use: the agent installs the service itself (bundled `service/` →
 bundled `.whl` → `pip install local-knowledge[models]` → asks for the bundle
-path, in that order), downloads the local models (~1.4 GB once), writes the IDE MCP
+path, in that order), downloads the local models (~500 MB once), writes the IDE MCP
 config, and asks for one reload.
 
 Manual install (same commands the agent runs):
@@ -22,7 +22,7 @@ Manual install (same commands the agent runs):
 ```bash
 python3 -m venv ~/.knowledge/venv
 ~/.knowledge/venv/bin/python -m pip install "local-knowledge[models]"
-~/.knowledge/venv/bin/local-knowledge prepare-models   # ~1.4 GB, once
+~/.knowledge/venv/bin/local-knowledge prepare-models   # ~500 MB, once
 ~/.knowledge/venv/bin/local-knowledge register --ide auto --workspace "$PWD"
 ~/.knowledge/venv/bin/local-knowledge doctor           # verify
 ```

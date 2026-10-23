@@ -38,7 +38,7 @@ first-run installation.
 
 Announce: "The SharePoint service isn't responding — checking whether it's
 already installed. If not, I'll install it: create a virtual environment,
-install the service, download the local models (~1.3 GB once), and register the IDE
+install the service, download the local models (~500 MB once), and register the IDE
 config — then you'll do a one-time Entra sign-in in your own terminal and
 reload once." Then run the steps below end-to-end.
 
@@ -61,7 +61,7 @@ reload once." Then run the steps below end-to-end.
    - `registration ✗` → `register --ide auto --workspace "<repo>"`
    - `index:* corrupt` → `clean` then re-crawl the affected scope
    - `index:* older model` → `start_crawl` on that scope (one rebuild)
-   - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
+   - `disk_free ✗` → tell the user ~1 GB is needed for models, then stop
    - `python ✗` → venv was built on <3.11 — rebuild it from step 1
    - `update available` → `sharepoint-knowledge update` — installs the newest
      **soaked** release (3-day delay by design), self-tests it, and rolls

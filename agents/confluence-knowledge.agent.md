@@ -37,7 +37,7 @@ first-run installation.
 
 Announce: "The Confluence service isn't responding — checking whether it's
 already installed. If not, I'll install it for you: create a virtual
-environment, install the service, download the local models (~1.3 GB once), and
+environment, install the service, download the local models (~500 MB once), and
 register the IDE config. Then it's one IDE reload, and the one-time
 credential step happens right here in chat — you'll copy your token and
 I'll read it straight from the clipboard; it never enters the
@@ -61,7 +61,7 @@ pausing between them; the user sees each command anyway.
    - `registration ✗` → `register --ide auto --workspace "<repo>"`
    - `index:* corrupt` → `clean` then re-crawl the affected scope
    - `index:* older model` → `start_crawl` on that scope (one rebuild)
-   - `disk_free ✗` → tell the user ~2 GB is needed for models, then stop
+   - `disk_free ✗` → tell the user ~1 GB is needed for models, then stop
    - `python ✗` → venv was built on <3.11 — rebuild it from step 1
    - `update available` → `confluence-knowledge update` — installs the newest
      **soaked** release (3-day delay by design), self-tests it, and rolls
@@ -111,8 +111,7 @@ pausing between them; the user sees each command anyway.
    `$VENV_PY` (`…/venv/Scripts/python.exe` or `…/venv/bin/python`).
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
-3. **Models.** `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
-   prepare-models` — downloads the pinned local models — nomic-embed-text-v1.5 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
+3. **Models.** `"~/.knowledge/venv/bin/confluence-knowledge" prepare-models` — downloads the pinned local models — nomic-embed-text-v1.5 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
    into `~/.knowledge/models/`. If the network blocks Hugging
    Face, tell the user to drop the model dirs there from their internal
    mirror — never switch to a cloud embedding API.
@@ -159,8 +158,7 @@ pausing between them; the user sees each command anyway.
    - **Fallback CLI** — only when the tools STILL aren't callable after
      the reload (that itself is diagnostic — check `status`/doctor for a
      server-start failure first): ask them to copy the token, then run
-     `"$HOME/.confluence-knowledge/venv/bin/confluence-knowledge"
-     setup --site <URL> --email <email> --env cloud --from-clipboard`.
+     `"~/.knowledge/venv/bin/confluence-knowledge" setup --site <URL> --email <email> --env cloud --from-clipboard`.
    - **Privacy-first (their terminal)**: `confluence-knowledge setup`
      (getpass wizard — hidden input, same validate-then-persist order).
    **Never ask them to paste a token into chat** — it would transit the
@@ -168,8 +166,7 @@ pausing between them; the user sees each command anyway.
    `SSL: CERTIFICATE_VERIFY_FAILED`, the fix is
    `$VENV/bin/python -m pip install pip-system-certs` (bundled in ≥0.1.5 —
    only needed for older installs).
-7. **Verify then hand off.** Run `"$HOME/.confluence-knowledge/venv/bin/
-   confluence-knowledge" doctor` — must print `configured: true` and both
+7. **Verify then hand off.** Run `"~/.knowledge/venv/bin/confluence-knowledge" doctor` — must print `configured: true` and both
    models ready. Then re-ask the question. Do NOT answer
    from anything but the MCP tools — bootstrap complete ≠ evidence loaded.
 

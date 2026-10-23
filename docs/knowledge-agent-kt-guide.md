@@ -100,7 +100,7 @@ with a disclosed warning instead of being indexed.
 ### Verify it yourself
 
 ```bash
-~/.confluence-knowledge/venv/bin/confluence-knowledge doctor
+~/.knowledge/venv/bin/confluence-knowledge doctor
 # green flags → deps, models, registration, index health
 ls ~/.confluence-knowledge/work/.conf_knowledge_index/  # one <scope>.db per root
 ```

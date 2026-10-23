@@ -87,7 +87,7 @@ Manual install (if preferred):
 ```powershell
 py -m venv %USERPROFILE%\.knowledge\venv           # python3 -m venv ~/.knowledge/venv on macOS/Linux
 %USERPROFILE%\.knowledge\venv\Scripts\python -m pip install "C:\path\to\service[models]"
-%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~1.4 GB, MIT/Apache-2.0 ONNX models
+%USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe prepare-models   # ~500 MB, MIT/Apache-2.0 ONNX models
 %USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe setup            # env + site URL + PAT (hidden input)
 %USERPROFILE%\.knowledge\venv\Scripts\confluence-knowledge.exe doctor           # verify everything is green
 ```
