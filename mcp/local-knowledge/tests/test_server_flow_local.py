@@ -117,3 +117,27 @@ def test_scope_rebind_from_meta(tmp_path):
             raise SystemExit(f"{bad} accepted")
         except SetupError:
             pass
+
+
+def test_verify_survives_restart(tmp_path):
+    """#231: evidence sets persist in index meta — a daemon restart (or a
+    new chat in another IDE window) must not turn verify_citations into
+    'unknown evidence set'."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "guide.md").write_text("restart the gateway before the deploy")
+    (root / "data.csv").write_text("service,owner\ngateway,ops\n")
+    c = server_local.connect(str(root))
+    job = server_local.start_crawl(c["scope_handle"])
+    r = server_local.crawl_step(c["scope_handle"], job["job_id"])
+    while r["state"] == "running":
+        r = server_local.crawl_step(c["scope_handle"], job["job_id"])
+    res = server_local.search(c["scope_handle"], "who owns the gateway?")
+    assert res["evidence"]
+    set_id = res["evidence_set"]
+    q = res["evidence"][0]
+    mapping = [{"claim": "x", "chunk_id": q["chunk_id"],
+                "quote": q["text"][:12]}]
+    server_local._evidence_sets.clear()     # daemon restarted
+    v = server_local.verify_citations(c["scope_handle"], set_id, mapping)
+    assert v["ok"], v

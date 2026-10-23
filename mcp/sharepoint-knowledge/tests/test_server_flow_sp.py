@@ -102,3 +102,22 @@ def test_scope_rebind_from_meta(sp_env):
             raise SystemExit(f"{bad} accepted")
         except SetupError:
             pass
+
+
+def test_verify_survives_restart(sp_env):
+    """#231: same restart contract as confluence — _evidence_sets is
+    process memory; the persisted shadow (chunk_ids + epoch in index
+    meta) rebuilds the set after a daemon restart / new chat."""
+    c = sp_env.connect("site:" + SITE_ID)
+    job = sp_env.start_crawl(c["scope_handle"])
+    r = sp_env.crawl_step(c["scope_handle"], job["job_id"])
+    while r["state"] == "running":
+        r = sp_env.crawl_step(c["scope_handle"], job["job_id"])
+    res = sp_env.search(c["scope_handle"], "when are deploys allowed?")
+    set_id = res["evidence_set"]
+    q = res["evidence"][0]
+    mapping = [{"claim": "x", "chunk_id": q["chunk_id"],
+                "quote": q["text"][:12]}]
+    sp_env._evidence_sets.clear()          # daemon restarted
+    v = sp_env.verify_citations(c["scope_handle"], set_id, mapping)
+    assert v["ok"], v
