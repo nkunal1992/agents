@@ -99,7 +99,7 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
             try:
                 svcs = _services(meta)
                 break
-            except Exception:                      # noqa: BLE001,S110
+            except Exception:
                 if time.monotonic() > deadline:
                     raise
                 time.sleep(0.3)
