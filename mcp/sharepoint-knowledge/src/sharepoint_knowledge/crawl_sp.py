@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 import uuid
 from collections import deque
@@ -26,6 +27,8 @@ from confluence_knowledge.settings import SetupError
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 20_000
+FLUSH_MAX_CHUNKS = 128   # chunks per embed flush — bounds each call
+BATTERY_DUTY = 0.5       # battery saver duty ratio, ~proportional steps
 
 from confluence_knowledge.retrieval import CHUNK_TOKENS
 from confluence_knowledge.retrieval import MODEL_MARKER as _MODEL_ID
@@ -295,6 +298,24 @@ class SPCrawler:
         warns_raw = self.index.meta_get(f"warns:{job_id}")
         warns: list[str] = json.loads(warns_raw) if warns_raw else []
 
+        # per-phase wall-clock stats — parity with confluence crawl.py
+        # (#244); durable under stats:{job_id}
+        stats_raw = self.index.meta_get(f"stats:{job_id}")
+        stats: dict = (json.loads(stats_raw) if stats_raw else {
+            "fetch_ms": 0.0, "wait_ms": 0.0, "extract_ms": 0.0,
+            "embed_ms": 0.0, "sparse_ms": 0.0, "store_ms": 0.0,
+            "chunks": 0, "pages": 0})
+        _stats_lock = threading.Lock()
+
+        def _save_stats() -> None:
+            stats["battery_saver"] = bool(
+                self.control and self.control.battery_saver())
+            stats["pages_per_s"] = round(
+                stats["pages"] /
+                max(stats["extract_ms"] + stats["embed_ms"]
+                    + stats["store_ms"] + stats["wait_ms"], 1) * 1000, 2)
+            self.index.meta_set(f"stats:{job_id}", json.dumps(stats))
+
         processed = 0
         # throttled checkpoints — full state used to be rewritten per item
         last_ckpt, last_ckpt_n = time.monotonic(), 0
@@ -316,7 +337,14 @@ class SPCrawler:
             nonlocal pending
             if not pending:
                 return True
-            buf, pending = pending, []
+            # cap each flush at ~FLUSH_MAX_CHUNKS — bounds a single
+            # flush's embed time; the rest stay pending (#244, parity
+            # with confluence crawl)
+            buf, n_chunks = [], 0
+            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
+                pid, pg, chunks, h = pending.pop(0)
+                buf.append((pid, pg, chunks, h))
+                n_chunks += len(chunks)
             vecs = sp = None
             if self.embedder is not None:
                 if self.control is not None:
@@ -328,15 +356,43 @@ class SPCrawler:
                 texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
                          for _, pg, chunks, _ in buf for c in chunks]
                 if texts:
+                    tick_t0 = time.monotonic()
+
+                    def _embed_tick(done: int, total: int,
+                                    _c=self.control) -> None:
+                        nonlocal tick_t0
+                        """Heartbeat + progress inside a dense flush —
+                        a big item used to freeze the visible job."""
+                        if _c is None:
+                            return
+                        _c.check()
+                        _c.progress.note = \
+                            f"embedding {done}/{total} chunks"
+                        if _c.battery_saver():
+                            el = time.monotonic() - tick_t0
+                            time.sleep(min(el * BATTERY_DUTY, 1.0))
+                            tick_t0 = time.monotonic()
                     t0 = time.monotonic()
-                    vecs = self.embedder.embed(texts)
+                    import inspect as _ins
+                    if "on_batch" in _ins.signature(
+                            self.embedder.embed).parameters:
+                        vecs = self.embedder.embed(
+                            texts, on_batch=_embed_tick)
+                    else:
+                        vecs = self.embedder.embed(texts)
+                        if self.control is not None and \
+                                self.control.battery_saver():
+                            time.sleep(min(
+                                (time.monotonic() - t0) * BATTERY_DUTY, 1.0))
+                    stats["embed_ms"] += \
+                        (time.monotonic() - t0) * 1000
                     if self.sparse is not None:
+                        t0 = time.monotonic()
                         sp = self.sparse.embed(texts)
-                    if self.control is not None and \
-                            self.control.battery_saver():
-                        # ~50% duty cycle on battery — halves sustained CPU
-                        time.sleep(max(0.0, time.monotonic() - t0))
+                        stats["sparse_ms"] += \
+                            (time.monotonic() - t0) * 1000
             off = 0
+            t0 = time.monotonic()
             for pid, pg, chunks, h in buf:
                 n = len(chunks)
                 try:
@@ -352,6 +408,9 @@ class SPCrawler:
                 except StaleJobError:
                     return False
                 off += n
+            stats["store_ms"] += (time.monotonic() - t0) * 1000
+            stats["pages"] += len(buf)
+            stats["chunks"] += n_chunks
             seen.update(pid for pid, *_ in buf)
             if self.control is not None:
                 self.control.page_done(len(buf))
@@ -383,6 +442,16 @@ class SPCrawler:
                     pid for pid in self.index.active_pages()
                     if pid.startswith(prefix))
 
+        def _timed(fn, *a):
+            """Fetch-worker self-timer — measures the network cost
+            per-task from inside pool threads (#244, parity crawl.py)."""
+            t = time.monotonic()
+            try:
+                return fn(*a)
+            finally:
+                with _stats_lock:
+                    stats["fetch_ms"] += (time.monotonic() - t) * 1000
+
         def _submit(pool):
             # re-read the adaptive cap each fill — the window breathes
             # mid-step under pressure (#184, parity #179)
@@ -396,23 +465,23 @@ class SPCrawler:
                 try:
                     if entry.startswith("site:"):
                         inflight[pool.submit(
-                            self._expand_site, entry[5:])] = entry
+                            _timed, self._expand_site, entry[5:])] = entry
                     elif entry.startswith("list:"):
                         _, site_id, list_id = entry.split(":", 2)
                         inflight[pool.submit(
-                            _expand_list_entries, self.client,
+                            _timed, _expand_list_entries, self.client,
                             site_id, list_id)] = entry
                     elif entry.startswith("drive:"):
                         inflight[pool.submit(
-                            self._expand_drive, entry[6:])] = entry
+                            _timed, self._expand_drive, entry[6:])] = entry
                     elif entry.startswith("page:"):
                         _, s, l, i = entry.split(":", 3)
                         inflight[pool.submit(
-                            self._fetch_list_item, s, l, i)] = entry
+                            _timed, self._fetch_list_item, s, l, i)] = entry
                     elif entry.startswith("item:"):
                         _, d, i = entry.split(":", 2)
                         inflight[pool.submit(
-                            self._fetch_item, d, i)] = entry
+                            _timed, self._fetch_item, d, i)] = entry
                     else:
                         errors.append(f"unknown queue entry {entry}")
                 except Exception as e:  # noqa: BLE001 — malformed entry
@@ -443,12 +512,15 @@ class SPCrawler:
                         job_id, list(queue) + sorted(inflight.values()),
                         errors, seen, levels, warns, keep_failed,
                         parents=parents)
+                    _save_stats()
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
                 _submit(pool)
                 if not inflight:
                     break
+                t_wait = time.monotonic()
                 done, _ = wait(tuple(inflight),
                                return_when=FIRST_COMPLETED)
+                stats["wait_ms"] += (time.monotonic() - t_wait) * 1000
                 for fut in done:
                     entry = inflight.pop(fut)
                     processed += 1
@@ -511,8 +583,11 @@ class SPCrawler:
                             if self.control is not None:
                                 self.control.page_done(1)
                             continue
+                        t0 = time.monotonic()
                         chunks, w = extract_file_chunks(
                             meta["title"], data, **self._chunk_kwargs())
+                        stats["extract_ms"] += \
+                            (time.monotonic() - t0) * 1000
                         meta["warnings"] = w
                         warns.extend(w)
                         for c in chunks:
@@ -580,6 +655,7 @@ class SPCrawler:
             # carried forward — stored so status/last_crawl can report it
             self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
+            _save_stats()
         self.index.save_job(job_id, "done" if not queue else "running",
                             list(queue), errors)
         return {"job_id": job_id,

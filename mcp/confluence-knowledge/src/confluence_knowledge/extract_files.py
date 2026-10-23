@@ -16,6 +16,7 @@ from .extract import MAX_WORDS, Chunk, _word_count, extract_chunks, split_oversi
 from .settings import SetupError
 
 MAX_FILE_WORDS = 200_000   # ~1MB of text — beyond that, index metadata only
+MAX_CHUNKS_PER_DOC = 2048  # one doc can't stall a crawl (#244)
 
 SUPPORTED = {".txt", ".md", ".markdown", ".adoc", ".asciidoc", ".asc",
              ".csv", ".html", ".htm", ".docx", ".pptx", ".xlsx", ".pdf"}
@@ -271,10 +272,22 @@ def _csv_chunks(data: bytes, measure=_word_count,
 
 
 def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
-                        budget: int = MAX_WORDS) -> tuple[list[Chunk], list[str]]:
+                        budget: int = MAX_WORDS,
+                        max_chunks: int = MAX_CHUNKS_PER_DOC
+                        ) -> tuple[list[Chunk], list[str]]:
     """Dispatch on extension → (chunks, warnings). Never guesses at binaries.
     `measure`/`budget` bound chunk size — token-aware when a tokenizer-backed
-    measure is supplied (R16)."""
+    measure is supplied (R16). `max_chunks` bounds one document's chunk
+    output — a pathological doc (a 100k-row sheet, a nested-table docx)
+    can't stall a crawl on a single file (#244)."""
+    def _cap(out: tuple[list[Chunk], list[str]]) \
+            -> tuple[list[Chunk], list[str]]:
+        chunks, warns = out
+        if len(chunks) > max_chunks:
+            return (chunks[:max_chunks],
+                    warns + [(f"chunk cap hit ({len(chunks)} produced) — "
+                              f"document truncated at {max_chunks} chunks")])
+        return out
     from pathlib import Path as P
     ext = P(filename).suffix.lower()
     if ext not in SUPPORTED:
@@ -288,22 +301,22 @@ def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
         if ext in (".txt", ".adoc", ".asciidoc", ".asc"):
             # adoc is plain-text markup — its `=` headers stay inline in
             # the prose (searchable); no full Asciidoctor render needed
-            return _text_chunks(_decode_text(data), "",
-                                measure=measure, budget=budget), []
+            return _cap((_text_chunks(_decode_text(data), "",
+                                     measure=measure, budget=budget), []))
         if ext in (".md", ".markdown"):
-            return _md_chunks(data, measure, budget), []
+            return _cap((_md_chunks(data, measure, budget), []))
         if ext in (".html", ".htm"):
-            return extract_chunks(_decode_text(data), measure, budget)
+            return _cap(extract_chunks(_decode_text(data), measure, budget))
         if ext == ".csv":
-            return _csv_chunks(data, measure, budget), []
+            return _cap((_csv_chunks(data, measure, budget), []))
         if ext == ".docx":
-            return _docx_chunks(data, measure, budget), []
+            return _cap((_docx_chunks(data, measure, budget), []))
         if ext == ".pptx":
-            return _pptx_chunks(data, measure, budget), []
+            return _cap((_pptx_chunks(data, measure, budget), []))
         if ext == ".xlsx":
-            return _xlsx_chunks(data, measure, budget), []
+            return _cap((_xlsx_chunks(data, measure, budget), []))
         if ext == ".pdf":
-            return _pdf_chunks(data, measure, budget)
+            return _cap(_pdf_chunks(data, measure, budget))
     except zipfile.BadZipFile:
         return [], ["corrupt office file (not a valid zip) — skipped"]
     except Exception as e:  # noqa: BLE001 — one bad file must not kill a crawl
