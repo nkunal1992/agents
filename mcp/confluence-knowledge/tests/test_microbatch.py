@@ -4,8 +4,7 @@ so no model files are needed."""
 
 import numpy as np
 
-from confluence_knowledge.retrieval import (EMBED_SPECS, LocalEmbedder,
-                                            LocalReranker)
+from confluence_knowledge.retrieval import EMBED_SPECS, LocalEmbedder, LocalReranker
 
 
 class _FakeEnc:
