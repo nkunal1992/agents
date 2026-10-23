@@ -159,6 +159,32 @@ def test_scope_survives_server_restart(wired):
     assert wait_done(c["scope_handle"], job["job_id"])["state"] == "done"
 
 
+def test_scope_rebind_needs_no_network(wired, monkeypatch):
+    """#229: a daemon restart drops _scopes — the rebind must not call
+    connect()'s live credential check (VPN/network blip = 'rejecting the
+    connected scope'). The scope's identity is proven by root_page meta
+    connect() already stamped — locally verifiable, zero network."""
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    wait_done(c["scope_handle"], job["job_id"])
+    server._scopes.clear()
+    # every network path now dead — rebind must still serve reads
+    def _no_network(*a, **k):
+        raise AssertionError("rebind touched the network")
+    monkeypatch.setattr(server, "_client_for", _no_network)
+    s = server._scope(c["scope_handle"])
+    assert s["key"] == c["scope_handle"].split(":")[1]
+    # fabricated + malformed handles still rejected
+    from confluence_knowledge.settings import SetupError
+    key = c["scope_handle"].split(":")[1]
+    for bad in (f"scope:{key}:999", "scope:deadbeef:1", "scope:x"):
+        try:
+            server._scope(bad)
+            raise SystemExit(f"{bad} accepted")
+        except SetupError:
+            pass
+
+
 def test_coverage_complete_despite_earlier_failed_job(wired, monkeypatch):
     emb, rr = _FakeEmbedder(), _FakeReranker()
     monkeypatch.setattr(server, "_embedder", lambda: emb)
