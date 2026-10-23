@@ -99,3 +99,15 @@ def test_md_chunk_ordinals_never_repeat():
     ords = [c.ordinal for c in chunks]
     assert len(ords) == len(set(ords)), \
         f"duplicate ordinals: {ords}"
+
+
+def test_adoc_extracts_as_text():
+    """#208/#231: AsciiDoc is plain-text markup — its `=` headers stay
+    searchable inline; no full Asciidoctor render needed."""
+    from confluence_knowledge.extract_files import SUPPORTED, extract_file_chunks
+    for ext in (".adoc", ".asciidoc", ".asc"):
+        assert ext in SUPPORTED
+        chunks, warns = extract_file_chunks(
+            f"deploy{ext}", b"= IDCT Guide\n\n== Setup\n\nrun the tool\n")
+        assert chunks and not warns
+        assert "Setup" in chunks[0].text or "Setup" in chunks[-1].text

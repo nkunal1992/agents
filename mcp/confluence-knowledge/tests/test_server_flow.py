@@ -205,6 +205,42 @@ def test_reconnect_after_crawl_sees_cache(wired):
     assert again["cached_pages"] == 1
 
 
+def test_verify_survives_restart(wired, monkeypatch):
+    """#231: _evidence_sets is process memory — a daemon restart must not
+    turn verify_citations into 'unknown evidence set'. The persisted
+    shadow (chunk_ids + epoch in index meta) rebuilds the set."""
+    emb, rr = _FakeEmbedder(), _FakeReranker()
+    monkeypatch.setattr(server, "_embedder", lambda: emb)
+    monkeypatch.setattr(server, "_reranker", lambda: rr)
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    wait_done(c["scope_handle"], job["job_id"])
+    res = server.search(c["scope_handle"], "text")
+    set_id = res["evidence_set"]
+    q = res["evidence"][0]
+    mapping = [{"claim": "x", "chunk_id": q["chunk_id"],
+                "quote": q["text"][:12]}]
+    server._evidence_sets.clear()            # daemon restarted
+    v = server.verify_citations(c["scope_handle"], set_id, mapping)
+    assert v["ok"], v
+
+
+def test_orphan_reclaim_needs_no_network(wired, monkeypatch):
+    """#231: daemon boot reclaims a 'running' job whose worker died — the
+    scope_key check must not need a live API (offline daemon boot after
+    a crash). connect() stamps `principal` — reclaim validates locally."""
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    key = c["scope_handle"].split(":")[1]
+    server._workers.clear()
+    def _no_network(*a, **k):
+        raise AssertionError("reclaim touched the network")
+    monkeypatch.setattr(server, "_client_for", _no_network)
+    server._resume_job(key, job["job_id"])
+    assert job["job_id"] in server._workers or wait_done(
+        c["scope_handle"], job["job_id"])["state"] == "done"
+
+
 def test_verify_citations_routes_to_daemon(monkeypatch, wired):
     """Evidence sets are process-local — under daemon mode `search`
     populates the DAEMON's registry, so verify must route there first.

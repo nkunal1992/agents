@@ -113,3 +113,93 @@ def test_full_rag_tail_through_daemon(rig):
     assert ok["ok"] is True
     fb = srv.submit_feedback(c["scope_handle"], "q", "correction")
     assert isinstance(fb, dict)
+
+
+def _wait_done(srv, c, j, timeout=120):
+    final = {"state": "starting"}
+    deadline = time.monotonic() + timeout
+    while final["state"] in ("running", "starting"):
+        if time.monotonic() > deadline:
+            break
+        final = srv.wait_for_crawl(c["scope_handle"], j["job_id"],
+                                   wait_s=25)
+    return final
+
+
+def test_scope_and_evidence_survive_daemon_restart(rig):
+    """#229+#231 journey: daemon kill mid-session → respawn → same
+    scope_handle still searches AND verify_citations still answers —
+    the no-IDE-reload contract."""
+    srv, proc = rig
+    c = srv.connect("100")
+    j = srv.start_crawl(c["scope_handle"])
+    assert _wait_done(srv, c, j)["state"] == "done"
+    res = srv.search(c["scope_handle"], "release sign-off")
+    assert res["evidence"]
+    set_id = res["evidence_set"]
+
+    proc.kill(); proc.wait(timeout=8)
+    # ensure_daemon respawns on the next call — same path the watchdog uses
+    import confluence_knowledge.rpc as _rpc_mod
+    from confluence_knowledge.settings import daemon_home
+    rpc = _rpc_mod.RpcDb(daemon_home() / "rpc.db")
+    srv._daemon_call("daemon_models_ready", {}, 10)
+    deadline = time.monotonic() + 25
+    while not rpc.daemon_alive() and time.monotonic() < deadline:
+        time.sleep(0.3)
+    assert rpc.daemon_alive(), "daemon never respawned"
+
+    # same handle → scope rebinds from meta (no live connect needed)
+    res2 = srv.search(c["scope_handle"], "release sign-off")
+    assert res2["evidence"], "scope did not rebind after restart"
+    # evidence set persisted → verify still answers
+    ok = srv.verify_citations(c["scope_handle"], set_id, [
+        {"claim": "x", "chunk_id": res["evidence"][0]["chunk_id"],
+         "quote": res["evidence"][0]["text"][:40]}])
+    assert ok["ok"] is True
+
+
+def test_stdio_proxy_survives_daemon_restart(rig, tmp_path):
+    """#226's promise, proven end-to-end: an IDE's stdio proxy session
+    survives a daemon restart — no reload. The proxy's MCP session is
+    between IDE and proxy; daemon restarts are invisible behind rpc."""
+    import asyncio
+    srv, proc = rig
+    c = srv.connect("100")
+    j = srv.start_crawl(c["scope_handle"])
+    assert _wait_done(srv, c, j)["state"] == "done"
+
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+    env = {**os.environ,
+           "PYTHONPATH": str(TESTS.parent / "src"),
+           "CONF_KNOWLEDGE_HOME": os.environ["CONF_KNOWLEDGE_HOME"],
+           "CONF_KNOWLEDGE_WORKDIR": os.environ["CONF_KNOWLEDGE_WORKDIR"],
+           "CONF_KNOWLEDGE_TOKEN": os.environ["CONF_KNOWLEDGE_TOKEN"],
+           "CONF_KNOWLEDGE_DAEMON": "1",
+           "KNOWLEDGE_SHARED_HOME": os.environ["KNOWLEDGE_SHARED_HOME"],
+           "KNOWLEDGE_FAKE_EMBEDDINGS": "1"}
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "confluence_knowledge.server"], env=env)
+
+    async def _scenario():
+        async with stdio_client(params) as (r, w):
+            from mcp import ClientSession
+            async with ClientSession(r, w) as session:
+                await session.initialize()
+                async def call(tool, args):
+                    res = await session.call_tool(tool, args)
+                    text = "".join(x.text for x in res.content
+                                   if getattr(x, "type", "") == "text")
+                    import json as _j
+                    return _j.loads(text)
+                out = await call("connect", {"root": "100"})
+                handle = out["scope_handle"]
+                proc.kill(); proc.wait(timeout=8)   # daemon dies mid-session
+                # the proxy respawns it inside the same MCP session —
+                # no reload, no reconnect
+                res = await call("search", {"scope_handle": handle,
+                                            "question": "release sign-off"})
+                return res
+    res = asyncio.run(_scenario())
+    assert res.get("evidence") or res.get("coverage"), res

@@ -810,6 +810,8 @@ def search(scope_handle: str, question: str) -> dict:
             _evidence_sets.pop(next(iter(_evidence_sets)))
         _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
                                   "epoch": idx.snapshot_epoch()}
+    idx.persist_evset(set_id, [e["chunk_id"] for e in ev],
+                      _evidence_sets[set_id]["epoch"])   # #231
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -915,10 +917,14 @@ def verify_citations(scope_handle: str, evidence_set: str,
     s = _scope(scope_handle)
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)
+    idx = _index_for(s["key"])
+    if rec is None:
+        r = idx.evset_rebind(evidence_set)      # #231 daemon restart
+        if r:
+            rec = {"scope": s["key"], **r}
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
-    idx = _index_for(s["key"])
     if rec.get("epoch") != idx.snapshot_epoch():
         raise SecurityException(
             "evidence set predates the latest published snapshot — "
