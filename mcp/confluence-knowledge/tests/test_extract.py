@@ -68,8 +68,7 @@ def test_long_text_splits_with_overlap():
 def test_adoc_extracts_as_text():
     """#208/#231: AsciiDoc is plain-text markup — its `=` headers stay
     searchable inline; no full Asciidoctor render needed."""
-    from confluence_knowledge.extract_files import (
-        SUPPORTED, extract_file_chunks)
+    from confluence_knowledge.extract_files import SUPPORTED, extract_file_chunks
     for ext in (".adoc", ".asciidoc", ".asc"):
         assert ext in SUPPORTED
         chunks, warns = extract_file_chunks(

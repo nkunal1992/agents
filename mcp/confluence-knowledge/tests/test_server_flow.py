@@ -232,7 +232,6 @@ def test_orphan_reclaim_needs_no_network(wired, monkeypatch):
     c = server.connect("1")
     job = server.start_crawl(c["scope_handle"])
     key = c["scope_handle"].split(":")[1]
-    idx = server._index_for(key, for_write=True)
     server._workers.clear()
     def _no_network(*a, **k):
         raise AssertionError("reclaim touched the network")
