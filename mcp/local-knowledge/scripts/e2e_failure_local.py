@@ -9,14 +9,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import venv
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]
                     / "confluence-knowledge" / "scripts"))
 import atexit
 
-from _e2e_common import check, stop_shared_daemon, fresh_venv
+from _e2e_common import check, fresh_venv, stop_shared_daemon
 
 REPO_SVC = Path(__file__).resolve().parents[1]
 

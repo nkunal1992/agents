@@ -8,6 +8,7 @@ self-deadlocked with "database is locked".
 import sqlite3
 import threading
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -259,12 +260,12 @@ def test_verify_citations_routes_to_daemon(monkeypatch, wired):
 class _TreeClient:
     """Static DC tree for #240 alias tests:
     1 "Root" → children 2 "Child" + 3 "Sibling"."""
-    _PAGES = {
+    _PAGES: ClassVar = {
         "1": ("Root", "the root page", []),
         "2": ("Child", "child only content", ["1"]),
         "3": ("Sibling", "text text text text text", ["1"]),
     }
-    _KIDS = {"1": ["2", "3"], "2": [], "3": []}
+    _KIDS: ClassVar = {"1": ["2", "3"], "2": [], "3": []}
 
     def get(self, path, params=None):
         if "user/current" in path:
