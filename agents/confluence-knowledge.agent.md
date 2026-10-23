@@ -264,7 +264,12 @@ Recover in order:
 4. If the daemon won't stay up — especially on Windows, where a
    closing terminal can take it down — `confluence-knowledge doctor register --transport
    stdio` then reload once: the IDE spawns the service per session
-   and it brings the daemon up itself.
+   and it brings the daemon up itself. On a managed laptop where
+   `%USERPROFILE%` is a synced/redirected profile (OneDrive file
+   locking can break the daemon's database), set
+   `KNOWLEDGE_SHARED_HOME=C:\knowledge` (any local dir) in the
+   user's environment and re-run register — the daemon home, models,
+   and indexes all relocate.
 5. Only then → tell the user exactly: "the local knowledge service
    can't be reached — open the IDE's MCP server panel and restart
    confluence-knowledge, or reload the window once." The crawl keeps running either
