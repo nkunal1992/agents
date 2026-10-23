@@ -35,7 +35,8 @@ def test_register_writes_venv_command_and_merges(sandbox):
     jb = files[0]
     data = json.loads(jb.read_text())
     entry = data["servers"]["confluence-knowledge"]
-    assert entry["command"].endswith(("python", "python.exe"))
+    assert entry["command"].endswith(
+        ("python", "python.exe", "pythonw.exe"))
     assert entry["args"] == ["-m", "confluence_knowledge.server"]
 
     merged = json.loads(existing.read_text())
