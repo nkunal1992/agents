@@ -37,9 +37,12 @@ def _models_checks(home: Path, cli: str) -> list[dict]:
             "detail": ("missing: " + ", ".join(spec["missing"])
                        if spec["missing"] else "present"),
             "remediation": None if spec["ok"] else f"{cli} prepare-models"})
-    from .retrieval import active_provider
+    from .retrieval import active_embed_spec, active_provider
     out.append({"flag": "onnx_provider", "ok": True,
                 "detail": active_provider(), "remediation": None})
+    out.append({"flag": "embed_model", "ok": True,
+                "detail": active_embed_spec()["repo"],
+                "remediation": None})
     return out
 
 

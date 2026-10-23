@@ -186,3 +186,46 @@ def test_pick_providers_auto(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_ONNX_PROVIDERS",
                        "CUDAExecutionProvider,MissingEP")
     assert _pick_providers(ort) == ["CUDAExecutionProvider"]
+
+
+def test_embed_spec_registry(monkeypatch):
+    """#249: env selects the active embed spec; aliases resolve; unknown
+    values fail with a clear SetupError."""
+    import pytest
+
+    from confluence_knowledge import retrieval
+    from confluence_knowledge.settings import SetupError
+
+    monkeypatch.delenv("KNOWLEDGE_EMBED_MODEL", raising=False)
+    assert retrieval._env_embed_model() == "arctic-xs"
+    assert retrieval.active_embed_spec()["repo"].endswith("arctic-embed-xs")
+
+    monkeypatch.setenv("KNOWLEDGE_EMBED_MODEL", "nomic")
+    assert retrieval.active_embed_spec()["dim"] == 768
+    assert retrieval.active_embed_spec()["pool"] == "mean"
+
+    monkeypatch.setenv("KNOWLEDGE_EMBED_MODEL",
+                       "snowflake-arctic-embed-xs")   # repo alias works
+    assert retrieval._env_embed_model() == "arctic-xs"
+
+    monkeypatch.setenv("KNOWLEDGE_EMBED_MODEL", "bge-m3")
+    with pytest.raises(SetupError):
+        retrieval._env_embed_model()
+
+
+def test_model_marker_differs_per_spec(monkeypatch):
+    """#249: the stamp changes with the active spec → a nomic index reads
+    stale under arctic → one recrawl."""
+    import importlib
+
+    from confluence_knowledge import retrieval
+
+    nomic = "nomic-embed-text-v1.5-onnx-quantized+taskpre"
+    assert retrieval.MODEL_MARKER.startswith("snowflake-arctic-embed-xs")
+
+    monkeypatch.setenv("KNOWLEDGE_EMBED_MODEL", "nomic")
+    importlib.reload(retrieval)
+    assert retrieval.MODEL_MARKER.startswith(nomic)
+    monkeypatch.delenv("KNOWLEDGE_EMBED_MODEL")
+    importlib.reload(retrieval)
+    assert retrieval.MODEL_MARKER.startswith("snowflake-arctic-embed-xs")

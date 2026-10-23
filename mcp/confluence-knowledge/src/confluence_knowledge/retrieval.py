@@ -28,24 +28,77 @@ from .index import Index
 from .resources import limits, plan_batches
 from .settings import SetupError
 
-EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5"  # Apache-2.0, non-BAAI
-EMBED_ONNX = "onnx/model_quantized.onnx"
-# nomic's quantized graph is self-contained — no external-data sibling
-EMBED_ONNX_DATA = None
 SPARSE_MODEL = "Qdrant/bm25"                            # MIT — via fastembed
 RERANK_REPO = "mixedbread-ai/mxbai-rerank-xsmall-v1"  # Apache-2.0
 RERANK_ONNX = "onnx/model_quantized.onnx"
 RERANK_BASE_REPO = "mixedbread-ai/mxbai-rerank-base-v1"  # heavier override
 
-EMBED_MODEL_ID = "nomic-embed-text-v1.5-onnx-quantized"
+# Per-embedder runtime spec (#249). The lock file carries the download
+# spec (repo/files/sha256) per role key; this dict carries the RUNTIME
+# shape — pooling, task prefixes, dims, context cap. English-only,
+# non-BAAI per workspace policy. `KNOWLEDGE_EMBED_MODEL` selects;
+# default is the fast tier (arctic-xs ≈ 8.6× nomic at probe parity).
+EMBED_SPECS = {
+    "arctic-xs": {
+        "lock_key": "embed",
+        "repo": "Snowflake/snowflake-arctic-embed-xs",
+        "onnx": "onnx/model.onnx",
+        "onnx_data": None,
+        "dim": 384,
+        "max_tokens": 512,
+        "pool": "cls",                # model card: CLS pooling
+        "doc_prefix": "",
+        "query_prefix": "Represent this sentence for searching "
+                        "relevant passages: ",
+        "marker": "snowflake-arctic-embed-xs",
+    },
+    "nomic": {
+        "lock_key": "embed_large",
+        "repo": "nomic-ai/nomic-embed-text-v1.5",
+        "onnx": "onnx/model_quantized.onnx",
+        "onnx_data": None,
+        "dim": 768,
+        "max_tokens": 2048,
+        "pool": "mean",               # masked mean over hidden states
+        "doc_prefix": "search_document: ",
+        "query_prefix": "search_query: ",
+        "marker": "nomic-embed-text-v1.5-onnx-quantized",
+    },
+}
+_EMBED_ALIASES = {"nomic-embed-text-v1.5": "nomic",
+                  "snowflake-arctic-embed-xs": "arctic-xs",
+                  "arctic-embed-xs": "arctic-xs",
+                  "default": "arctic-xs", "fast": "arctic-xs",
+                  "large": "nomic"}
+
+
+def _env_embed_model() -> str:
+    raw = os.environ.get("KNOWLEDGE_EMBED_MODEL", "arctic-xs").strip()
+    key = _EMBED_ALIASES.get(raw.lower(), raw.lower())
+    if key not in EMBED_SPECS:
+        raise SetupError(
+            f"KNOWLEDGE_EMBED_MODEL '{raw}' isn't a known embedder — "
+            f"pick one of: {', '.join(sorted(EMBED_SPECS))}")
+    return key
+
+
+def active_embed_spec() -> dict:
+    return EMBED_SPECS[_env_embed_model()]
+
+
 SPARSE_MODEL_ID = "qdrant-bm25-fastembed"
 # Composite fingerprint of every model whose output is PERSISTED (dense +
 # sparse vectors). The reranker is deliberately absent: it only scores at
 # query time, so a reranker swap must not trigger a full rebuild (#178).
-# +taskpre — nomic search_document/search_query prefixes changed the
-# embed contract; every old index restamps → auto-recrawl (never
-# silently reuses role-less vectors)
-MODEL_MARKER = f"{EMBED_MODEL_ID}+taskpre+{SPARSE_MODEL_ID}"
+# The marker rides the ACTIVE embed spec — switching models changes it,
+# so old indexes flag stale and recrawl under the new model (#249).
+# +taskpre is kept as a literal segment for marker compat — indexes
+# stamped under nomic's taskpre contract still match when env=nomic.
+MODEL_MARKER = (active_embed_spec()["marker"] + "+taskpre+" +
+                SPARSE_MODEL_ID)
+# Back-compat aliases — a few call sites import the name, not the spec
+EMBED_REPO = active_embed_spec()["repo"]
+EMBED_MODEL_ID = active_embed_spec()["marker"]
 
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
@@ -60,7 +113,6 @@ MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
 # safety margin for row-atomic chunks that must exceed the budget (a single
 # huge table row) — 2048 stays far under the models' 8k context, bounding
 # worst-case cross-encoder cost (measured: no p50 change at real chunk sizes).
-EMBED_MAX_TOKENS = 2048
 RERANK_MAX_TOKENS = 2048
 CHUNK_TOKENS = 448       # token-aware split target — leaves room for
                          # heading path + page title inside the embed input
@@ -191,19 +243,21 @@ def _tokenizer(dest: Path):
 
 
 class LocalEmbedder:
-    """nomic-embed-text-v1.5 dense embeddings via ONNX int8
-    (no torch). 768-dim, 8192-ctx, vendor-published artifact —
-    replaces BGE-M3 under the non-BAAI workspace policy."""
+    """Dense embeddings via ONNX (no torch) — model resolved from
+    `KNOWLEDGE_EMBED_MODEL` through EMBED_SPECS (#249): default
+    snowflake-arctic-embed-xs (22M, 384-dim, CLS-pooled, English-only);
+    `nomic` opts back into the 137M/768-dim masked-mean variant."""
 
     def __init__(self, home: Path, cli: str = "confluence-knowledge"):
-        needed = [EMBED_ONNX, "tokenizer.json"]
-        if EMBED_ONNX_DATA:
-            needed.append(EMBED_ONNX_DATA)
-        dest = _require(_model_home(home, EMBED_REPO), EMBED_REPO, cli,
+        spec = self._spec = active_embed_spec()
+        needed = [spec["onnx"], "tokenizer.json"]
+        if spec["onnx_data"]:
+            needed.append(spec["onnx_data"])
+        dest = _require(_model_home(home, spec["repo"]), spec["repo"], cli,
                         needed)
-        self._sess = _ort_session(dest / EMBED_ONNX, cli)
-        # output dim is a session property — 768 on nomic-v1.5
-        self._dim = int(self._sess.get_outputs()[-1].shape[-1] or 768)
+        self._sess = _ort_session(dest / spec["onnx"], cli)
+        self._dim = int(self._sess.get_outputs()[-1].shape[-1]
+                        or spec["dim"])
         self._needs_token_types = any(
             i.name == "token_type_ids" for i in self._sess.get_inputs())
         self._has_sentence_emb = any(
@@ -211,7 +265,7 @@ class LocalEmbedder:
             self._sess.get_outputs())
         self._tok = _tokenizer(dest)
         self._tok.no_padding()  # padding is applied per micro-batch
-        self._tok.enable_truncation(EMBED_MAX_TOKENS)
+        self._tok.enable_truncation(spec["max_tokens"])
 
     def count_tokens(self, text: str) -> int:
         """Content-token length under the model tokenizer — used for
@@ -241,8 +295,10 @@ class LocalEmbedder:
         # content-hash dedup — template/boilerplate strings repeat across
         # enterprise pages and embed identically; cache by sha256 so each
         # unique text pays the ONNX cost once per daemon life
-        prefix = "search_query: " if query else "search_document: "
-        texts = [prefix + t for t in texts]
+        prefix = (self._spec["query_prefix"] if query
+                  else self._spec["doc_prefix"])
+        if prefix:
+            texts = [prefix + t for t in texts]
         import hashlib
         cache = getattr(self, "_vec_cache", None)
         if cache is None:
@@ -285,14 +341,18 @@ class LocalEmbedder:
                         ["sentence_embedding"], feed)[0],
                         dtype=np.float32)
                 else:
-                    # nomic-style export: hidden states only → masked
-                    # mean pooling (the model card's pooling, not CLS)
                     h = np.asarray(self._sess.run(
                         ["last_hidden_state"], feed)[0],
                         dtype=np.float32)
-                    m = mask[:, :, None].astype(np.float32)
-                    v = (h * m).sum(axis=1) / np.maximum(
-                        m.sum(axis=1), 1e-9)
+                    if self._spec["pool"] == "cls":
+                        # arctic-embed: CLS pooling — first token's
+                        # hidden state carries the sequence embedding
+                        v = h[:, 0, :].astype(np.float32)
+                    else:
+                        # nomic: masked mean over hidden states
+                        m = mask[:, :, None].astype(np.float32)
+                        v = (h * m).sum(axis=1) / np.maximum(
+                            m.sum(axis=1), 1e-9)
                 if out is None:
                     out = np.empty((len(enc), v.shape[1]),
                                    dtype=np.float32)
@@ -423,8 +483,11 @@ def prepare_models(home: Path) -> list[str]:
     models.mkdir(parents=True, exist_ok=True)
 
     # dense + rerankers: direct HF snapshot (repo + revision pinned in the
-    # lock); rerank_light is fetched too so *_RERANKER overrides always work
-    for key in ("embed", "rerank", "rerank_light"):
+    # lock); rerank_light is fetched too so *_RERANKER overrides always work.
+    # The dense role fetches the ACTIVE spec — embed (arctic-xs default)
+    # or embed_large (KNOWLEDGE_EMBED_MODEL=nomic) — not both (#249).
+    embed_key = active_embed_spec()["lock_key"]
+    for key in (embed_key, "rerank", "rerank_light"):
         spec = lock["models"][key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         if dest.exists():
@@ -477,9 +540,11 @@ def prepare_models(home: Path) -> list[str]:
 
     # GC: remove model dirs not owned by the current lock — superseded
     # revisions and legacy models (e.g. the old MiniLM stack) otherwise
-    # accumulate ~600 MB each in the user's home.
+    # accumulate ~600 MB each in the user's home. The inactive embed spec
+    # is deliberately NOT owned: leaving it means every arctic→nomic
+    # switcher carries a stale 137M dir forever; opting back re-downloads.
     owned = {lock["models"][k]["repo"].split("/")[-1]
-             for k in ("embed", "rerank", "rerank_light")} | {"fastembed"}
+             for k in (embed_key, "rerank", "rerank_light")} | {"fastembed"}
     for d in models.iterdir():
         if d.is_dir() and d.name not in owned:
             shutil.rmtree(d, ignore_errors=True)
@@ -520,8 +585,9 @@ def models_complete(home: Path) -> dict:
         return {k: {"ok": True, "missing": [], "mode": "fake-embeddings"}
                 for k in ("embed", "rerank", "rerank_light", "sparse")}
     lock = _load_lock()["models"]
+    embed_key = active_embed_spec()["lock_key"]
     out = {}
-    for key in ("embed", "rerank", "rerank_light"):
+    for key in (embed_key, "rerank", "rerank_light"):
         spec = lock[key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         missing = [f for f in spec["files"] if not (dest / f).exists()]

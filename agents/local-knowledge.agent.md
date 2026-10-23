@@ -102,7 +102,7 @@ Then run the steps below end-to-end without pausing.
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
 3. **Models.** `"$HOME/.local-knowledge/venv/bin/local-knowledge"
-   prepare-models` — downloads two Apache-2.0 models (embedding + reranker)
+   prepare-models` — downloads two Apache-2.0 models (the default fast English embedder snowflake-arctic-embed-xs — `KNOWLEDGE_EMBED_MODEL=nomic` opts into the heavier 768-dim model — plus reranker)
    into `~/.knowledge/models/`. If the network blocks Hugging Face,
    tell the user to drop the model dirs there from their internal mirror —
    never switch to a cloud embedding API.

@@ -39,7 +39,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=800)
     ap.add_argument("--batches", default="4,8,16,32,64")
+    ap.add_argument("--model", default=None,
+                    help="KNOWLEDGE_EMBED_MODEL value — arctic-xs/nomic")
     args = ap.parse_args()
+    if args.model:
+        os.environ["KNOWLEDGE_EMBED_MODEL"] = args.model
 
     os.environ.setdefault("LOCAL_KNOWLEDGE_HOME",
                           str(Path(tempfile.mkdtemp()) / "home"))

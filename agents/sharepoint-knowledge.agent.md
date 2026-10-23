@@ -99,9 +99,10 @@ reload once." Then run the steps below end-to-end.
    macOS/Linux: `"$PY" -m venv ~/.knowledge/venv`), then use its
    interpreter as `$VENV_PY`. Never write service code yourself.
 3. **Models.** `"$VENV/bin/sharepoint-knowledge" prepare-models` — two
-   Apache-2.0 models into `~/.knowledge/models/`. Hugging Face
-   blocked → drop the model dirs there from your internal mirror — never a
-   cloud embedding API.
+   Apache-2.0 models into `~/.knowledge/models/` (default fast embedder
+   snowflake-arctic-embed-xs — `KNOWLEDGE_EMBED_MODEL=nomic` opts into the
+   heavier 768-dim model). Hugging Face blocked → drop the model dirs
+   there from your internal mirror — never a cloud embedding API.
 4. **Register the MCP server.** Run:
    ```bash
    "$VENV/bin/sharepoint-knowledge" register --ide auto --workspace "<repo root>"

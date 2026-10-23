@@ -111,7 +111,7 @@ pausing between them; the user sees each command anyway.
    `$VENV_PY` (`…/venv/Scripts/python.exe` or `…/venv/bin/python`).
    Never write service code yourself — always install the pinned/bundled
    package. Never modify it after install.
-3. **Models.** `"~/.knowledge/venv/bin/confluence-knowledge" prepare-models` — downloads the pinned local models — nomic-embed-text-v1.5 embeddings + sparse + reranker (ONNX, MIT/Apache-2.0)
+3. **Models.** `"~/.knowledge/venv/bin/confluence-knowledge" prepare-models` — downloads the pinned local models — Snowflake arctic-embed-xs embeddings (the fast default; `KNOWLEDGE_EMBED_MODEL=nomic` selects the heavier 768-dim embedder for max recall — an index built under either is flagged stale on the other and re-crawls once) + sparse + reranker (ONNX, MIT/Apache-2.0)
    into `~/.knowledge/models/`. If the network blocks Hugging
    Face, tell the user to drop the model dirs there from their internal
    mirror — never switch to a cloud embedding API.

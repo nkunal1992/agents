@@ -1,14 +1,6 @@
 {
-  "comment": "Pinned ONNX model artifacts. Retrieval is local-only — torch and cloud embedding APIs are never used. 'files' limits the snapshot to what the runtime needs.",
+  "comment": "Pinned ONNX model artifacts. Retrieval is local-only \u2014 torch and cloud embedding APIs are never used. 'files' limits the snapshot to what the runtime needs.",
   "models": {
-    "embed": {
-      "repo": "nomic-ai/nomic-embed-text-v1.5",
-      "revision": "e9b6763023c676ca8431644204f50c2b100d9aab",
-      "license": "Apache-2.0",
-      "sha256": {"onnx/model_quantized.onnx": "b4342336debaea79de872370664b0aaeb67dea4605513d00ee236ea871a81f27"},
-      "note": "non-BAAI replacement for bge-m3 (workspace policy): 137M, 768-dim, 8192-ctx, vendor-published ONNX — 4/4 corpus probes at ~2x faster embeds than bge-m3",
-      "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "README.md"]
-    },
     "sparse": {
       "repo": "Qdrant/bm25",
       "revision": "22b8d2af71a76161e18dd432d2cee0eefa66e412",
@@ -19,16 +11,71 @@
       "repo": "mixedbread-ai/mxbai-rerank-xsmall-v1",
       "revision": "b5c6e9da73abc3711f593f705371cdbe9e0fe422",
       "license": "Apache-2.0",
-      "sha256": {"onnx/model_quantized.onnx": "15ef19a6de90be7d52b627f2c784107bd806e64826450f41fb75fa4f0179ab30"},
+      "sha256": {
+        "onnx/model_quantized.onnx": "15ef19a6de90be7d52b627f2c784107bd806e64826450f41fb75fa4f0179ab30"
+      },
       "note": "non-BAAI replacement for bge-reranker-v2-m3 (workspace policy): 70M, equal probe recall on our corpus at ~3.3x faster scoring",
-      "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "onnx/quantize_config.json", "README.md"]
+      "files": [
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+        "special_tokens_map.json",
+        "onnx/quantize_config.json",
+        "README.md"
+      ]
     },
     "rerank_light": {
       "repo": "mixedbread-ai/mxbai-rerank-base-v1",
       "revision": "800f24c113213a187e65bde9db00c15a2bb12738",
       "license": "Apache-2.0",
-      "files": ["onnx/model_quantized.onnx", "tokenizer.json", "tokenizer_config.json", "config.json", "special_tokens_map.json", "onnx/quantize_config.json", "README.md"],
+      "files": [
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+        "special_tokens_map.json",
+        "onnx/quantize_config.json",
+        "README.md"
+      ],
       "note": "downloaded only when *_RERANKER env selects the heavier override"
+    },
+    "embed": {
+      "repo": "Snowflake/snowflake-arctic-embed-xs",
+      "revision": "d8c86521100d3556476a063fc2342036d45c106f",
+      "license": "Apache-2.0",
+      "note": "fast English default (#249): 22M, 384-dim, 512-ctx \u2014 measured 62 chunks/s vs nomic's ~7 on real corpus text (~8.6x) at 7/10 probe-recall parity. CLS pooling + 'Represent this sentence\u2026' query prefix. Non-BAAI per workspace policy.",
+      "files": [
+        "onnx/model.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+        "special_tokens_map.json"
+      ],
+      "sha256": {
+        "onnx/model.onnx": "cf2698d30ff05da02c70a088313bad56e5c2f401d734cb24a8390d446111936c",
+        "tokenizer.json": "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854",
+        "tokenizer_config.json": "9ca59277519f6e3692c8685e26b94d4afca2d5438deff66483db495e48735810",
+        "config.json": "d7d071046ab952af96b7abad788db7ab3fc997b465e1b9914ff39707092254ec",
+        "special_tokens_map.json": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"
+      }
+    },
+    "embed_large": {
+      "repo": "nomic-ai/nomic-embed-text-v1.5",
+      "revision": "e9b6763023c676ca8431644204f50c2b100d9aab",
+      "license": "Apache-2.0",
+      "sha256": {
+        "onnx/model_quantized.onnx": "b4342336debaea79de872370664b0aaeb67dea4605513d00ee236ea871a81f27"
+      },
+      "note": "non-BAAI replacement for bge-m3 (workspace policy): 137M, 768-dim, 8192-ctx, vendor-published ONNX \u2014 4/4 corpus probes at ~2x faster embeds than bge-m3 \u2014 opt-in via KNOWLEDGE_EMBED_MODEL=nomic (#249)",
+      "files": [
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+        "special_tokens_map.json",
+        "README.md"
+      ]
     }
   }
 }
