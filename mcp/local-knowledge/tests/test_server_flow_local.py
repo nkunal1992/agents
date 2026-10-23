@@ -222,3 +222,53 @@ def test_descendent_materializes_on_start_crawl(tmp_path):
     # materialized index re-rels under sub.parent → 'sub/…'
     assert {e["page_id"] for e in res["evidence"]} <= \
         {"sub/inner.md", "sub/more.txt"}
+
+
+def test_flush_cap_and_embed_note(tmp_path, monkeypatch):
+    """#244: a many-chunk corpus flushes in bounded batches — each embed
+    sees ≤FLUSH_MAX_CHUNKS+one-doc texts, and progress.note reports the
+    rolling count instead of freezing pages_done."""
+    calls = []
+
+    class TickEmbedder:
+        def embed(self, texts, on_batch=None, query: bool = False):
+            calls.append(len(texts))
+            if on_batch:
+                on_batch(len(texts), len(texts))
+            return np.random.rand(len(texts), 8).astype(np.float32)
+
+    monkeypatch.setattr(server_local, "_EMBEDDER", TickEmbedder())
+    root = tmp_path / "docs"
+    root.mkdir()
+    # each file ~70 chunks (70×~40-word lines) → 4 files ≈ 280 chunks
+    # forces ≥2 flushes under the 128-chunk cap
+    for i in range(4):
+        (root / f"big{i}.txt").write_text(
+            "\n".join(f"line {j} " + "word " * 8 for j in range(600)))
+    c = server_local.connect(str(root))
+    job = server_local.start_crawl(c["scope_handle"])
+    r = server_local.crawl_step(c["scope_handle"], job["job_id"])
+    while r["state"] == "running":
+        r = server_local.crawl_step(c["scope_handle"], job["job_id"])
+    assert r["state"] == "done" and r["pages_seen"] == 4
+    assert len(calls) >= 2                      # bounded flushes, not one giant call
+    idx = server_local._index_for(c["scope_handle"].split(":")[1])
+    stats = idx.meta_get(f"stats:{job['job_id']}")
+    assert stats and '"embed_ms"' in stats      # per-phase timing persisted
+    # a second identical crawl reuses live rows — no re-extract, no re-embed
+    calls.clear()
+    job2 = server_local.start_crawl(c["scope_handle"], refresh=True)
+    r = server_local.crawl_step(c["scope_handle"], job2["job_id"])
+    while r["state"] == "running":
+        r = server_local.crawl_step(c["scope_handle"], job2["job_id"])
+    assert r["state"] == "done" and calls == []  # unchanged → zero embeds
+
+
+def test_extract_file_chunks_doc_cap():
+    """#244: a pathological doc is truncated at the cap with a warning —
+    it can't stall a crawl on a single file."""
+    from confluence_knowledge.extract_files import extract_file_chunks
+    data = ("\n".join("row " + "word " * 8 for _ in range(5000))).encode()
+    chunks, warns = extract_file_chunks("big.txt", data, max_chunks=10)
+    assert len(chunks) <= 10
+    assert any("chunk cap" in w for w in warns)

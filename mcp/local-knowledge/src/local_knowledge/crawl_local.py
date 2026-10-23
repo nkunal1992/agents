@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 import uuid
 from collections import deque
@@ -25,6 +26,8 @@ from confluence_knowledge.settings import SetupError
 SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv",
              "venv", ".idea", ".vscode", "target", "dist", "build", ".tox"}
 MAX_FILE_BYTES = 25 * 1024 * 1024  # 25MB — bigger files get a warning, not a crash
+FLUSH_MAX_CHUNKS = 128   # chunks per embed flush — bounds each call
+BATTERY_DUTY = 0.5       # battery saver duty ratio, ~proportional steps
 MAX_FILES = 20_000                  # guard against "pointed at $HOME" accidents
 
 
@@ -192,6 +195,59 @@ class LocalCrawler:
         warns: list[str] = json.loads(warns_raw) if warns_raw else []
         visited_dirs: set[str] = set()   # guards symlink/dir-graph cycles
 
+        # per-phase wall-clock stats — the field's "why is the crawl slow"
+        # answer (parity with confluence crawl.py, #244). Durable under
+        # stats:{job_id} so bounded step() calls accumulate.
+        stats_raw = self.index.meta_get(f"stats:{job_id}")
+        stats: dict = (json.loads(stats_raw) if stats_raw else {
+            "fetch_ms": 0.0, "wait_ms": 0.0, "extract_ms": 0.0,
+            "embed_ms": 0.0, "sparse_ms": 0.0, "store_ms": 0.0,
+            "chunks": 0, "pages": 0})
+        _stats_lock = threading.Lock()
+
+        def _save_stats() -> None:
+            stats["battery_saver"] = bool(
+                self.control and self.control.battery_saver())
+            stats["pages_per_s"] = round(
+                stats["pages"] /
+                max(stats["extract_ms"] + stats["embed_ms"]
+                    + stats["store_ms"] + stats["wait_ms"], 1) * 1000, 2)
+            self.index.meta_set(f"stats:{job_id}", json.dumps(stats))
+
+        chunk_kwargs = self._chunk_kwargs()
+
+        def _timed_children(d: Path):
+            t0 = time.monotonic()
+            try:
+                return self._children(d)
+            finally:
+                with _stats_lock:
+                    stats["fetch_ms"] += (time.monotonic() - t0) * 1000
+
+        def _read_extract(f: Path):
+            """Fetch worker: read + hash + EXTRACT — extraction runs in
+            the pool so it overlaps the previous buffer's embed instead
+            of serialising on the main thread (#244). `chunks=None`
+            marks "unchanged" — the main loop stages live rows, no work
+            wasted on identical bytes."""
+            t0 = time.monotonic()
+            meta, data, h = self._read(f)
+            with _stats_lock:
+                stats["fetch_ms"] += (time.monotonic() - t0) * 1000
+            if not data:
+                return meta, data, [], h     # oversized — warns set
+            if self.index.live_page_hash(meta["page_id"]) == h:
+                return meta, data, None, h   # unchanged → copy live rows
+            t0 = time.monotonic()
+            chunks, warns = extract_file_chunks(f.name, data,
+                                                **chunk_kwargs)
+            with _stats_lock:
+                stats["extract_ms"] += (time.monotonic() - t0) * 1000
+            meta["warnings"] = warns
+            for c in chunks:
+                c.chunk_id = f"{meta['page_id']}:{h[:8]}:{c.ordinal}"
+            return meta, data, chunks, h
+
         processed = 0
         # throttled checkpoints — full state used to be rewritten per item
         last_ckpt, last_ckpt_n = time.monotonic(), 0
@@ -215,7 +271,15 @@ class LocalCrawler:
             nonlocal pending
             if not pending:
                 return True
-            buf, pending = pending, []
+            # cap each flush at ~FLUSH_MAX_CHUNKS: pages are popped from
+            # the head until the cap is hit, the rest stay pending —
+            # bounds a single flush's embed time and heartbeats the job
+            # through a big docx (#244, parity with confluence crawl)
+            buf, n_chunks = [], 0
+            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
+                rel, meta, chunks, h, lvl = pending.pop(0)
+                buf.append((rel, meta, chunks, h, lvl))
+                n_chunks += len(chunks)
             vecs = sp = None
             if self.embedder is not None:
                 if self.control is not None:
@@ -227,15 +291,46 @@ class LocalCrawler:
                 texts = [f"{m['title']}\n{c.heading_path}\n{c.text}"
                          for _, m, chunks, *_ in buf for c in chunks]
                 if texts:
+                    tick_t0 = time.monotonic()
+
+                    def _embed_tick(done: int, total: int,
+                                    _c=self.control) -> None:
+                        nonlocal tick_t0
+                        """Heartbeat + progress inside a dense flush — a
+                        big docx used to freeze the visible job for
+                        minutes, indistinguishable from a wedged crawl."""
+                        if _c is None:
+                            return
+                        _c.check()           # cancel + lease heartbeat
+                        _c.progress.note = \
+                            f"embedding {done}/{total} chunks"
+                        if _c.battery_saver():
+                            el = time.monotonic() - tick_t0
+                            time.sleep(min(el * BATTERY_DUTY, 1.0))
+                            tick_t0 = time.monotonic()
                     t0 = time.monotonic()
-                    vecs = self.embedder.embed(texts)
+                    import inspect as _ins
+                    if "on_batch" in _ins.signature(
+                            self.embedder.embed).parameters:
+                        vecs = self.embedder.embed(
+                            texts, on_batch=_embed_tick)
+                    else:
+                        vecs = self.embedder.embed(texts)
+                        if self.control is not None and \
+                                self.control.battery_saver():
+                            # no per-batch hook on this embedder — same
+                            # proportional duty pause, once per call
+                            time.sleep(min(
+                                (time.monotonic() - t0) * BATTERY_DUTY, 1.0))
+                    stats["embed_ms"] += \
+                        (time.monotonic() - t0) * 1000
                     if self.sparse is not None:
+                        t0 = time.monotonic()
                         sp = self.sparse.embed(texts)
-                    if self.control is not None and \
-                            self.control.battery_saver():
-                        # ~50% duty cycle on battery — halves sustained CPU
-                        time.sleep(max(0.0, time.monotonic() - t0))
+                        stats["sparse_ms"] += \
+                            (time.monotonic() - t0) * 1000
             off = 0
+            t0 = time.monotonic()
             for rel, meta, chunks, h, lvl in buf:
                 n = len(chunks)
                 try:
@@ -251,6 +346,9 @@ class LocalCrawler:
                 except StaleJobError:
                     return False
                 off += n
+            stats["store_ms"] += (time.monotonic() - t0) * 1000
+            stats["pages"] += len(buf)
+            stats["chunks"] += n_chunks
             seen.update(rel for rel, *_ in buf)
             if self.control is not None:
                 self.control.page_done(len(buf))
@@ -281,6 +379,7 @@ class LocalCrawler:
                     self._checkpoint(
                         job_id, list(queue) + sorted(inflight.values()),
                         errors, seen, levels, warns, keep_failed)
+                    _save_stats()
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
                 cur = (self.control.fetch_concurrency(conc)
                        if self.control is not None else conc)
@@ -299,13 +398,15 @@ class LocalCrawler:
                         if real in visited_dirs:
                             continue  # symlink/loop — dirs aren't pages
                         visited_dirs.add(real)
-                        inflight[pool.submit(self._children, path)] = entry
+                        inflight[pool.submit(_timed_children, path)] = entry
                     else:
-                        inflight[pool.submit(self._read, path)] = entry
+                        inflight[pool.submit(_read_extract, path)] = entry
                 if not inflight:
                     break
+                t_wait = time.monotonic()
                 done, _ = wait(tuple(inflight),
                                return_when=FIRST_COMPLETED)
+                stats["wait_ms"] += (time.monotonic() - t_wait) * 1000
                 for fut in done:
                     entry = inflight.pop(fut)
                     processed += 1
@@ -338,27 +439,26 @@ class LocalCrawler:
                             if (k[4:] if k.startswith("dir:")
                                 else k[5:]) not in seen)
                         continue
-                    meta, data, content_hash = result
+                    meta, data, chunks, content_hash = result
                     rel = meta["page_id"]
                     if rel in seen:
                         continue
-                    # unchanged file: reuse its live rows instead of
-                    # re-extracting + re-embedding identical bytes
-                    if (self.index.live_page_hash(rel) == content_hash
-                            and self.index.copy_live_to_stage(rel, job_id)):
-                        seen.add(rel)
-                        if self.control is not None:
-                            self.control.page_done(1)
-                        continue
-                    if data:
+                    if chunks is None:
+                        # worker confirmed unchanged — stage live rows;
+                        # identical bytes never re-embed
+                        if self.index.copy_live_to_stage(rel, job_id):
+                            seen.add(rel)
+                            if self.control is not None:
+                                self.control.page_done(1)
+                            continue
+                        # hash matched but stage copy failed (live row
+                        # vanished mid-crawl) — extract on demand
                         chunks, warns2 = extract_file_chunks(
-                            Path(path_s).name, data, **self._chunk_kwargs())
+                            Path(path_s).name, data, **chunk_kwargs)
                         meta["warnings"] = warns2
                         for c in chunks:
                             c.chunk_id = (f"{rel}:{content_hash[:8]}:"
                                           f"{c.ordinal}")
-                    else:
-                        chunks = []   # oversized — warnings already set
                     pending.append((rel, meta, chunks, content_hash,
                                     levels.get(rel, path_s.count("/"))))
                     if (sum(len(c) for _, _, c, _, _ in pending) >= 64
@@ -402,6 +502,7 @@ class LocalCrawler:
             # carried forward — stored so status/last_crawl can report it
             self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
+            _save_stats()
         self.index.save_job(job_id, "done" if not queue else "running",
                             list(queue), errors)
         return {"job_id": job_id,
