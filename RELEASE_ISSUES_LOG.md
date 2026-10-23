@@ -96,3 +96,21 @@ Structured record of every failure hit during the RC runs and how each was resol
   the agent read daemon.log/watchdog.log and try `register
   --transport stdio` before dead-ending.
 - **Release**: 0.11.1 patch — sisters' `~=0.11.0` picks it up.
+
+## ISSUE-007 — verify-published poll used the JSON API, pip reads the simple index
+
+- **Run**: confluence-knowledge-v0.11.1 stable (39888337997), verify-published
+  (windows-latest). `pip install confluence-knowledge==0.11.1` → "No
+  matching distribution" ~40s after upload.
+- **Root cause**: the ISSUE-005 poll queried `pypi.org/pypi/<pkg>/json`
+  which updates before `/simple/<pkg>/` — the index pip actually
+  resolves against. The windows leg raced the slower index.
+- **Fix**: poll the normalized simple-index page for the dist filename
+  (`re.sub` normalization per PEP 503) instead of the JSON API.
+- **Also**: the "file yank issue" step lacked `shell: bash` — its
+  `\`-continuations hit a PowerShell ParserError on windows runners
+  (no issue was filed; the release itself was healthy — ubuntu verify
+  passed). Added `shell: bash`.
+- **Unrelated flake**: test-artifact windows `test_parallel_is_much_faster`
+  (parallel 1.64s vs seq 3.02s) — congested-runner timing assert, rerun
+  passed.

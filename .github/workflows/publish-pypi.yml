@@ -376,21 +376,25 @@ jobs:
         run: |
           PKG="${{ needs.validate.outputs.pkg }}"
           VER="${{ needs.validate.outputs.version }}"
-          # the upload returns 200 while the simple index still lags —
-          # one python call polls the JSON API with internal retry so
-          # nothing depends on bash-loop/set -e/seq behaviour across OSes
+          # the upload returns 200 while the SIMPLE index still lags —
+          # pip resolves against /simple/, not the JSON API, so poll the
+          # exact index pip reads (was: JSON poll raced a slower index
+          # and windows verify found no matching distribution)
           python - <<EOF || exit 1
-          import json, sys, time, urllib.request
+          import re, sys, time, urllib.request
           pkg, ver = "$PKG", "$VER"
-          url = "https://pypi.org/pypi/" + pkg + "/json"
+          norm = re.sub(r"[-_.]+", "-", pkg).lower()
+          dist = re.sub(r"[-_.]+", "_", pkg).lower()
+          url = "https://pypi.org/simple/" + norm + "/"
           for i in range(24):
               try:
-                  if ver in json.load(urllib.request.urlopen(url))["releases"]:
-                      print(pkg + "==" + ver + " visible on pypi")
+                  html = urllib.request.urlopen(url).read().decode()
+                  if (dist + "-" + ver) in html:
+                      print(pkg + "==" + ver + " visible on the simple index")
                       sys.exit(0)
               except Exception as e:
                   print("poll error:", e)
-              print("pypi index not yet showing", pkg + "==" + ver,
+              print("simple index not yet showing", pkg + "==" + ver,
                     "(" + str(i + 1) + "/24)", flush=True)
               time.sleep(15)
           sys.exit(pkg + "==" + ver + " never appeared on pypi")
@@ -409,6 +413,7 @@ jobs:
           esac
       - name: Final release failed verification — file yank issue
         if: ${{ failure() && needs.validate.outputs.is_rc == 'False' }}
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
