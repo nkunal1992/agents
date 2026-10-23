@@ -76,17 +76,34 @@ def daemon_http_status(cli: str = "confluence-knowledge") -> dict:
     one implementation so the flags can't drift. `ok=False` covers both
     'endpoint down' and 'daemon running older code than the installed
     package' (#226 — a live daemon after pip install -U still serves the
-    old code until restarted)."""
+    old code until restarted). For stdio registrations the endpoint is
+    optional — the proxy boots the daemon on demand, so a cold start
+    (no http.json yet) is healthy, not a failure."""
     check = {"flag": "daemon_http", "ok": False,
              "detail": "no http endpoint — daemon down or pre-#206",
              "remediation": f"{cli} doctor (self-heals the daemon)"}
     meta = _http_meta()
     if not meta:
+        if registered_transport(cli) == "stdio":
+            check.update(ok=True, remediation=None,
+                         detail=("no http endpoint — stdio entry: the "
+                                 "daemon starts on the first call"))
         return check
     import socket as _sock
-    with _sock.socket() as probe:
-        probe.settimeout(2)
-        probe.connect(("127.0.0.1", meta["port"]))
+    try:
+        with _sock.socket() as probe:
+            probe.settimeout(2)
+            probe.connect(("127.0.0.1", meta["port"]))
+    except OSError:
+        if registered_transport(cli) == "stdio":
+            check.update(ok=True, remediation=None,
+                         detail=(f"endpoint at 127.0.0.1:{meta['port']} "
+                                 "down — stdio entry: the proxy respawns "
+                                 "the daemon on the next call"))
+        else:
+            check["detail"] = (f"endpoint at 127.0.0.1:{meta['port']} "
+                               "down — daemon dead or stale URL")
+        return check
     check["detail"] = (f"mcp endpoint listening on "
                        f"127.0.0.1:{meta['port']}")
     check["ok"] = True
