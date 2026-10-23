@@ -98,6 +98,17 @@ jobs:
           python -m pip install --no-build-isolation             ./mcp/local-knowledge ./mcp/sharepoint-knowledge
           cd mcp/confluence-knowledge
           python -m pytest tests/e2e/sessions/ -x -q
+      - name: Upload daemon/watchdog logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-logs-${{ matrix.os }}
+          path: |
+            ~/.knowledge/daemon/**/*.log
+            ~/.knowledge/daemon/**/daemon.log
+            ~/.knowledge/daemon/**/watchdog.log
+            ~/Library/Caches/knowledge/daemon/**/*.log
+          if-no-files-found: ignore
       - name: Failure e2e — break the install, verify doctor flags + recovery
         shell: bash
         env:
