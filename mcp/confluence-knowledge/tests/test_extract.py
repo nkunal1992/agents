@@ -111,3 +111,44 @@ def test_adoc_extracts_as_text():
             f"deploy{ext}", b"= IDCT Guide\n\n== Setup\n\nrun the tool\n")
         assert chunks and not warns
         assert "Setup" in chunks[0].text or "Setup" in chunks[-1].text
+
+
+def _nested_table_docx():
+    import io
+
+    docx = pytest.importorskip("docx")
+    doc = docx.Document()
+    tbl = doc.add_table(rows=1, cols=2)
+    for r in range(60):
+        row = tbl.add_row()
+        row.cells[0].text = f"key{r}"
+        inner = row.cells[1].add_table(rows=8, cols=3)
+        for irow in inner.rows:
+            for c in irow.cells:
+                c.text = "value " * 10
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+
+
+def test_docx_nested_table_chunks_bounded():
+    """#242: descendant iter() walked nested-table rows/cells as if they
+    were the outer table's — a 39KB doc exploded into ~46k chunks and
+    embedded for tens of minutes. Direct-children iteration keeps the
+    count content-proportional; nested text lands once via tc.iter("t")."""
+    from confluence_knowledge.extract_files import extract_file_chunks
+    chunks, _ = extract_file_chunks("nested.docx", _nested_table_docx())
+    # pre-fix produced 46,332 — bound it well under a sane multiple
+    assert len(chunks) < 1500
+    assert any("value" in c.text for c in chunks)
+
+
+def test_table_with_oversized_header_row_does_not_fragment():
+    """#242: a ~250-word header row leaves ~1 word of budget per piece —
+    split_oversized fragmented every row into single-word chunks."""
+    from confluence_knowledge.extract import split_table_text
+    header = "Table — columns: " + " ".join(f"h{i}" for i in range(200))
+    rows = [f"row{i}: " + " ".join(f"cell{j}" for j in range(200))
+            for i in range(20)]
+    segs = split_table_text("\n".join([header] + rows))
+    assert len(segs) < 200
