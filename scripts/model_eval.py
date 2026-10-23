@@ -26,6 +26,8 @@ from confluence_knowledge.resources import plan_batches
 
 # (key, repo, onnx rel-path, params M) — ONNX+int8 verified on the hub
 CANDIDATES = [
+    ("arctic-xs (default)", "Snowflake/snowflake-arctic-embed-xs",
+     "onnx/model_quantized.onnx", 22),
     ("bge-m3 (old)", "Xenova/bge-m3",
      "onnx/sentence_transformers_quantized.onnx", 568),
     ("granite-small-r2", "onnx-community/granite-embedding-small-english-r2-ONNX",
