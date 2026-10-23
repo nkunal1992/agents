@@ -594,7 +594,7 @@ def _resume_job(scope_key: str, job_id: str) -> None:
                              else "rest/api/user/current").json()
             principal = (who.get("accountId") or who.get("userKey")
                          or who.get("username") or "?")
-        except Exception:               # noqa: BLE001,S110 — offline:
+        except Exception:               # noqa: BLE001 — offline:
             return                      # keep the job orphaned rather
     if profile.scope_key(principal, root) != scope_key:  # than guess
         return          # profile moved to another site — not ours
