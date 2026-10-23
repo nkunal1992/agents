@@ -287,7 +287,7 @@ def detached_spawn_kwargs() -> dict:
 _BREAKAWAY_FLAG = 0x01000000         # CREATE_BREAKAWAY_FROM_JOB
 
 
-def _popen_detached(argv: list, **kw) -> "subprocess.Popen":
+def _popen_detached(argv: list, **kw) -> subprocess.Popen:
     """Spawn detached — Windows Job objects may reject BREAKAWAY (the flag
     needs JOB_OBJECT_LIMIT_BREAKAWAY_OK), so retry without it once."""
     try:
