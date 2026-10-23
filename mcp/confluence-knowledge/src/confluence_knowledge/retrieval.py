@@ -99,6 +99,8 @@ MODEL_MARKER = (active_embed_spec()["marker"] + "+taskpre+" +
 # Back-compat aliases — a few call sites import the name, not the spec
 EMBED_REPO = active_embed_spec()["repo"]
 EMBED_MODEL_ID = active_embed_spec()["marker"]
+EMBED_ONNX = active_embed_spec()["onnx"]
+EMBED_ONNX_DATA = active_embed_spec()["onnx_data"]
 
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
@@ -295,8 +297,11 @@ class LocalEmbedder:
         # content-hash dedup — template/boilerplate strings repeat across
         # enterprise pages and embed identically; cache by sha256 so each
         # unique text pays the ONNX cost once per daemon life
-        prefix = (self._spec["query_prefix"] if query
-                  else self._spec["doc_prefix"])
+        # spec resolves per-instance at __init__; tests that build the
+        # object via __new__ (fake sessions) fall back to the active one
+        spec = getattr(self, "_spec", None) or active_embed_spec()
+        prefix = (spec["query_prefix"] if query
+                  else spec["doc_prefix"])
         if prefix:
             texts = [prefix + t for t in texts]
         import hashlib
@@ -344,7 +349,7 @@ class LocalEmbedder:
                     h = np.asarray(self._sess.run(
                         ["last_hidden_state"], feed)[0],
                         dtype=np.float32)
-                    if self._spec["pool"] == "cls":
+                    if spec["pool"] == "cls":
                         # arctic-embed: CLS pooling — first token's
                         # hidden state carries the sequence embedding
                         v = h[:, 0, :].astype(np.float32)

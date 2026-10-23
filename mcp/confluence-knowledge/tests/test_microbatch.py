@@ -4,7 +4,8 @@ so no model files are needed."""
 
 import numpy as np
 
-from confluence_knowledge.retrieval import LocalEmbedder, LocalReranker
+from confluence_knowledge.retrieval import (EMBED_SPECS, LocalEmbedder,
+                                            LocalReranker)
 
 
 class _FakeEnc:
@@ -40,9 +41,11 @@ class _FakeSess:
         return [np.arange(b, dtype=np.float32).reshape(b, 1)]
 
 
-def _embedder(sess, tok):
+def _embedder(sess, tok, spec=None):
+    from confluence_knowledge.retrieval import EMBED_SPECS
     emb = object.__new__(LocalEmbedder)
     emb._sess, emb._tok = sess, tok
+    emb._spec = spec or EMBED_SPECS["arctic-xs"]
     return emb
 
 
@@ -57,13 +60,13 @@ def test_embed_respects_batch_token_budget(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_BATCH_TOKENS", "100000")
     monkeypatch.setenv("KNOWLEDGE_MAX_BATCH", "4")
     sess, tok = _FakeSess(), _FakeTok()
-    emb = _embedder(sess, tok)
+    emb = _embedder(sess, tok, EMBED_SPECS["nomic"])
     texts = ["x" * 600, "a" * 20, "b" * 20, "c" * 20]
     out = emb.embed(texts)
     assert out.shape == (4, 8)
     # nomic task prefixes ride inside the input — "search_document: "
     # is 17 chars, so the fake's chars-as-tokens lengths all grow by 17
-    pad = len("search_document: ")
+    pad = len(EMBED_SPECS["nomic"]["doc_prefix"])
     for b, l in sess.calls:
         assert b * l * l <= 100_000 or b == 1  # the outlier alone
     assert max(l for b, l in sess.calls) == 600 + pad
@@ -123,12 +126,32 @@ def test_task_prefixes_split_roles_and_never_collide(monkeypatch):
             return [_FakeEnc(len(t)) for t in ts]
 
     sess, _ = _FakeSess(), None
-    emb = _embedder(sess, T())
+    emb = _embedder(sess, T(), EMBED_SPECS["nomic"])
     emb.embed(["alpha"])                  # document role
     emb.embed(["alpha"], query=True)      # query role — must re-embed
     assert len(emb._vec_cache) == 2
     assert seen[0] == "search_document: alpha"
     assert seen[1] == "search_query: alpha"
+
+
+def test_arctic_prefixes_split_roles(monkeypatch):
+    """#249: arctic's contract — queries carry 'Represent this
+    sentence…', documents ride bare; dedup still separates roles."""
+    seen = []
+
+    class T:
+        def encode_batch(self, ts, **k):
+            seen.extend(ts)
+            return [_FakeEnc(len(t)) for t in ts]
+
+    sess, _ = _FakeSess(), None
+    emb = _embedder(sess, T(), EMBED_SPECS["arctic-xs"])
+    emb.embed(["alpha"])                  # document role — no prefix
+    emb.embed(["alpha"], query=True)      # query role — arctic prefix
+    assert len(emb._vec_cache) == 2
+    assert seen[0] == "alpha"
+    assert seen[1].startswith(
+        "Represent this sentence for searching relevant passages:")
 
 
 def test_embed_masked_mean_all_padded_row(monkeypatch):
