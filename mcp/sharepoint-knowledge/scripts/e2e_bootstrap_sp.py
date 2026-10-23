@@ -172,8 +172,10 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
               "register: http entry points at the daemon's sp path",
               entry)
     else:
-        check(entry["command"] == str(vpy),
-              "register: points at the venv python")
+        check(entry["command"] == str(vpy)
+              or (os.name == "nt"
+                  and entry["command"] == str(vpy.with_name("pythonw.exe"))),
+              "register: points at the venv python (pythonw on Windows)")
 
     doctor = run([str(cli), "doctor"], env, "doctor: models + auth path")
     check('"configured": true' in doctor.stdout,
