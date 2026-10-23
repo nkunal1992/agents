@@ -278,8 +278,11 @@ Recover in order:
      keep waiting.
    - a `note` like "the computer slept" → relay it verbatim, keep
      polling — the crawl kept running in the background.
-   - `phase: paused: low memory` → free RAM is under the floor — waits
-     safely, resumes itself; tell the user once, keep waiting.
+   - `phase: paused: low memory` → free RAM is under the danger floor —
+     waits safely, resumes itself; tell the user once, keep waiting.
+   - `phase` starting `constrained: low memory` → below the comfort
+     floor but above danger — still working at reduced pace; relay
+     the figure once, keep waiting.
    - `phase` starting `resuming:` → the memory floor stayed unreachable —
      the crawl is working again anyway (bounded override); normal.
    - `phase` containing "battery saver" → throttled on battery — normal.

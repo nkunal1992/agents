@@ -12,6 +12,9 @@ from confluence_knowledge.jobs import Progress, crawl_control
 def _ctl(tmp_path, monkeypatch, pause_max=0.15, cooldown=0.3):
     monkeypatch.setattr(jobs, "_MEM_PAUSE_MAX_S", pause_max)
     monkeypatch.setattr(jobs, "_MEM_PAUSE_COOLDOWN_S", cooldown)
+    # pin availability under the danger floor — above it the guard
+    # runs constrained instead of pausing (#245)
+    monkeypatch.setattr(jobs, "_avail_mb", lambda: 200.0)
     idx = Index(tmp_path / "s.db")
     idx.create_job("j", "1")
     idx.save_job("j", "running", ["page:1"], [])
