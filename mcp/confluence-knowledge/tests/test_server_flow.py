@@ -12,6 +12,7 @@ import time
 import pytest
 
 from confluence_knowledge import server
+from confluence_knowledge.client import SecurityException
 from confluence_knowledge.settings import SiteProfile
 
 
@@ -253,3 +254,111 @@ def test_verify_citations_routes_to_daemon(monkeypatch, wired):
     out = server.verify_citations("scope:x", "set:1", [])
     assert seen["name"] == "verify_citations"
     assert out == {"ok": True}            # daemon answered — no local check
+
+
+class _TreeClient:
+    """Static DC tree for #240 alias tests:
+    1 "Root" → children 2 "Child" + 3 "Sibling"."""
+    _PAGES = {
+        "1": ("Root", "the root page", []),
+        "2": ("Child", "child only content", ["1"]),
+        "3": ("Sibling", "text text text text text", ["1"]),
+    }
+    _KIDS = {"1": ["2", "3"], "2": [], "3": []}
+
+    def get(self, path, params=None):
+        if "user/current" in path:
+            return _Resp({"username": "u"})
+        if "/child/page" in path:
+            pid = path.split("/content/")[1].split("/child")[0]
+            kids = self._KIDS[pid]
+            return _Resp({"results": [{"id": k, "type": "page"}
+                                      for k in kids],
+                          "size": len(kids), "limit": 200})
+        pid = path.rsplit("/", 1)[1]
+        title, body, anc = self._PAGES[pid]
+        return _Resp({"id": pid, "title": title,
+                      "body": {"storage": {"value": f"<p>{body}</p>"}},
+                      "version": {"number": 1},
+                      "ancestors": [{"id": a} for a in anc],
+                      "_links": {"webui": "/x", "base": "https://c"}})
+
+
+def _tree_crawl(wired, monkeypatch):
+    """connect("1") + crawl the 3-page tree to done; models faked."""
+    monkeypatch.setattr(server, "_client_for", lambda p: _TreeClient())
+    emb, rr = _FakeEmbedder(), _FakeReranker()
+    monkeypatch.setattr(server, "_embedder", lambda: emb)
+    monkeypatch.setattr(server, "_reranker", lambda: rr)
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    r = wait_done(c["scope_handle"], job["job_id"])
+    assert r["state"] == "done" and r["pages_seen"] == 3
+    return c
+
+
+def test_descendent_scope_answers_from_ancestor(wired, monkeypatch):
+    """#240: connect(B ⊂ indexed A) aliases reads into A's snapshot —
+    no new crawl, evidence restricted to B's subtree."""
+    _tree_crawl(wired, monkeypatch)
+    c = server.connect("2")
+    assert c["covered_by"] == "1" and c["cached"] is True
+    assert c["cached_pages"] == 1
+    res = server.search(c["scope_handle"], "text")
+    assert res["evidence"]
+    assert {e["page_id"] for e in res["evidence"]} == {"2"}
+    # sibling pages are denied even by direct chunk/page request
+    for pid in ("1", "3"):
+        with pytest.raises(SecurityException):
+            server.get_evidence(c["scope_handle"], page_id=pid)
+    q = res["evidence"][0]
+    v = server.verify_citations(c["scope_handle"], res["evidence_set"], [
+        {"claim": "x", "chunk_id": q["chunk_id"],
+         "quote": q["text"][:12]}])
+    assert v["ok"], v
+
+
+def test_descendent_alias_survives_restart(wired, monkeypatch):
+    """#240+#229: the alias persists in the scope's own index meta —
+    a daemon restart reconstructs the virtual binding offline."""
+    _tree_crawl(wired, monkeypatch)
+    c = server.connect("2")
+    server._scopes.clear()
+    server._evidence_sets.clear()
+    res = server.search(c["scope_handle"], "text")
+    assert res["evidence"] and \
+        {e["page_id"] for e in res["evidence"]} == {"2"}
+    q = res["evidence"][0]
+    v = server.verify_citations(c["scope_handle"], res["evidence_set"], [
+        {"claim": "x", "chunk_id": q["chunk_id"],
+         "quote": q["text"][:12]}])
+    assert v["ok"], v
+
+
+def test_descendent_materializes_on_start_crawl(wired, monkeypatch):
+    """#240: start_crawl on an aliased scope clones the subtree into its
+    own index first — the alias clears and the scope becomes standalone."""
+    _tree_crawl(wired, monkeypatch)
+    c = server.connect("2")
+    assert c.get("covered_by") == "1"
+    job = server.start_crawl(c["scope_handle"])
+    r = wait_done(c["scope_handle"], job["job_id"])
+    assert r["state"] == "done"
+    s = server._scopes[c["scope_handle"]]
+    assert "reads_from" not in s
+    res = server.search(c["scope_handle"], "text")
+    assert {e["page_id"] for e in res["evidence"]} == {"2"}
+
+
+def test_descendent_alias_needs_same_principal(wired, monkeypatch):
+    """#240 security: an ancestor index built under a different account
+    must never serve this connection — alias is refused, scope stays
+    empty."""
+    _tree_crawl(wired, monkeypatch)
+    # rewrite A's principal stamp — simulates an index from another user
+    a = server._scopes[server.connect("1")["scope_handle"]]["key"]
+    server._index_for(a).meta_set("principal", "someone-else")
+    c = server.connect("2")
+    assert "covered_by" not in c and c["cached"] is False
+    res = server.search(c["scope_handle"], "text")
+    assert res["evidence"] == [] and res["coverage"] == "empty"

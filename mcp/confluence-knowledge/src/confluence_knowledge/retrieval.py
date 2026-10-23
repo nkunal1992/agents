@@ -578,19 +578,34 @@ def _bm25_idf(df: dict[int, int] | None, n_docs: int, t: int) -> float:
 
 def retrieve(index: Index, query: str, embedder: LocalEmbedder,
              reranker: LocalReranker | None = None,
-             sparse: LocalSparseEmbedder | None = None) -> list[dict]:
+             sparse: LocalSparseEmbedder | None = None,
+             allow_chunks: set[str] | None = None) -> list[dict]:
     """Dense + sparse + FTS → RRF fuse → rerank → bounded evidence.
 
     Ranks over the index's per-snapshot search cache (dense matrix +
     inverted sparse index + id set) — a query costs one matmul and one
     sparse accumulate, not a whole-scope reload from SQLite.
+
+    `allow_chunks` restricts candidates to a subset — the #240
+    descendent-alias filter: a virtual scope reads its ancestor's index
+    through its own subtree's chunk set, so sibling pages never bleed
+    into evidence.
     """
     cache = index.search_cache()
     if not cache.ids:
         return []
-    if len(cache.ids) > MAX_SEARCHABLE_CHUNKS:
+    if allow_chunks is None:
+        allowed = cache.ids
+        pos = None                    # identity — whole cache
+    else:
+        allowed = [c for c in cache.ids if c in allow_chunks]
+        pos = np.asarray([cache.row[c] for c in allowed],
+                         dtype=np.int64)
+    if not allowed:
+        return []
+    if len(allowed) > MAX_SEARCHABLE_CHUNKS:
         raise SetupError(
-            f"index holds {len(cache.ids):,} chunks — searching the whole "
+            f"index holds {len(allowed):,} chunks — searching the whole "
             "scope at once is unsupported. Connect a narrower scope (or "
             "re-index with a smaller root).")
 
@@ -598,20 +613,22 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     # query touches ~61 MB instead of re-decoding every vector blob
     dense_rank: list[str] = []
     qvec = embedder.embed([query], query=True)[0].astype(np.float32)
-    if cache.dense.shape[0] and cache.dense.shape[1] == qvec.shape[0]:
+    dense = cache.dense if pos is None else cache.dense[pos]
+    if dense.shape[0] and dense.shape[1] == qvec.shape[0]:
         q = qvec / (np.linalg.norm(qvec) + 1e-9)
-        scores = np.empty(len(cache.ids), dtype=np.float32)
-        for off in range(0, len(cache.ids), 4096):
+        scores = np.empty(len(allowed), dtype=np.float32)
+        for off in range(0, len(allowed), 4096):
             scores[off:off + 4096] = \
-                cache.dense[off:off + 4096].astype(np.float32) @ q
-        k = min(TOP_K_RETRIEVE, len(cache.ids))
+                dense[off:off + 4096].astype(np.float32) @ q
+        k = min(TOP_K_RETRIEVE, len(allowed))
         top = np.argpartition(-scores, k - 1)[:k]
         top = top[np.argsort(-scores[top])]
-        dense_rank = [cache.ids[i] for i in top]
+        dense_rank = [allowed[i] for i in top]
 
     # keyword leg — FTS filtered by the cached active-id set
+    fts_active = cache.ids_set if allow_chunks is None else set(allowed)
     fts_rank = [cid for cid, _ in
-                index.fts_search(query, active=cache.ids_set)
+                index.fts_search(query, active=fts_active)
                 ][:TOP_K_RETRIEVE]
 
     # sparse leg — accumulate postings only for the query's terms
@@ -628,6 +645,8 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
                 sscores[rows] += np.float32(
                     qw * _bm25_idf(cache.df, cache.n_docs, t)) * wts
         nz = np.flatnonzero(sscores)
+        if pos is not None:
+            nz = np.intersect1d(nz, pos, assume_unique=True)
         if nz.size:
             top = nz[np.argsort(-sscores[nz])][:TOP_K_RETRIEVE]
             sparse_rank = [cache.ids[i] for i in top]

@@ -253,6 +253,11 @@ Recover in order:
    real account, so pre-upgrade caches are unreachable by design.)
 3. **Freshness nudge.** `cached` true → "I found a previously cached index
    of this scope from `<cached_as_of>`. Use it, or refresh first?" — wait.
+   - If `covered_by` is present, the item lives inside an already-indexed
+     ancestor scope — answers come from that index filtered to this
+     subtree. Say so: "This is inside `<covered_by>` which I indexed on
+     `<cached_as_of>` — I'll answer from that index. Say 're-index' for
+     a dedicated index." `start_crawl` then materializes it.
 4. **Crawl.** `start_crawl` → **background crawl** — the server indexes
    on its own and posts a desktop notification when it finishes. Say what
    started: "Crawling in the background — I'll keep you posted." Then

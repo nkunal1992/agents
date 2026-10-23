@@ -318,6 +318,14 @@ Recover in order:
    `<cached_as_of>`. I will use this to answer your question. Would you like
    me to refresh the crawl to check for recent updates?" — wait for the
    answer before searching.
+   - If `covered_by` is present, the requested root lives inside an
+     already-indexed ancestor scope — answers come from the ancestor's
+     index filtered to the requested subtree. Say so:
+     "This page is inside `<covered_by>` which I indexed on
+     `<cached_as_of>` — I'll answer from that index. Say 're-index' if
+     you want a dedicated index for just this subtree."
+     `start_crawl` then materializes the dedicated index (unchanged
+     pages keep their embeddings — it is far cheaper than a cold crawl).
 4. **Crawl.** If no cache or refresh requested: `start_crawl` begins a
    **background crawl** — the server indexes the whole subtree on its own,
    and posts a desktop notification when it finishes. Say what started:
