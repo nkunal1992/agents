@@ -42,7 +42,7 @@ EMBED_SPECS = {
     "arctic-xs": {
         "lock_key": "embed",
         "repo": "Snowflake/snowflake-arctic-embed-xs",
-        "onnx": "onnx/model.onnx",
+        "onnx": "onnx/model_quantized.onnx",
         "onnx_data": None,
         "dim": 384,
         "max_tokens": 512,

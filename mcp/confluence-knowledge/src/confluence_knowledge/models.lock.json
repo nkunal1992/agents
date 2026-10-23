@@ -44,20 +44,22 @@
       "repo": "Snowflake/snowflake-arctic-embed-xs",
       "revision": "d8c86521100d3556476a063fc2342036d45c106f",
       "license": "Apache-2.0",
-      "note": "fast English default (#249): 22M, 384-dim, 512-ctx \u2014 measured 62 chunks/s vs nomic's ~7 on real corpus text (~8.6x) at 7/10 probe-recall parity. CLS pooling + 'Represent this sentence\u2026' query prefix. Non-BAAI per workspace policy.",
+      "note": "fast English default (#249): 22M, 384-dim, 512-ctx \u2014 measured 62 chunks/s vs nomic's ~7 on real corpus text (~8.6x) at 7/10 probe-recall parity. int8-quantized ONNX, CLS pooling + 'Represent this sentence\u2026' query prefix. Non-BAAI per workspace policy.",
       "files": [
-        "onnx/model.onnx",
+        "onnx/model_quantized.onnx",
         "tokenizer.json",
         "tokenizer_config.json",
         "config.json",
-        "special_tokens_map.json"
+        "special_tokens_map.json",
+        "README.md"
       ],
       "sha256": {
-        "onnx/model.onnx": "cf2698d30ff05da02c70a088313bad56e5c2f401d734cb24a8390d446111936c",
+        "onnx/model_quantized.onnx": "e6aa5e656466a73d7c3111e9a3378bd13e5b93af30eaac2b3f13fd56692589a1",
         "tokenizer.json": "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854",
         "tokenizer_config.json": "9ca59277519f6e3692c8685e26b94d4afca2d5438deff66483db495e48735810",
         "config.json": "d7d071046ab952af96b7abad788db7ab3fc997b465e1b9914ff39707092254ec",
-        "special_tokens_map.json": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"
+        "special_tokens_map.json": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a",
+        "README.md": "6bfaf51250f5360e505272dde4a9ffcdc41bf66b090d68e8f9ecc4807ab80507"
       }
     },
     "embed_large": {
