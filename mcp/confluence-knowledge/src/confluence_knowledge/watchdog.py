@@ -165,6 +165,19 @@ def stop_daemon(home: Path, timeout: float = 8) -> dict:
     return out
 
 
+def restart_daemon(home: Path, timeout: float = 8) -> None:
+    """Doctor/upgrade path — stop the pair and spawn a fresh daemon, then
+    CLEAR the stop-file so the new watchdog actually runs. Distinct from
+    `stop_daemon`'s "user wants it off" semantics: here the intent is
+    restart, so the marker must not survive or the watchdog refuses to
+    loop and the daemon ends up watchdog-less (#226)."""
+    stop_daemon(home, timeout=timeout)
+    (home / _STOP_FILE).unlink(missing_ok=True)
+    from .rpc import RpcDb, ensure_daemon
+    ensure_daemon(RpcDb(home / "rpc.db"))
+    spawn_watchdog(home)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s watchdog %(message)s")

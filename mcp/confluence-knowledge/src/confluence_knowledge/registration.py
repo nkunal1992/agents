@@ -37,13 +37,72 @@ def _server_entry(workdir: Path | None, module: str, env_var: str,
                     "url": f"http://127.0.0.1:{meta['port']}/"
                            f"{server_id}/mcp?token={meta['token']}",
                     "headers": {"Authorization": f"Bearer {meta['token']}"}}
+    exe = sys.executable            # the venv python — no PATH guessing
+    if sys.platform == "win32":
+        # pythonw.exe has no console — a python.exe proxy per IDE window
+        # would pop a terminal per spawn on Windows (#226)
+        wexe = Path(exe).with_name("pythonw.exe")
+        if wexe.exists():
+            exe = str(wexe)
     entry = {
-        "command": sys.executable,  # the venv python — no PATH guessing
+        "command": exe,
         "args": ["-m", module],
     }
     if workdir is not None:
         entry["env"] = {env_var: str(workdir)}
     return entry
+
+
+def _daemon_services_version(meta: dict) -> str | None:
+    """The running daemon's package version from /_services — None when
+    unreachable or the field is absent (pre-#226 daemons report only
+    services). Loopback URL is built from our own http.json."""
+    try:
+        import urllib.request as _req
+        req = _req.Request(
+            f"http://127.0.0.1:{meta['port']}/_services",
+            headers={"Authorization": f"Bearer {meta['token']}"})
+        if not req.full_url.startswith("http://127.0.0.1:"):
+            return None
+        with _req.urlopen(req, timeout=2) as r:     # nosec B310
+            return _json.loads(r.read()).get("version")
+    except Exception:                               # noqa: BLE001,S110
+        return None
+
+
+def daemon_http_status(cli: str = "confluence-knowledge") -> dict:
+    """The daemon_http health check, shared by every service's status —
+    one implementation so the flags can't drift. `ok=False` covers both
+    'endpoint down' and 'daemon running older code than the installed
+    package' (#226 — a live daemon after pip install -U still serves the
+    old code until restarted)."""
+    check = {"flag": "daemon_http", "ok": False,
+             "detail": "no http endpoint — daemon down or pre-#206",
+             "remediation": f"{cli} doctor (self-heals the daemon)"}
+    meta = _http_meta()
+    if not meta:
+        return check
+    import socket as _sock
+    with _sock.socket() as probe:
+        probe.settimeout(2)
+        probe.connect(("127.0.0.1", meta["port"]))
+    check["detail"] = (f"mcp endpoint listening on "
+                       f"127.0.0.1:{meta['port']}")
+    check["ok"] = True
+    dver = _daemon_services_version(meta)
+    if dver and dver != "unknown":
+        try:
+            import importlib.metadata as _im
+            installed = _im.version("confluence-knowledge")
+        except Exception:                           # noqa: BLE001
+            installed = None
+        if installed and dver != installed:
+            check.update(ok=False,
+                         detail=(f"daemon running {dver}, installed "
+                                 f"{installed} — restart picks up the fix"))
+        else:
+            check["detail"] += f" (v{dver})"
+    return check
 
 
 def _http_meta(workdir: Path | None = None) -> dict | None:
@@ -242,6 +301,22 @@ def register(ide: str = "auto", workspace: Path | None = None,
                              protected=())
         out.append((f, _merge(f, entry, server_id)))
     return out
+
+
+def registered_transport(server_id: str = SERVER_ID) -> str | None:
+    """The transport our registered entry currently uses — 'url' means
+    http, 'command' means stdio. Doctor's self-heal rewrites the entry
+    with the SAME type so an http user's URL refreshes while a stdio
+    user's choice is preserved (#226)."""
+    for p in targets("all"):
+        try:
+            entry = (json.loads(p.read_text())
+                     .get("servers", {}).get(server_id))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(entry, dict):
+            return "http" if "url" in entry else "stdio"
+    return None
 
 
 def registered_paths(server_id: str = SERVER_ID,

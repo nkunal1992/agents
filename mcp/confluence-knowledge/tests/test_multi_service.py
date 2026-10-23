@@ -199,6 +199,104 @@ def test_detached_spawn_kwargs_windows(monkeypatch):
     assert kw["close_fds"]
 
 
+def test_daemon_http_status_flags_stale(tmp_path, monkeypatch):
+    """#226: a daemon alive on the port but reporting an OLDER package
+    version than the installed one must read as not-ok — 'alive' is not
+    'current'; `pip install -U` doesn't restart the running process."""
+    import json
+    from confluence_knowledge import registration as reg
+    (tmp_path / "http.json").write_text(
+        json.dumps({"port": 9, "token": "t"}))
+    monkeypatch.setattr(reg, "_http_meta", lambda w=None:
+                        {"port": 9, "token": "t"})
+    monkeypatch.setattr(reg.socket if hasattr(reg, "socket") else
+                        __import__("socket"), "socket", None) if False else None
+    import socket
+    class _Probe:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def settimeout(self, t): pass
+        def connect(self, addr): pass
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: _Probe())
+    monkeypatch.setattr(reg, "_daemon_services_version",
+                        lambda meta: "0.11.0")
+    import importlib.metadata as im
+    monkeypatch.setattr(im, "version", lambda p: "0.11.2")
+    c = reg.daemon_http_status()
+    assert not c["ok"], "alive-but-stale daemon must flag not-ok"
+    assert "0.11.0" in c["detail"] and "0.11.2" in c["detail"]
+
+
+def test_daemon_http_status_healthy(tmp_path, monkeypatch):
+    """#226: same-version daemon → ok with the version surfaced."""
+    from confluence_knowledge import registration as reg
+    monkeypatch.setattr(reg, "_http_meta", lambda w=None:
+                        {"port": 9, "token": "t"})
+    import socket
+    class _Probe:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def settimeout(self, t): pass
+        def connect(self, addr): pass
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: _Probe())
+    monkeypatch.setattr(reg, "_daemon_services_version",
+                        lambda meta: "0.11.2")
+    import importlib.metadata as im
+    monkeypatch.setattr(im, "version", lambda p: "0.11.2")
+    c = reg.daemon_http_status()
+    assert c["ok"] and "0.11.2" in c["detail"]
+
+
+def test_restart_daemon_clears_stop_file(tmp_path, monkeypatch):
+    """#226: restart intent must remove .watchdog.stop — a fresh marker
+    would leave the new daemon watchdog-less (the watchdog loop exits
+    while it exists)."""
+    from confluence_knowledge import watchdog
+    (tmp_path / ".watchdog.stop").write_text("1")
+    calls = []
+    monkeypatch.setattr(watchdog, "stop_daemon",
+                        lambda home, timeout=8: calls.append("stop"))
+    monkeypatch.setattr(watchdog, "spawn_watchdog",
+                        lambda home: calls.append("spawn"))
+    import confluence_knowledge.rpc as rpc_mod
+    monkeypatch.setattr(rpc_mod, "ensure_daemon",
+                        lambda rpc, env=None: calls.append("ensure"))
+    watchdog.restart_daemon(tmp_path)
+    assert calls == ["stop", "ensure", "spawn"], calls
+    assert not (tmp_path / ".watchdog.stop").exists()
+
+
+def test_registered_transport(tmp_path, monkeypatch):
+    """#226: doctor rewrites the entry with the user's own transport —
+    url entries are http, command entries are stdio."""
+    import json
+    from confluence_knowledge import registration as reg
+    mcp = tmp_path / "mcp.json"
+    mcp.write_text(json.dumps(
+        {"servers": {"confluence-knowledge": {"url": "http://x"}}}))
+    monkeypatch.setattr(reg, "targets", lambda *a, **k: [mcp])
+    assert reg.registered_transport() == "http"
+    mcp.write_text(json.dumps(
+        {"servers": {"confluence-knowledge": {"command": "py"}}}))
+    assert reg.registered_transport() == "stdio"
+    monkeypatch.setattr(reg, "targets", lambda *a, **k: [])
+    assert reg.registered_transport() is None
+
+
+def test_stdio_entry_prefers_pythonw_on_windows(tmp_path, monkeypatch):
+    """#226: win32 proxies spawn per IDE window — python.exe would flash
+    a console each time; pythonw.exe never does."""
+    import sys
+    from confluence_knowledge import registration as reg
+    fake_py = tmp_path / "python.exe"
+    fake_pyw = tmp_path / "pythonw.exe"
+    fake_py.write_text("x"); fake_pyw.write_text("x")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "executable", str(fake_py))
+    e = reg._server_entry(None, "m", "E")
+    assert e["command"].endswith("pythonw.exe"), e["command"]
+
+
 def test_detached_spawn_kwargs_posix():
     """#220: POSIX keeps setsid — unchanged behaviour on macOS/Linux."""
     import os

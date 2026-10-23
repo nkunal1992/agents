@@ -273,22 +273,9 @@ def status() -> dict:
         # points at the daemon's URL — a dead daemon or stale port means
         # tools go unreachable until doctor self-heals it
         try:
-            from confluence_knowledge.registration import _http_meta
-            meta = _http_meta()
-            up = False
-            if meta:
-                import socket as _sock
-                with _sock.socket() as probe:
-                    probe.settimeout(2)
-                    probe.connect(("127.0.0.1", meta["port"]))
-                    up = True
-            checks.append({
-                "flag": "daemon_http", "ok": up,
-                "detail": ("mcp endpoint listening on 127.0.0.1:"
-                           f"{meta['port']}" if up else
-                           "no http endpoint — daemon down or pre-#206"),
-                "remediation": None if up else
-                "doctor self-heals the daemon"})
+            from confluence_knowledge.registration import \
+                daemon_http_status
+            checks.append(daemon_http_status("local-knowledge"))
         except Exception:                       # noqa: BLE001,S110 —
             pass                                # status must never fail
     last = None

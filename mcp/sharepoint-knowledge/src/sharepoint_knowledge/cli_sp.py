@@ -135,19 +135,21 @@ def _doctor() -> int:
     if any(c["flag"] == "daemon_http" and not c["ok"]
            for c in s.get("checks", [])):
         try:
-            from confluence_knowledge.registration import register
-            from confluence_knowledge.rpc import RpcDb, ensure_daemon
+            from confluence_knowledge.registration import (
+                register, registered_transport)
             from confluence_knowledge.settings import daemon_home
+            from confluence_knowledge.watchdog import restart_daemon
             root = daemon_home()
-            ensure_daemon(RpcDb(root / "rpc.db"))
-            results = register(transport="http", workdir=root,
+            restart_daemon(root)       # restarts alive-but-stale too
+            t = (registered_transport(APP_NAME) or "http")
+            results = register(transport=t, workdir=root,
                                server_id=APP_NAME, module=MODULE,
                                env_var=ENV_VAR)
-            print(f"self-heal: daemon restarted, http entry refreshed "
-                  f"in {len(results)} config(s)")
+            print(f"self-heal: daemon restarted, server entry "
+                  f"refreshed ({t}) in {len(results)} config(s)")
         except Exception as e:                  # noqa: BLE001
             print(f"self-heal failed: {e} — run "
-                  "register --transport http", file=sys.stderr)
+                  "register", file=sys.stderr)
     if upd["update_available"]:
         print("update available: run `sharepoint-knowledge update` "
               "(soaked release, self-tested, rolls back on failure)")
@@ -179,12 +181,14 @@ def main() -> None:
                      default="auto")
     reg.add_argument("--workspace", default=None,
                      help="repo dir for the workspace .vscode/mcp.json")
-    reg.add_argument("--transport", choices=["http", "stdio"],
-                     default="http",
-                     help="server entry type — http (default): the daemon's "
-                          "localhost endpoint; the IDE reconnects per request "
-                          "so a dead or suspended session never needs a "
-                          "reload (#206). stdio: per-window child process")
+    reg.add_argument("--transport", choices=["stdio", "http"],
+                     default="stdio",
+                     help="server entry type — stdio (default): a per-window "
+                          "proxy owns the IDE session, so daemon restarts "
+                          "stay invisible — no IDE reload ever (#226). "
+                          "http: the daemon's shared localhost endpoint — "
+                          "one URL for every window, but a restart stales "
+                          "the session until a reload")
     reg.add_argument("--remove", action="store_true",
                      help="remove our server entry instead of adding it")
     sub.add_parser("serve", help="run the stdio MCP server")

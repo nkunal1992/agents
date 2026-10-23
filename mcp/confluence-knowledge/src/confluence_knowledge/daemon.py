@@ -61,6 +61,16 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _pkg_version() -> str:
+    """The installed engine version the daemon's code came from — lets a
+    status check tell 'daemon running 0.11.0 code, package 0.11.1' so an
+    upgrade actually reaches the running process (#222 follow-up)."""
+    try:
+        return importlib.metadata.version("confluence-knowledge")
+    except Exception:                           # noqa: BLE001 — editable
+        return "unknown"
+
+
 def _bearer_app(app, token: str):
     """ASGI middleware — loopback is still a multi-user surface; every
     request must carry the per-venv bearer from http.json."""
@@ -227,7 +237,8 @@ class Daemon:
                     yield
 
             async def services_endpoint(_request):
-                return JSONResponse({"services": sorted(apps)})
+                return JSONResponse({"services": sorted(apps),
+                                     "version": _pkg_version()})
 
             routes = [Mount(f"/{name}", app=app)
                       for name, app in apps.items()]
