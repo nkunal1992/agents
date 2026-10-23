@@ -33,7 +33,7 @@ def test_models_complete_green_when_full(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     for name, files in (
-            ("nomic-embed-text-v1.5",
+            ("snowflake-arctic-embed-xs",
              ["onnx/model_quantized.onnx",
               "tokenizer.json", "tokenizer_config.json",
               "config.json", "special_tokens_map.json",

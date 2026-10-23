@@ -79,11 +79,13 @@ def run(home: Path, server_module: str) -> dict:
         from .health import health_checks
         checks = health_checks(home, home, "selftest", "selftest",
                                index_root=None)
+        from .retrieval import active_embed_spec
         bad = [c["flag"] for c in checks
                if not c["ok"] and c["flag"] in
                {"deps", "models_complete"} | {
                    f"model_{k}" for k in
-                   ("embed", "rerank", "rerank_light", "sparse")}]
+                   (active_embed_spec()["lock_key"],
+                    "rerank", "rerank_light", "sparse")}]
         stages.append({"stage": "health", "ok": not bad,
                        "detail": "red: " + ", ".join(bad) if bad
                                  else "deps + models ok"})
