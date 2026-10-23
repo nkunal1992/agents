@@ -47,8 +47,13 @@ _POLL_S = 0.15
 
 
 def _port_free(port: int) -> bool:
+    # SO_REUSEADDR to match the server's own bind — a plain probe fails
+    # while the killed daemon's client sockets are still in TIME_WAIT,
+    # which would send the respawn to a NEW port and orphan every
+    # registered IDE URL (the exact no-reload contract this exists for)
     try:
         with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("127.0.0.1", port))
         return True
     except OSError:
