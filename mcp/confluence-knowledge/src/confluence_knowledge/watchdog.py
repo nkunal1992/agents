@@ -55,12 +55,13 @@ def spawn_watchdog(home: Path) -> None:
     env = dict(os.environ)
     env["KNOWLEDGE_WATCHDOG_ROLE"] = "1"
     try:
-        proc = subprocess.Popen(
+        from .rpc import _popen_detached, detached_spawn_kwargs
+        proc = _popen_detached(
             [sys.executable, "-m", "confluence_knowledge.watchdog",
              str(home)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=open(home / "watchdog.log", "ab"),   # noqa: SIM115
-            env=env, start_new_session=True)
+            env=env, **detached_spawn_kwargs())
         (home / _PID_FILE).write_text(str(proc.pid))
     except Exception:
         log.warning("watchdog spawn failed", exc_info=True)

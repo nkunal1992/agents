@@ -266,6 +266,39 @@ def lease_label(owner: str | None) -> str:
     return "another server process"
 
 
+def detached_spawn_kwargs() -> dict:
+    """Popen kwargs that detach the child from its spawning console/session —
+    #220: `start_new_session` alone only maps to CREATE_NEW_PROCESS_GROUP on
+    Windows, so the daemon/watchdog died when the agent's terminal (or the
+    IDE's session) closed. POSIX keeps setsid; Windows gets a real
+    console-free detach plus a best-effort escape from Job objects."""
+    if os.name == "nt":
+        # literal win32 CreateProcess flag values — subprocess only exposes
+        # them as constants on Windows builds; literals keep this testable
+        # on POSIX and the values are stable ABI
+        _DETACHED_PROCESS = 0x00000008
+        _CREATE_NO_WINDOW = 0x08000000
+        _BREAKAWAY = 0x01000000        # CREATE_BREAKAWAY_FROM_JOB
+        return {"creationflags": (_DETACHED_PROCESS | _CREATE_NO_WINDOW
+                                  | _BREAKAWAY), "close_fds": True}
+    return {"start_new_session": True}
+
+
+_BREAKAWAY_FLAG = 0x01000000         # CREATE_BREAKAWAY_FROM_JOB
+
+
+def _popen_detached(argv: list, **kw) -> "subprocess.Popen":
+    """Spawn detached — Windows Job objects may reject BREAKAWAY (the flag
+    needs JOB_OBJECT_LIMIT_BREAKAWAY_OK), so retry without it once."""
+    try:
+        return subprocess.Popen(argv, **kw)
+    except OSError:
+        if os.name == "nt" and kw.get("creationflags"):
+            kw = {**kw, "creationflags": kw["creationflags"] & ~_BREAKAWAY_FLAG}
+            return subprocess.Popen(argv, **kw)
+        raise
+
+
 def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
     """Spawn the shared daemon lazily if no live owner holds the lease.
     Racing proxies may double-spawn — self-correcting: the loser's
@@ -295,18 +328,19 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         cli_env["KNOWLEDGE_DAEMON_ROLE"] = "1"   # the brain never proxies
         if env:
             cli_env.update(env)
-        proc = subprocess.Popen(
+        proc = _popen_detached(
             [sys.executable, "-m", "confluence_knowledge.daemon",
              str(workdir)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             # fd stays open for the child's lifetime — Popen owns it
             stderr=open(workdir / "daemon.log", "ab"),   # noqa: SIM115
             env=cli_env,
-            start_new_session=True)      # detached — survives IDE exit
+            **detached_spawn_kwargs())   # survives console/IDE exit
         pid_path.write_text(str(proc.pid))
         # wait for the child to take the lease — sequential proxy calls
-        # would otherwise each spawn (boot is ~1-2 s)
-        deadline = time.monotonic() + 8
+        # would otherwise each spawn. Generous bound: a cold Windows boot
+        # (package import + AV scan) can exceed 10 s (#220).
+        deadline = time.monotonic() + 20
         while time.monotonic() < deadline and not rpc.daemon_alive():
             time.sleep(0.1)
         if not rpc.daemon_alive():
@@ -317,7 +351,7 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         # failed first connection (#206 cold-boot race)
         import json as _json
         import socket as _sock
-        http_deadline = time.monotonic() + 8
+        http_deadline = time.monotonic() + 20
         while time.monotonic() < http_deadline:
             try:
                 meta = _json.loads((workdir / "http.json").read_text())

@@ -182,6 +182,57 @@ def test_ensure_daemon_respects_fresh_stop_file(tmp_path, monkeypatch):
     assert spawned, "daemon never spawned after stale stop cleared"
 
 
+def test_detached_spawn_kwargs_windows(monkeypatch):
+    """#220: on Windows the daemon/watchdog must fully detach from the
+    spawning console — `start_new_session` only maps to
+    CREATE_NEW_PROCESS_GROUP, leaving the child console-attached so it
+    dies when the agent's terminal or the IDE session closes. The fix
+    uses DETACHED_PROCESS + CREATE_NO_WINDOW (+ BREAKAWAY from Job
+    objects) with no start_new_session."""
+    import os
+    import confluence_knowledge.rpc as rpc_mod
+    monkeypatch.setattr(os, "name", "nt")
+    kw = rpc_mod.detached_spawn_kwargs()
+    assert "start_new_session" not in kw, \
+        "POSIX-style session detach does not detach a Windows console"
+    assert kw["creationflags"], "Windows spawn must carry detach flags"
+    assert kw["close_fds"]
+
+
+def test_detached_spawn_kwargs_posix():
+    """#220: POSIX keeps setsid — unchanged behaviour on macOS/Linux."""
+    import os
+    import confluence_knowledge.rpc as rpc_mod
+    if os.name == "nt":
+        return                     # covered by the windows case above
+    assert rpc_mod.detached_spawn_kwargs() == {"start_new_session": True}
+
+
+def test_popen_detached_breakaway_retry(monkeypatch):
+    """#220: CREATE_BREAKAWAY_FROM_JOB can be denied when the parent's Job
+    object disallows breakaway — the spawn must retry without it rather
+    than fail the whole ensure_daemon."""
+    import os
+    import confluence_knowledge.rpc as rpc_mod
+    monkeypatch.setattr(os, "name", "nt")
+    class _Proc:
+        pid = 4243
+    flags_seen = []
+    def _pop(argv, **kw):
+        flags_seen.append(kw.get("creationflags", 0))
+        if len(flags_seen) == 1:
+            raise OSError("Access is denied")
+        return _Proc()
+    monkeypatch.setattr(rpc_mod.subprocess, "Popen", _pop)
+    base = rpc_mod.detached_spawn_kwargs()["creationflags"]
+    rpc_mod._popen_detached(["x"], creationflags=base)
+    assert len(flags_seen) == 2, "the denied breakaway must retry once"
+    assert flags_seen[0] & rpc_mod._BREAKAWAY_FLAG, \
+        "first attempt must carry the breakaway flag"
+    assert not flags_seen[1] & rpc_mod._BREAKAWAY_FLAG, \
+        "the denied retry must drop breakaway, keep the detach bits"
+
+
 def test_stop_never_signals_pid_reused_foreign_process(tmp_path):
     """Bug hunt: a stale .daemon.pid file (or a fresh lease row) that
     now points at an unrelated process must NOT be SIGTERMed — pid

@@ -188,11 +188,21 @@ Recover in order:
 2. Still down → run `sharepoint-knowledge doctor` via `execute` — it
    checks the daemon's http endpoint, restarts the daemon, and rewrites
    the registered URL if the port drifted. Then retry `status`.
-3. Only if doctor can't heal → tell the user exactly: "the local
-   knowledge service can't be reached — open the IDE's MCP server panel
-   and restart sharepoint-knowledge, or reload the window once." The
-   crawl keeps running either way; `status`/`last_crawl` picks it up.
-4. **Never emit the "not documented" refusal here** — the failure is
+3. Still down → **diagnose before dead-ending** — read the
+   daemon's own logs: `~/.knowledge/daemon/*/daemon.log` and
+   `watchdog.log` (`read` them, or `execute` a `tail`/`type`). Relay
+   the last real error to the user — never say just "unreachable".
+   If doctor printed `self-heal failed: <e>` that's the diagnosis —
+   report `<e>` verbatim.
+4. If the daemon won't stay up — especially on Windows, where a
+   closing terminal can take it down — `sharepoint-knowledge register --transport
+   stdio` then reload once: the IDE spawns the service per session
+   and it brings the daemon up itself.
+5. Only then → tell the user exactly: "the local knowledge service
+   can't be reached — open the IDE's MCP server panel and restart
+   sharepoint-knowledge, or reload the window once." The crawl keeps running either
+   way; `status`/`last_crawl` picks it back up.
+6. **Never emit the "not documented" refusal here** — the failure is
    connectivity, not evidence.
 
 ## Daemon lifecycle (the shared service behind the tools)

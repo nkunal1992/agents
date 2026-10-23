@@ -78,3 +78,21 @@ Structured record of every failure hit during the RC runs and how each was resol
 - **Fix**: replaced the bash loop + second check with a single Python
   call carrying its own 24×15s retry — no `seq`, no set -e interplay,
   no split-check race. Verified against live PyPI.
+
+## ISSUE-006 — Windows daemon dies with the agent's console (post-0.11.0 field report)
+
+- **Report**: first real-world run on a Windows laptop — install +
+  register + reload OK, then every `status` ✗, doctor's self-heal
+  "timed out", agent dead-ended before credentials.
+- **Root cause**: `ensure_daemon`/`spawn_watchdog` used
+  `start_new_session=True`, which maps to CREATE_NEW_PROCESS_GROUP on
+  Windows — the daemon/watchdog stay console-attached and die when the
+  spawning shell/IDE terminal closes. `register`'s http URL then
+  points at a dead port. Cold-boot imports also exceed the 8 s
+  spawn-ready deadlines.
+- **Fix**: `detached_spawn_kwargs()` — DETACHED_PROCESS |
+  CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB (breakaway retried
+  without on denied job objects); deadlines 8→20 s; playbook now has
+  the agent read daemon.log/watchdog.log and try `register
+  --transport stdio` before dead-ending.
+- **Release**: 0.11.1 patch — sisters' `~=0.11.0` picks it up.
