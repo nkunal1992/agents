@@ -350,8 +350,12 @@ Recover in order:
    Use `crawl_step` only for an instant snapshot between waits.
    - `note: loading local models` or `phase: starting` → the crawl is
      queued while models warm — keep waiting.
-   - `phase: paused: low memory` → free RAM is under the floor — the crawl
-     waits safely and resumes itself; tell the user once, keep waiting.
+   - `phase: paused: low memory` → free RAM is under the danger floor —
+     the crawl waits safely and resumes itself; tell the user once,
+     keep waiting.
+   - `phase` starting `constrained: low memory` → below the comfort
+     floor but above danger — still working at reduced pace; relay
+     the figure once, keep waiting.
    - `phase` starting `resuming:` → the memory floor stayed unreachable —
      the crawl is working again anyway (bounded override); normal.
    - `phase` containing `paused: auth` → the token expired mid-crawl —

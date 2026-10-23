@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from .client import AccessError
-from .resources import limits
+from .resources import _avail_mb, limits
 
 
 class CrawlCancelled(Exception):
@@ -119,6 +119,21 @@ _MEM_PAUSE_MAX_S = float(os.environ.get("KNOWLEDGE_MEM_PAUSE_MAX_S", "600"))
 _MEM_PAUSE_COOLDOWN_S = float(
     os.environ.get("KNOWLEDGE_MEM_PAUSE_COOLDOWN_S", "60"))
 
+
+def _mem_danger_mb() -> float:
+    """The hard-OOM floor — below this even a minimal-footprint embed is
+    unsafe, so the crawl truly pauses. Between `min_free_mb` and this
+    floor the crawl runs CONSTRAINED (fetch window 1, smallest embed
+    batches — live limits() already shrink them) instead of freezing
+    for 10-minute cycles (#245)."""
+    raw = os.environ.get("KNOWLEDGE_MEM_DANGER_MB", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return max(250.0, getattr(limits(), "min_free_mb", 1500) * 0.2)
+
 # Auth lifecycle (#177): an expired token pauses the job rather than
 # burning errors; the crawler probes for a rotated credential and resumes
 # in place. A ceiling prevents an unattended pause from hanging forever.
@@ -174,6 +189,7 @@ class CrawlControl:
         self._fetch_cap = 0
         self._paused_since: float | None = None
         self._pause_override_until = 0.0
+        self._mem_constrained = False
 
     def check(self) -> None:
         """Call between queue items and embed flushes. Order: cancel →
@@ -183,7 +199,26 @@ class CrawlControl:
         self._heartbeat()
         if time.time() < self._pause_override_until:
             return
+        if limits().memory_ok():
+            self._mem_constrained = False
         while not limits().memory_ok():
+            avail = _avail_mb()
+            if avail >= _mem_danger_mb():
+                # strained but above the danger floor — keep working at
+                # minimum footprint (fetch window clamps in
+                # fetch_concurrency; embed batches already shrink via
+                # live limits()) instead of a 10-min/60s duty cycle
+                # (#245)
+                if not self._mem_constrained:
+                    self._mem_constrained = True
+                    self.progress.set_phase(
+                        f"constrained: low memory (~{avail:.0f} MB free)")
+                    self._flush_progress()
+                    logging.getLogger(__name__).info(
+                        "memory guard constrained job %s (%.0f MB free)",
+                        self.job_id, avail)
+                break
+            self._mem_constrained = False
             if self._paused_since is None:
                 self._paused_since = time.time()
                 logging.getLogger(__name__).info(
@@ -303,6 +338,8 @@ class CrawlControl:
             cur = default
         if self._battery:
             cur = min(cur, max(1, default // 2))
+        if self._mem_constrained:
+            cur = min(cur, 2)          # #245 — trickle, don't freeze
         self._fetch_cap = cur
         return cur
 

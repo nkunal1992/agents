@@ -29,6 +29,9 @@ def test_memory_guard_pauses_and_resumes(tmp_path, monkeypatch):
     ctl = _ctl(idx)
     monkeypatch.setattr(
         type(limits()), "memory_ok", lambda self: False)
+    # pin availability under the danger floor — above it the crawl
+    # runs constrained instead of pausing (#245)
+    monkeypatch.setattr(jobs_mod, "_avail_mb", lambda: 200.0)
     def checker():
         while not ctl.progress.phase.startswith("paused"):
             time.sleep(0.02)
@@ -48,6 +51,7 @@ def test_memory_guard_cancel_wins(tmp_path, monkeypatch):
     ctl = _ctl(idx, flag=flag)
     monkeypatch.setattr(
         type(limits()), "memory_ok", lambda self: False)
+    monkeypatch.setattr(jobs_mod, "_avail_mb", lambda: 200.0)
     threading.Timer(0.3, flag.set).start()
     with pytest.raises(CrawlCancelled):
         ctl.check()
@@ -123,3 +127,42 @@ def test_progress_rate_and_snapshot(tmp_path):
     back = Progress.from_blob(__import__("json").dumps(snap))
     assert back is not None and back.pages_done == 30
     assert back.worker == "another server process"
+
+
+def test_memory_strained_keeps_working(tmp_path, monkeypatch):
+    """#245: below min_free but ABOVE the danger floor the crawl runs
+    constrained — no 10-minute pause cycle. Fetch window clamps to ≤2."""
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j1", "1")
+    idx.save_job("j1", "running", ["page:1"], [])
+    ctl = _ctl(idx)
+    monkeypatch.setattr(
+        type(limits()), "memory_ok", lambda self: False)
+    monkeypatch.setattr(jobs_mod, "_avail_mb", lambda: 800.0)
+    ctl.check()          # must NOT block — constrained, not paused
+    assert ctl._mem_constrained is True
+    assert ctl.progress.phase.startswith("constrained: low memory")
+    assert ctl.fetch_concurrency(6) <= 2
+
+
+def test_memory_danger_floor_still_pauses(tmp_path, monkeypatch):
+    """#245: below the danger floor the crawl still pauses — genuine
+    OOM territory is where the guard must actually freeze."""
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j1", "1")
+    idx.save_job("j1", "running", ["page:1"], [])
+    ctl = _ctl(idx)
+    monkeypatch.setattr(
+        type(limits()), "memory_ok", lambda self: False)
+    monkeypatch.setattr(jobs_mod, "_avail_mb", lambda: 200.0)
+
+    def recover():
+        while not ctl.progress.phase.startswith("paused"):
+            time.sleep(0.02)
+        monkeypatch.setattr(
+            type(limits()), "memory_ok", lambda self: True)
+    t = threading.Thread(target=recover)
+    t.start()
+    ctl.check()
+    t.join()
+    assert ctl._mem_constrained is False
