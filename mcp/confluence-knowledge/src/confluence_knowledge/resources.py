@@ -41,16 +41,32 @@ _CPU_SAMPLE_S = 2.0
 _cpu_cache: list = [0.0, 50.0]   # [monotonic_ts, last_pct]
 
 
+_proc = None   # lazily bound psutil.Process for own-share exclusion
+
+
 def _cpu_pct() -> float:
-    """System-wide CPU utilisation — 2 s-cached so limits() stays cheap
-    when embed() calls it per micro-batch."""
+    """OTHER-process CPU utilisation — system % minus THIS process's
+    share. The embedder's own inference must not read as 'machine busy':
+    without the subtraction a dense embed phase makes the crawler look
+    externally loaded and batches halve mid-run (#247). 2 s-cached so
+    limits() stays cheap per micro-batch."""
+    global _proc
     now = time.monotonic()
     ts, pct = _cpu_cache
     if now - ts < _CPU_SAMPLE_S:
         return pct
     try:
-        pct = float(_psutil.cpu_percent(interval=None)) \
-            if _psutil is not None else 50.0
+        if _psutil is None:
+            pct = 50.0
+        else:
+            sys_pct = float(_psutil.cpu_percent(interval=None))
+            if _proc is None:
+                _proc = _psutil.Process()
+            # process % is per-100%-of-one-core — normalise to the
+            # same system-wide share the system figure reports
+            own = _proc.cpu_percent(interval=None) / max(
+                1, _psutil.cpu_count() or 1)
+            pct = max(0.0, sys_pct - own)
     except Exception:  # noqa: BLE001 — no sensor → assume mid-band
         pct = 50.0
     _cpu_cache[:] = (now, pct)
@@ -84,12 +100,16 @@ def _phys_cores() -> int:
 
 
 def _default_threads() -> int:
-    # ~half the PHYSICAL cores, capped — sized per machine at session
-    # build. i7-13850HX → 10, M-series → ~7, a 4-core laptop → 2;
-    # halved when the machine is already busy. KNOWLEDGE_THREADS wins
-    # (set =16 to run full-bore on a 20-core workstation).
-    t = max(2, min(16, _phys_cores() // 2))
-    return max(2, t // 2) if _pressured() else t
+    # ~two-thirds of the PHYSICAL cores, capped — sized per machine at
+    # session build. i7-13850HX → 13, M4 Pro → 10, a 4-core laptop → 2.
+    # ORT intra-op scaling is near-linear through the physical cores
+    # (measured +26% at full bore on M-series); two-thirds keeps headroom
+    # for the IDE/OS without the stale-pressured-halving bug: session
+    # threads are FIXED at build, and a transient busy moment used to
+    # permanently halve them for the session's life (#247). Real-time
+    # pressure still throttles live via the max_batch/fetch ladders —
+    # which do adapt back. KNOWLEDGE_THREADS wins.
+    return max(2, min(16, _phys_cores() * 2 // 3))
 
 
 def _default_max_batch() -> int:
@@ -97,11 +117,13 @@ def _default_max_batch() -> int:
     # tokens carries ~a few tens of MB of activations, so scale to the
     # RAM that's actually free. Halved under CPU pressure. KNOWLEDGE_MAX_
     # BATCH wins. batch_tokens still clamps every run.
-    # Ceiling 16 measured on the nomic sweep: throughput is flat past
-    # ~8 (intra_op threads already saturate), bigger batches only grow
-    # padded memory — 32 ran ~7% SLOWER at +345 MB peak RSS.
+    # Ceiling 32: the CPU-ONNX sweet spot for 768d-class embedders is
+    # ~16-64 (fastembed/onnx_benchy sweeps); past ~32 is flat. Earlier
+    # "flat past ~8" numbers were taken WITH the self-throttle active
+    # — halved threads distorted them (#247). batch_tokens' L² budget
+    # still bounds padded memory regardless of item count.
     avail = _avail_mb()
-    b = (4 if avail < 2048 else 8 if avail < 8192 else 16)
+    b = (4 if avail < 2048 else 8 if avail < 8192 else 32)
     return max(2, b // 2) if _pressured() else b
 
 

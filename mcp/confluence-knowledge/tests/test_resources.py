@@ -16,8 +16,8 @@ def _calm(monkeypatch):
 
 def test_default_threads_scale_with_cores(monkeypatch):
     _calm(monkeypatch)
-    # half the physical cores, floored at 2, capped at 16
-    for cpus, want in ((2, 2), (8, 4), (12, 6), (16, 8), (32, 16),
+    # ~two-thirds of the physical cores, floored at 2, capped at 16
+    for cpus, want in ((2, 2), (8, 5), (12, 8), (16, 10), (32, 16),
                        (64, 16)):
         monkeypatch.setattr(resources, "_phys_cores", lambda c=cpus: c)
         monkeypatch.delenv("KNOWLEDGE_THREADS", raising=False)
@@ -27,28 +27,30 @@ def test_default_threads_scale_with_cores(monkeypatch):
     assert limits().threads == 2
 
 
-def test_default_threads_halve_under_pressure(monkeypatch):
+def test_default_threads_machine_sized_not_pressure_halved(monkeypatch):
+    """#247: session threads are fixed at build — halving on a transient
+    busy moment used to permanently cripple a session. Live pressure is
+    now throttled by the max_batch/fetch ladders which DO recover."""
     _calm(monkeypatch)
     monkeypatch.setattr(resources, "_phys_cores", lambda: 20)
-    assert limits().threads == 10
-    # battery alone no longer halves — its throttle is the duty-cycle
-    # sleep in the embed loop, not smaller pools
+    assert limits().threads == 13
     monkeypatch.setattr(resources, "_battery_active", lambda: True)
-    assert limits().threads == 10
+    assert limits().threads == 13
     monkeypatch.setattr(resources, "_battery_active", lambda: False)
     monkeypatch.setattr(resources, "_cpu_pct", lambda: 85.0)
-    assert limits().threads == 5
+    assert limits().threads == 13      # external load no longer halves
+    assert limits().max_batch == 16    # …but batch size still halves
 
 
 def test_default_max_batch_tracks_free_ram(monkeypatch):
     _calm(monkeypatch)
     monkeypatch.delenv("KNOWLEDGE_MAX_BATCH", raising=False)
-    for mb, want in ((1024.0, 4), (4096.0, 8), (12000.0, 16),
-                     (32768.0, 16)):
+    for mb, want in ((1024.0, 4), (4096.0, 8), (12000.0, 32),
+                     (32768.0, 32)):
         monkeypatch.setattr(resources, "_avail_mb", lambda a=mb: a)
         assert limits().max_batch == want
     monkeypatch.setattr(resources, "_cpu_pct", lambda: 90.0)
-    assert limits().max_batch == 8
+    assert limits().max_batch == 16       # 32 halved under real pressure
     monkeypatch.setenv("KNOWLEDGE_MAX_BATCH", "6")   # env wins over auto
     assert limits().max_batch == 6
 
@@ -76,7 +78,7 @@ def test_limits_env_overrides_and_invalid(monkeypatch):
 
 
 def _default():
-    return max(2, min(16, (resources._phys_cores() or 4) // 2))
+    return max(2, min(16, (resources._phys_cores() or 4) * 2 // 3))
 
 
 def test_lower_priority_calls_nice(monkeypatch):
@@ -132,3 +134,55 @@ def test_plan_batches_oversized_singleton():
     assert plan_batches([100_000, 10, 20], 1024, 16) == [[0], [2, 1]]
     assert plan_batches([], 1024, 16) == []
     assert plan_batches([10], 5, 16) == [[0]]
+
+
+def test_cpu_pct_excludes_own_process(monkeypatch):
+    """#247: system% minus OUR share — the embedder's own inference must
+    not register as machine pressure."""
+    import types
+
+    class _Vmem:
+        @staticmethod
+        def cpu_percent(interval=None):
+            return 90.0                      # system pegged…
+
+        @staticmethod
+        def cpu_count():
+            return 10
+
+    class _Proc:
+        def cpu_percent(self, interval=None):
+            return 800.0                     # …by US (80% of 10 cores)
+
+    fake = types.SimpleNamespace(
+        cpu_percent=_Vmem.cpu_percent, cpu_count=_Vmem.cpu_count,
+        Process=lambda: _Proc(), virtual_memory=lambda: None,
+        battery=lambda: None)
+    monkeypatch.setattr(resources, "_psutil", fake)
+    monkeypatch.setattr(resources, "_proc", None)
+    resources._cpu_cache[:] = (0.0, 50.0)
+    pct = resources._cpu_pct()
+    # 90% system − 80% ours → ~10% other-load → NOT pressured
+    assert pct < 15.0
+    assert resources._pressured() is False
+
+
+def test_pick_providers_auto(monkeypatch):
+    """#247: auto order = CUDA→ROCm→CPU; env override wins; CPU fallback."""
+    import types
+
+    from confluence_knowledge.retrieval import _pick_providers
+
+    ort = types.SimpleNamespace(
+        get_available_providers=lambda: ["CPUExecutionProvider"])
+    monkeypatch.delenv("KNOWLEDGE_ONNX_PROVIDERS", raising=False)
+    assert _pick_providers(ort) == ["CPUExecutionProvider"]
+
+    ort.get_available_providers = lambda: [
+        "CPUExecutionProvider", "CUDAExecutionProvider"]
+    assert _pick_providers(ort)[0] == "CUDAExecutionProvider"
+    assert _pick_providers(ort)[-1] == "CPUExecutionProvider"
+
+    monkeypatch.setenv("KNOWLEDGE_ONNX_PROVIDERS",
+                       "CUDAExecutionProvider,MissingEP")
+    assert _pick_providers(ort) == ["CUDAExecutionProvider"]

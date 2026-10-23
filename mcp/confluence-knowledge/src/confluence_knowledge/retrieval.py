@@ -113,6 +113,39 @@ def _require(dest: Path, repo: str, cli: str, needed: list[str]) -> Path:
     return dest
 
 
+def _pick_providers(ort) -> list[str]:
+    """Execution-provider order — auto GPU when the installed wheel
+    supports it (#247).
+
+    CUDA/ROCm genuinely beat CPU for embedding models (~5-10× on dGPU).
+    CoreML/DirectML are deliberately NOT auto-selected: independent
+    sweeps (termite, fastembed-rb, cherry-studio, onnx_benchy) measure
+    them 2-13× SLOWER than plain CPU for this model class — the
+    ONNX→native bridge overhead exceeds any accelerator gain.
+    `KNOWLEDGE_ONNX_PROVIDERS` overrides for power users. CPU is always
+    appended last — ORT falls back per-op for nodes an EP can't run."""
+    avail = ort.get_available_providers()
+    env = os.environ.get("KNOWLEDGE_ONNX_PROVIDERS", "").strip()
+    if env:
+        picked = [p.strip() for p in env.split(",")
+                  if p.strip() in avail]
+        return picked or ["CPUExecutionProvider"]
+    order = ("CUDAExecutionProvider", "ROCMExecutionProvider",
+             "CPUExecutionProvider")
+    return [p for p in order if p in avail] or ["CPUExecutionProvider"]
+
+
+def active_provider() -> str:
+    """Which execution provider ORT sessions will take — doctor surfaces
+    it so the field can see whether a machine rode CUDA or fell back
+    to CPU (#247)."""
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return "unavailable"
+    return _pick_providers(ort)[0]
+
+
 def _ort_session(onnx_path: Path, cli: str):
     try:
         import onnxruntime as ort
@@ -120,7 +153,7 @@ def _ort_session(onnx_path: Path, cli: str):
         raise SetupError("onnxruntime isn't installed — reinstall the "
                          f"service ({cli} bootstrap reinstalls deps)") from e
     return ort.InferenceSession(
-        str(onnx_path), providers=["CPUExecutionProvider"],
+        str(onnx_path), providers=_pick_providers(ort),
         sess_options=_ort_opts(ort))
 
 
@@ -299,9 +332,16 @@ class LocalSparseEmbedder:
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         dest = _models_dir(home) / "fastembed"
         try:
-            self._m = SparseTextEmbedding(SPARSE_MODEL, cache_dir=str(dest),
-                                          local_files_only=True,
-                                          threads=limits().threads)
+            import onnxruntime as _ort
+            providers = _pick_providers(_ort)
+        except ImportError:
+            providers = None        # ORT absent → fastembed defaults
+        try:
+            kwargs = {"cache_dir": str(dest), "local_files_only": True,
+                      "threads": limits().threads}
+            if providers:
+                kwargs["providers"] = providers
+            self._m = SparseTextEmbedding(SPARSE_MODEL, **kwargs)
         except Exception as e:
             raise SetupError(
                 f"sparse model '{SPARSE_MODEL}' not prepared — run "
