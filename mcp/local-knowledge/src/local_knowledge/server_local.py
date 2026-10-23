@@ -215,7 +215,7 @@ def _scope(scope_handle: str) -> dict:
                         try:
                             s["reads_from"] = alias
                             s["subtree_root"] = os.path.relpath(
-                                root, Path(aroot).parent)
+                                root, Path(aroot).parent).replace("\\", "/")
                         except ValueError:
                             pass        # drive changed → stay uncached
                 with _state_lock:
@@ -388,10 +388,11 @@ def connect(root: str) -> dict:
                 return 0               # different drive
             if under == "." or under.startswith(".."):
                 return 0               # same root or outside it
-            # A's page_ids are relative to A's root.parent (_rel) — the
-            # subtree's prefix inside A is B's rel under that scheme
+            # A's page_ids are relative to A's root.parent and stored
+            # POSIX-normalized (_rel) — match that scheme
             return len(a.subtree_pages_prefix(
-                os.path.relpath(str(path), Path(aroot).parent)))
+                os.path.relpath(str(path), Path(aroot).parent)
+                .replace("\\", "/")))
         covering = find_covering(index_root(), scope_key, covers=_covers)
         if covering:
             idx.meta_set("alias_scope", covering["key"])
@@ -401,9 +402,9 @@ def connect(root: str) -> dict:
     if covering:
         aroot = _index_for(covering["key"]).meta_get("root_path")
         s["reads_from"] = covering["key"]
-        # subtree prefix in the ancestor's rel scheme (rel to root.parent)
+        # subtree prefix in the ancestor's POSIX-normalized rel scheme
         s["subtree_root"] = os.path.relpath(
-            str(path), Path(aroot).parent)
+            str(path), Path(aroot).parent).replace("\\", "/")
     with _state_lock:
         _scopes[handle] = s
     _start_warmup()
