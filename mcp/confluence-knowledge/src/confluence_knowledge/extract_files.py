@@ -17,8 +17,8 @@ from .settings import SetupError
 
 MAX_FILE_WORDS = 200_000   # ~1MB of text — beyond that, index metadata only
 
-SUPPORTED = {".txt", ".md", ".markdown", ".csv", ".html", ".htm",
-             ".docx", ".pptx", ".xlsx", ".pdf"}
+SUPPORTED = {".txt", ".md", ".markdown", ".adoc", ".asciidoc", ".asc",
+             ".csv", ".html", ".htm", ".docx", ".pptx", ".xlsx", ".pdf"}
 
 # Names that look like credentials/secrets — excluded by default and
 # disclosed in coverage warnings.
@@ -272,7 +272,9 @@ def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
         return [], [f"file too large ({len(data)} bytes) — skipped"]
 
     try:
-        if ext == ".txt":
+        if ext in (".txt", ".adoc", ".asciidoc", ".asc"):
+            # adoc is plain-text markup — its `=` headers stay inline in
+            # the prose (searchable); no full Asciidoctor render needed
             return _text_chunks(_decode_text(data), "",
                                 measure=measure, budget=budget), []
         if ext in (".md", ".markdown"):

@@ -264,8 +264,8 @@ def _scope(scope_handle: str) -> dict:
                 with _state_lock:
                     _scopes[scope_handle] = s
                 return s
-        except Exception:                       # noqa: BLE001 — meta
-            pass                                # unreadable → old path
+        except Exception:                       # noqa: BLE001,S110 —
+            pass                                # meta unreadable → old path
         try:
             out = connect(root)
         except Exception:                       # noqa: BLE001 — the
@@ -433,6 +433,7 @@ def connect(root: str) -> dict:
     scope_key = profile.scope_key(principal, root_id)
     idx = _index_for(scope_key, for_write=True)
     idx.meta_set("root_page", root_id)     # daemon orphan resume (#189)
+    idx.meta_set("principal", principal)   # offline orphan reclaim (#231)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root_id}"
     with _state_lock:
@@ -583,15 +584,22 @@ def _resume_job(scope_key: str, job_id: str) -> None:
     if not root:
         return
     profile = SiteProfile.load(_home())
-    client = _client_for(profile)
-    who = client.get("wiki/rest/api/user/current" if profile.env == "cloud"
-                     else "rest/api/user/current").json()
-    principal = (who.get("accountId") or who.get("userKey")
-                 or who.get("username") or "?")
-    if profile.scope_key(principal, root) != scope_key:
+    principal = idx.meta_get("principal")
+    if principal is None:
+        # pre-#231 index — the only validation is the live check
+        try:
+            client = _client_for(profile)
+            who = client.get("wiki/rest/api/user/current"
+                             if profile.env == "cloud"
+                             else "rest/api/user/current").json()
+            principal = (who.get("accountId") or who.get("userKey")
+                         or who.get("username") or "?")
+        except Exception:               # noqa: BLE001,S110 — offline:
+            return                      # keep the job orphaned rather
+    if profile.scope_key(principal, root) != scope_key:  # than guess
         return          # profile moved to another site — not ours
     s = {"key": scope_key, "root": root,
-         "client": client, "profile": profile}
+         "client": None, "profile": profile}   # _crawler rebuilds lazily
     t = threading.Thread(target=_worker_loop, args=(s, job_id),
                          daemon=True, name=f"crawl-{job_id}")
     _workers[job_id] = t
@@ -941,6 +949,8 @@ def search(scope_handle: str, question: str) -> dict:
             _evidence_sets.pop(next(iter(_evidence_sets)))
         _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
                                   "epoch": idx.snapshot_epoch()}
+    idx.persist_evset(set_id, [e["chunk_id"] for e in ev],
+                      _evidence_sets[set_id]["epoch"])
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -1047,11 +1057,16 @@ def verify_citations(scope_handle: str, evidence_set: str,
     s = _scope(scope_handle)  # binds or SetupError — never KeyError below
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)
+    idx = _index_for(s["key"])
+    if rec is None:
+        # daemon restarted — rebuild from the persisted shadow (#231)
+        r = idx.evset_rebind(evidence_set)
+        if r:
+            rec = {"scope": s["key"], **r}
     # full 24-char scope key — the key[:8] prefix in the id is cosmetic
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
-    idx = _index_for(s["key"])
     if rec.get("epoch") != idx.snapshot_epoch():
         raise SecurityException(
             "evidence set predates the latest published snapshot — "
