@@ -132,13 +132,9 @@ def test_daemon_restart_same_url(daemon, workdir):
     # field needs is recovery-on-same-URL, so assert exactly that.
     daemon.kill()
     daemon.wait(timeout=8)
-<<<<<<< HEAD
     # 60s on CI: watchdog detect (~2s) + cold spawn + fastmcp/uvicorn
     # import + mount can stretch past 30 on a congested macos runner —
     # the contract is 'respawn happens on the same URL', not 'in 30s'
-=======
-    # 60s on CI: watchdog detect + cold spawn + mount outlasts 30s
->>>>>>> fix/231-scenario-sweep
     deadline = time.monotonic() + 60
     while True:
         try:
