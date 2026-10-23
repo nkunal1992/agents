@@ -282,7 +282,7 @@ The server is designed to stay out of the way on a developer laptop:
   previously published snapshot is untouched; `start_crawl` re-runs and
   unchanged pages are reused. Cancelling from any IDE window works —
   the worker notices at its next heartbeat.
-- **Staying aware**: `wait_for_crawl` long-polls ≤120s and returns the
+- **Staying aware**: `wait_for_crawl` long-polls ≤45s and returns the
   moment the phase or page count moves, carrying `phase`, `pages_done`,
   `rate_ppm`, `eta_s`, `elapsed_s`, `worker`; `connect`/`status` expose
   `last_crawl` so the agent can answer "did it finish?" without polling.

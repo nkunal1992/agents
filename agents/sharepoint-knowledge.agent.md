@@ -236,17 +236,22 @@ Recover in order:
    on its own and posts a desktop notification when it finishes. Say what
    started: "Crawling in the background — I'll keep you posted." Then
    drive progress with `wait_for_crawl` (blocks ≤ `wait_s`, default 25s,
-   cap 120; returns early when phase or page count moves). Loop it and
+   cap 45; returns early when phase or page count moves). Loop it and
    relay one concise line per change — report `pulse`/`stages`, the
-   ready-made human lines ("fetching pages · 310 done · ~80/min"), never
-   raw field names. Do NOT surface jargon (`pages_done`, `rate_ppm`,
-   `eta_s`, `fetch_cap`, `errors_n`) — translate: "still downloading,
-   310 pages so far" not "phase=fetching pages_seen=310"; "N items
+   ready-made human lines ("fetching pages · 310 done · ~80/min"). Only
+   `pulse`, `stages`, and `note` may be relayed verbatim — every other
+   field gets translated; never quote a raw field name or value
+   (`pages_done`, `rate_ppm`, `eta_s`, `fetch_cap`, `errors_n`,
+   `total_pages`, `chunks_done`, `duty`, `on_battery`, `changed`).
+   "still downloading, 310 pages so far" not "phase=fetching
+   pages_seen=310"; "N items
    couldn't be read" not `errors_n`. Use `crawl_step` only for an
    instant snapshot. Surface `warnings` (skipped secrets, missing
    download URLs, oversized files) — disclose, never hide.
    - `note: loading local models` or `phase: starting` → models warming —
      keep waiting.
+   - a `note` like "the computer slept" → relay it verbatim, keep
+     polling — the crawl kept running in the background.
    - `phase: paused: low memory` → free RAM is under the floor — waits
      safely, resumes itself; tell the user once, keep waiting.
    - `phase` starting `resuming:` → the memory floor stayed unreachable —

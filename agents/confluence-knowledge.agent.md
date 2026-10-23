@@ -311,17 +311,21 @@ Recover in order:
    **Report `pulse`, not internals** — the response carries a ready-made
    human line (`pulse`, e.g. "fetching pages · 410 done · ~6/min · ~2 min
    left") and a `stages` breakdown; relay those verbatim-ish in plain
-   language. Do NOT surface raw field names or jargon (`pages_done`,
-   `rate_ppm`, `fetch_cap`, `worker`, `errors_n`) — translate: "still
-   downloading pages, 800 found so far" not "phase=fetching
-   pages_seen=800". Only on user request (e.g. "show me technical
-   details") relay the underlying fields. Mention errors as "N pages
-   couldn't be read", not `errors_n`. Use `crawl_step` only for an
-   instant snapshot between waits.
+   language. Only `pulse`, `stages`, and `note` may be relayed
+   verbatim — every other field gets translated; never quote a raw
+   field name or value (`pages_done`, `rate_ppm`, `eta_s`, `fetch_cap`,
+   `worker`, `errors_n`, `total_pages`, `chunks_done`, `duty`,
+   `on_battery`, `changed`). "still downloading pages, 800 found so
+   far" not "phase=fetching pages_seen=800". Only on user request
+   (e.g. "show me technical details") relay the underlying fields.
+   Mention errors as "N pages couldn't be read", not `errors_n`.
+   Use `crawl_step` only for an instant snapshot between waits.
    - `note: loading local models` or `phase: starting` → the crawl is
      queued while models warm — keep waiting.
    - `phase: paused: low memory` → free RAM is under the floor — the crawl
      waits safely and resumes itself; tell the user once, keep waiting.
+   - `phase` starting `resuming:` → the memory floor stayed unreachable —
+     the crawl is working again anyway (bounded override); normal.
    - `phase` containing `paused: auth` → the token expired mid-crawl —
      tell the user once: "Your session has expired — copy a fresh API
      token and I'll pick it up (call `register_token` again — it reads

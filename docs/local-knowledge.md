@@ -112,7 +112,7 @@ cross-process lease gives each job exactly one worker — a second IDE
 window polls the same crawl instead of racing it. `cancel_crawl` stops a
 running crawl within seconds (`cancelled` is terminal — it never
 auto-resumes) and keeps the previously published snapshot. `wait_for_crawl`
-long-polls ≤120s and returns the moment progress moves (`phase`,
+long-polls ≤45s and returns the moment progress moves (`phase`,
 `pages_done`, `rate_ppm`, `eta_s`); `connect`/`status` carry `last_crawl`,
 and a desktop notification fires on done/error/cancelled.
 
