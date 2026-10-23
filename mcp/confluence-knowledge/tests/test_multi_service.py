@@ -190,6 +190,7 @@ def test_detached_spawn_kwargs_windows(monkeypatch):
     uses DETACHED_PROCESS + CREATE_NO_WINDOW (+ BREAKAWAY from Job
     objects) with no start_new_session."""
     import os
+
     import confluence_knowledge.rpc as rpc_mod
     monkeypatch.setattr(os, "name", "nt")
     kw = rpc_mod.detached_spawn_kwargs()
@@ -202,6 +203,7 @@ def test_detached_spawn_kwargs_windows(monkeypatch):
 def test_detached_spawn_kwargs_posix():
     """#220: POSIX keeps setsid — unchanged behaviour on macOS/Linux."""
     import os
+
     import confluence_knowledge.rpc as rpc_mod
     if os.name == "nt":
         return                     # covered by the windows case above
@@ -213,6 +215,7 @@ def test_popen_detached_breakaway_retry(monkeypatch):
     object disallows breakaway — the spawn must retry without it rather
     than fail the whole ensure_daemon."""
     import os
+
     import confluence_knowledge.rpc as rpc_mod
     monkeypatch.setattr(os, "name", "nt")
     class _Proc:
