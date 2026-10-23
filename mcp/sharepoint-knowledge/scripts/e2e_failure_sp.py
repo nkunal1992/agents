@@ -20,6 +20,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]
 import atexit
 
 from _e2e_common import check, fresh_venv, stop_shared_daemon
+
+
+def _embed_dir_name() -> str:
+    """Active embed model's on-disk dir (#249 — follows
+    KNOWLEDGE_EMBED_MODEL / the spec registry)."""
+    try:
+        from confluence_knowledge.retrieval import active_embed_spec
+        return active_embed_spec()["repo"].split("/")[-1]
+    except Exception:
+        return "snowflake-arctic-embed-xs"
+
 from _fake_graph_server import TOKEN, serve
 
 REPO_SVC = Path(__file__).resolve().parents[1]
@@ -88,7 +99,7 @@ def main() -> None:
     cache = os.environ.get("CK_MODEL_CACHE")
     # #206 — models live in the SHARED store under the sandboxed HOME
     mdl = Path(env["HOME"]) / ".knowledge" / "models"
-    if cache and (Path(cache) / "nomic-embed-text-v1.5").exists():
+    if cache and (Path(cache) / _embed_dir_name()).exists():
         shutil.copytree(cache, mdl, dirs_exist_ok=True)
         print("PASS models seeded from cache")
     else:
@@ -111,7 +122,7 @@ def main() -> None:
     check(flags.get("creds_valid"), "valid token → creds flag green", flags)
 
     # break 1: partial model
-    (mdl / "nomic-embed-text-v1.5" / "tokenizer_config.json").unlink()
+    (mdl / _embed_dir_name() / "tokenizer_config.json").unlink()
     d = run([str(cli), "doctor"], env, check_rc=False)
     check("model_embed" in d.stdout and d.returncode != 0,
           "partial model flagged + non-zero", d.stdout)

@@ -44,6 +44,17 @@ def _atexit_stop(env: dict) -> None:
 
 from _e2e_common import TOKEN, call, check, serve
 
+
+def _embed_dir_name() -> str:
+    """Active embed model's on-disk dir (#249 — follows
+    KNOWLEDGE_EMBED_MODEL / the spec registry)."""
+    try:
+        from confluence_knowledge.retrieval import active_embed_spec
+        return active_embed_spec()["repo"].split("/")[-1]
+    except Exception:
+        return "snowflake-arctic-embed-xs"
+
+
 REQUEST_TIMEOUT = 20  # seconds; IDE clients time out around this order
 
 
@@ -51,7 +62,7 @@ REQUEST_TIMEOUT = 20  # seconds; IDE clients time out around this order
 
 async def main() -> None:
     home = Path(os.environ.get("CONF_KNOWLEDGE_HOME", "")).expanduser()
-    if not (home / "models" / "nomic-embed-text-v1.5").exists():
+    if not (home / "models" / _embed_dir_name()).exists():
         raise SystemExit("prepare models first: CONF_KNOWLEDGE_HOME=<dir> "
                          "confluence-knowledge prepare-models")
     srv, base, _hits = serve()

@@ -37,6 +37,17 @@ import atexit
 
 from _e2e_common import TOKEN, call, check, serve, stop_shared_daemon, fresh_venv
 
+
+def _embed_dir_name() -> str:
+    """Active embed model's on-disk dir (#249 — follows
+    KNOWLEDGE_EMBED_MODEL / the spec registry)."""
+    try:
+        from confluence_knowledge.retrieval import active_embed_spec
+        return active_embed_spec()["repo"].split("/")[-1]
+    except Exception:
+        return "snowflake-arctic-embed-xs"
+
+
 REPO_SVC = Path(__file__).resolve().parents[1]
 BUNDLE_SVC = REPO_SVC.parents[1] / "dist" / "confluence-knowledge-bundle" / "service"
 
@@ -105,7 +116,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     cache = os.path.expanduser(cache) if cache else None
     # #206 — models live in the SHARED store under the sandboxed HOME
     models_dir = Path(env["HOME"]) / ".knowledge" / "models"
-    if cache and (Path(cache) / "nomic-embed-text-v1.5").exists():
+    if cache and (Path(cache) / _embed_dir_name()).exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")
     else:

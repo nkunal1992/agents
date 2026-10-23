@@ -45,6 +45,17 @@ sys.path.insert(0, str(HERE))
 
 import _fake_dc_work as fake
 
+
+def _embed_dir_name() -> str:
+    """Active embed model's on-disk dir (#249 — follows
+    KNOWLEDGE_EMBED_MODEL / the spec registry)."""
+    try:
+        from confluence_knowledge.retrieval import active_embed_spec
+        return active_embed_spec()["repo"].split("/")[-1]
+    except Exception:
+        return "snowflake-arctic-embed-xs"
+
+
 FREEZE_S = 2.0          # tool call slower than this = freeze event
 LIGHT_P95_MS = 300.0    # status/crawl_step p95 budget
 STALL_MS = 250.0        # laptop-probe overshoot budget
@@ -868,7 +879,7 @@ def main() -> int:
     args = ap.parse_args()
 
     models = Path(args.models)
-    if not (models / "models" / "nomic-embed-text-v1.5").exists():
+    if not (models / "models" / _embed_dir_name()).exists():
         raise SystemExit(f"models not prepared under {models} "
                          "(need models/nomic-embed-text-v1.5)")
 

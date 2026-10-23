@@ -14,7 +14,7 @@ the per-phase breakdown the daemon now records:
                signal: high wait means pages arrive slower than we
                process them)
     extract  — storage-XHTML → chunks (CPU)
-    embed    — nomic-embed-text-v1.5 ONNX vectors (CPU — usually the dominant cost on
+    embed    — active dense-model ONNX vectors (CPU — usually the dominant cost on
                dense pages)
     sparse   — lexical sparse vectors (second model, optional)
     store    — sqlite staging writes

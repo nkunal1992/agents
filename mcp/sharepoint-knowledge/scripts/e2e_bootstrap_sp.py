@@ -31,6 +31,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]
 import atexit
 
 from _e2e_common import call, check, fresh_venv, stop_shared_daemon
+
+
+def _embed_dir_name() -> str:
+    """Active embed model's on-disk dir (#249 — follows
+    KNOWLEDGE_EMBED_MODEL / the spec registry)."""
+    try:
+        from confluence_knowledge.retrieval import active_embed_spec
+        return active_embed_spec()["repo"].split("/")[-1]
+    except Exception:
+        return "snowflake-arctic-embed-xs"
+
 from _fake_graph_server import TOKEN, serve
 
 REPO_SVC = Path(__file__).resolve().parents[1]
@@ -133,7 +144,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
 
     cache = os.environ.get("CK_MODEL_CACHE")
     models_dir = Path(env["HOME"]) / ".knowledge" / "models"
-    if cache and (Path(cache) / "nomic-embed-text-v1.5").exists():
+    if cache and (Path(cache) / _embed_dir_name()).exists():
         shutil.copytree(cache, models_dir, dirs_exist_ok=True)
         print(f"PASS models copied from cache {cache}")
     else:
