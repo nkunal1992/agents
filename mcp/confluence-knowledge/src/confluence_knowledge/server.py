@@ -236,15 +236,43 @@ def _models_loaded(wait: float) -> bool:
 
 def _scope(scope_handle: str) -> dict:
     s = _scopes.get(scope_handle)
-    if s is None:
-        # the IDE may restart the server (e.g. after a request timeout) and
-        # drop in-memory scopes; handles carry the root so they re-bind after
-        # the same identity check connect() performs
-        parts = scope_handle.split(":")
-        if len(parts) == 3 and parts[0] == "scope" and connect(parts[2])["scope_handle"] == scope_handle:
+    if s is not None:
+        return s
+    # the IDE may restart the server (or the daemon respawned) and drop
+    # in-memory scopes; handles carry scope_key+root so they re-bind.
+    # Prefer the persisted proof — connect() stamped root_page into the
+    # index at first use — over re-running connect()'s live credential
+    # check: a VPN/network blip must not cost a cached scope (#229).
+    # Security is identical: the mapping exists only where a real
+    # connect() created it — a fabricated handle still gets rejected.
+    parts = scope_handle.split(":")
+    if len(parts) == 3 and parts[0] == "scope":
+        key, root = parts[1], parts[2]
+        try:
+            db = workspace_index_root(_workdir()) / f"{key}.db"
+            if not db.exists():     # fabricated key — don't even create
+                raise SetupError("unknown scope — call connect first")
+            idx = _index_for(key)
+            if idx.meta_get("root_page") == root:
+                try:
+                    profile = SiteProfile.load(_home())
+                except SetupError:
+                    profile = None      # reads still work; _crawler
+                                       # re-checks when a crawl needs it
+                s = {"key": key, "profile": profile,
+                     "root": root, "client": None}
+                with _state_lock:
+                    _scopes[scope_handle] = s
+                return s
+        except Exception:                       # noqa: BLE001,S110 — meta
+            pass                                # unreadable → old path
+        try:
+            out = connect(root)
+        except Exception:                       # noqa: BLE001 — the
+            out = None                          # fallback is best-effort;
+        if isinstance(out, dict) and out.get("scope_handle") == scope_handle:
             return _scopes[scope_handle]
-        raise SetupError("unknown scope — call connect first")
-    return s
+    raise SetupError("unknown scope — call connect first")
 
 
 @tool(mcp)
@@ -434,7 +462,8 @@ def _maybe_auto_reindex(s: dict, idx: Index) -> str | None:
 
 
 def _crawler(s: dict, embedder=None, sparse=None, control=None) -> Crawler:
-    profile = s["profile"]
+    profile = s["profile"] or SiteProfile.load(_home())
+    s["profile"] = profile              # rebind may carry None (#229)
 
     def _fresh_client():
         # re-read the credential — a setup-rotated token must reach the

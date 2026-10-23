@@ -83,3 +83,22 @@ def test_status_unconfigured(tmp_path, monkeypatch):
     from sharepoint_knowledge import server_sp
     st = server_sp.status()
     assert st["configured"] is False and "error" in st["profile"]
+
+
+def test_scope_rebind_from_meta(sp_env):
+    """#229: after a restart (_scopes empty) a cached scope re-binds from
+    the persisted `root`/`root_entry` meta — no Graph calls, no KeyError
+    on a missing 'scope_handle'."""
+    c = sp_env.connect("site:" + SITE_ID)
+    sp_env._scopes.clear()
+    s = sp_env._scope(c["scope_handle"])
+    assert s["key"] == c["scope_handle"].split(":")[1]
+    assert s["root_entry"]
+    from confluence_knowledge.settings import SetupError
+    key = c["scope_handle"].split(":")[1]
+    for bad in (f"scope:{key}:bogus", "scope:deadbeef:site:x", "scope:x"):
+        try:
+            sp_env._scope(bad)
+            raise SystemExit(f"{bad} accepted")
+        except SetupError:
+            pass
