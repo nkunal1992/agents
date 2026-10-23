@@ -132,7 +132,8 @@ def test_daemon_restart_same_url(daemon, workdir):
     # field needs is recovery-on-same-URL, so assert exactly that.
     daemon.kill()
     daemon.wait(timeout=8)
-    deadline = time.monotonic() + 30
+    # 60s on CI: watchdog detect + cold spawn + mount outlasts 30s
+    deadline = time.monotonic() + 60
     while True:
         try:
             out = asyncio.run(asyncio.wait_for(
