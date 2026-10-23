@@ -316,6 +316,39 @@ class Index:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                             (key, value))
 
+    # ---- evidence-set persistence (#231) ----
+    # _evidence_sets is process memory — a daemon restart must not turn
+    # verify_citations into 'unknown evidence set'. Sets persist here,
+    # bounded to the last 16 per scope, inside the scope's own index so a
+    # set_id is inherently scope-bound.
+    _EVSET_KEEP = 16
+
+    def persist_evset(self, set_id: str, chunk_ids: list[str],
+                      epoch) -> None:
+        try:
+            raw = self.meta_get("evsets")
+            sets = json.loads(raw) if raw else {}
+            sets[set_id] = {"c": chunk_ids, "e": epoch}
+            while len(sets) > self._EVSET_KEEP:
+                sets.pop(next(iter(sets)))
+            self.meta_set("evsets", json.dumps(sets))
+        except Exception:                           # noqa: BLE001,S110 —
+            pass                                    # readonly proxy —
+        # the daemon-side write is what counts anyway
+
+    def evset_rebind(self, set_id: str) -> dict | None:
+        """Rebuild a lost evidence set from its persisted shadow — chunk
+        rows come straight from the index, so this needs no network and
+        no embeddings (#231)."""
+        try:
+            sets = json.loads(self.meta_get("evsets") or "{}")
+            p = sets.get(set_id)
+            if not p:
+                return None
+            return {"ev": self.chunks_by_ids(p["c"]), "epoch": p["e"]}
+        except Exception:                           # noqa: BLE001
+            return None
+
     # ---- cross-process worker lease ----
     # Every MCP server process (each IDE window spawns one) could otherwise
     # run a worker on the same job — double CPU/RAM and write contention.

@@ -262,11 +262,13 @@ Recover in order:
    If doctor printed `self-heal failed: <e>` that's the diagnosis —
    report `<e>` verbatim.
 4. If the daemon won't stay up — especially on Windows, where a
-   closing terminal can take it down — `confluence-knowledge doctor register --transport
-   stdio` then reload once: the IDE spawns the service per session
-   and it brings the daemon up itself. (Rare: if the daemon home is somehow on a
-   synced or network-mounted dir, set
-   `KNOWLEDGE_SHARED_HOME=C:\knowledge` and re-run register.)
+   closing terminal can take it down — `confluence-knowledge register` then
+   reload once: the default stdio entry means each IDE window
+   spawns its own proxy and the proxy brings the daemon up
+   itself (daemon restarts then stay invisible — no more reloads).
+   (Rare: if the daemon home is somehow on a synced or
+   network-mounted dir, set `KNOWLEDGE_SHARED_HOME=C:\knowledge`
+   and re-run register.)
 5. Only then → tell the user exactly: "the local knowledge service
    can't be reached — open the IDE's MCP server panel and restart
    confluence-knowledge, or reload the window once." The crawl keeps running either
@@ -280,10 +282,17 @@ Recover in order:
   token), `rpc.db` (tool-call queue + lease), `daemon.log`,
   `watchdog.log`. One daemon per Python env serves every installed
   knowledge service — this service's path is `/confluence-knowledge/mcp`.
+- `register` writes a **stdio** entry by default (#226): each IDE
+  window spawns a `python -m confluence_knowledge.server` proxy that owns the MCP session —
+  daemon restarts are invisible to the IDE. `register --transport
+  http` writes the shared `http://127.0.0.1:<port>/confluence-knowledge/mcp?token=…`
+  URL instead — one endpoint for all windows, but a daemon restart
+  stales the session until a reload.
 - `X stop` stops the daemon AND its watchdog cleanly (`X` = the CLI name)
   — the only shutdown that survives; a bare kill just gets respawned.
-- `X doctor` self-heals: restarts a dead daemon and rewrites the
-  registered URL if the port drifted.
+- `X doctor` self-heals: restarts the daemon — dead OR running
+  older code than the installed package (`status` flags it) — and
+  refreshes the registered entry.
 - The JetBrains IDE entry carries the token in the URL query
   (`?token=…`) on purpose — the Copilot plugin drops `headers` there
   (upstream bug). VS Code uses the header.

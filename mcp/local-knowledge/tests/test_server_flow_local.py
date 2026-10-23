@@ -96,3 +96,24 @@ def test_profile_saved(tmp_path):
     server_local.connect(str(root))
     p = LocalProfile.load()
     assert p.root_path == str(root.resolve())
+
+
+def test_scope_rebind_from_meta(tmp_path):
+    """#229: after a daemon/server restart (_scopes empty) a cached scope
+    must re-bind from the persisted root_path meta — no connect() re-run,
+    no KeyError on a missing 'scope_handle'."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "a.md").write_text("content")
+    c = server_local.connect(str(root))
+    server_local._scopes.clear()
+    s = server_local._scope(c["scope_handle"])
+    assert s["key"] == c["scope_handle"].split(":")[1]
+    from confluence_knowledge.settings import SetupError
+    for bad in (f"scope:{s['key']}:/no/such/path", "scope:deadbeef:/x",
+                "scope:x"):
+        try:
+            server_local._scope(bad)
+            raise SystemExit(f"{bad} accepted")
+        except SetupError:
+            pass

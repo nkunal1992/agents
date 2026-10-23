@@ -178,13 +178,33 @@ def _models_loaded(wait: float) -> bool:
 
 def _scope(scope_handle: str) -> dict:
     s = _scopes.get(scope_handle)
-    if s is None:
-        parts = scope_handle.split(":", 2)
-        if len(parts) == 3 and parts[0] == "scope" and \
-                connect(parts[2])["scope_handle"] == scope_handle:
+    if s is not None:
+        return s
+    # daemon/server restart dropped _scopes — re-bind from the persisted
+    # proof (connect() stamps root_path) instead of re-running connect():
+    # identical security (the meta exists only where a real connect
+    # created it) and zero side-effects (#229).
+    parts = scope_handle.split(":", 2)
+    if len(parts) == 3 and parts[0] == "scope":
+        key, root = parts[1], parts[2]
+        try:
+            if not (index_root() / f"{key}.db").exists():
+                raise SetupError("unknown scope — call connect first")
+            idx = _index_for(key)
+            if idx.meta_get("root_path") == root:
+                s = {"key": key, "root": Path(root)}
+                with _state_lock:
+                    _scopes[scope_handle] = s
+                return s
+        except Exception:                       # noqa: BLE001,S110
+            pass
+        try:
+            out = connect(root)
+        except Exception:                       # noqa: BLE001
+            out = None
+        if isinstance(out, dict) and out.get("scope_handle") == scope_handle:
             return _scopes[scope_handle]
-        raise SetupError("unknown scope — call connect first")
-    return s
+    raise SetupError("unknown scope — call connect first")
 
 
 
@@ -273,22 +293,8 @@ def status() -> dict:
         # points at the daemon's URL — a dead daemon or stale port means
         # tools go unreachable until doctor self-heals it
         try:
-            from confluence_knowledge.registration import _http_meta
-            meta = _http_meta()
-            up = False
-            if meta:
-                import socket as _sock
-                with _sock.socket() as probe:
-                    probe.settimeout(2)
-                    probe.connect(("127.0.0.1", meta["port"]))
-                    up = True
-            checks.append({
-                "flag": "daemon_http", "ok": up,
-                "detail": ("mcp endpoint listening on 127.0.0.1:"
-                           f"{meta['port']}" if up else
-                           "no http endpoint — daemon down or pre-#206"),
-                "remediation": None if up else
-                "doctor self-heals the daemon"})
+            from confluence_knowledge.registration import daemon_http_status
+            checks.append(daemon_http_status("local-knowledge"))
         except Exception:                       # noqa: BLE001,S110 —
             pass                                # status must never fail
     last = None
@@ -737,6 +743,8 @@ def search(scope_handle: str, question: str) -> dict:
             _evidence_sets.pop(next(iter(_evidence_sets)))
         _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
                                   "epoch": idx.snapshot_epoch()}
+    idx.persist_evset(set_id, [e["chunk_id"] for e in ev],
+                      _evidence_sets[set_id]["epoch"])   # #231
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -840,10 +848,14 @@ def verify_citations(scope_handle: str, evidence_set: str,
     s = _scope(scope_handle)
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)
+    idx = _index_for(s["key"])
+    if rec is None:
+        r = idx.evset_rebind(evidence_set)      # #231 daemon restart
+        if r:
+            rec = {"scope": s["key"], **r}
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
-    idx = _index_for(s["key"])
     if rec.get("epoch") != idx.snapshot_epoch():
         raise SecurityException(
             "evidence set predates the latest published snapshot — "

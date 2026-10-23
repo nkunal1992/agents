@@ -195,13 +195,45 @@ def workdir_from_home():
 
 def _scope(scope_handle: str) -> dict:
     s = _scopes.get(scope_handle)
-    if s is None:
-        parts = scope_handle.split(":", 3)
-        if len(parts) == 4 and parts[0] == "scope" and \
-                connect(parts[3])["scope_handle"] == scope_handle:
+    if s is not None:
+        return s
+    # daemon/server restart dropped _scopes — re-bind from the persisted
+    # proof (connect() stamps `root` = the raw input, matching the
+    # handle's last segment) instead of re-running connect()'s live
+    # Graph calls (#229). Same security: the meta exists only where a
+    # real connect created it.
+    parts = scope_handle.split(":", 2)
+    if len(parts) == 3 and parts[0] == "scope":
+        key, root = parts[1], parts[2]
+        try:
+            if not (index_root() / f"{key}.db").exists():
+                raise SetupError("unknown scope — call connect first")
+            idx = _index_for(key)
+            if idx.meta_get("root") == root:
+                profile = SPProfile.load()
+                s = {"key": key, "root_entry": idx.meta_get("root_entry"),
+                     "site_web": profile.site_url, "client": None}
+                with _state_lock:
+                    _scopes[scope_handle] = s
+                return s
+        except Exception:                       # noqa: BLE001,S110
+            pass
+        try:
+            out = connect(root)
+        except Exception:                       # noqa: BLE001
+            out = None
+        if isinstance(out, dict) and out.get("scope_handle") == scope_handle:
             return _scopes[scope_handle]
-        raise SetupError("unknown scope — call connect first")
-    return s
+    raise SetupError("unknown scope — call connect first")
+
+
+def _sp_client(s: dict):
+    """The scope's Graph client — the rebind leaves None (#229), resolved
+    lazily so reads keep working without credentials and crawls get a
+    fresh token when one exists."""
+    if s.get("client") is None:
+        s["client"] = _client_for(SPProfile.load().site_url)
+    return s["client"]
 
 
 @tool(mcp)
@@ -245,22 +277,8 @@ def status() -> dict:
         # points at the daemon's URL — a dead daemon or stale port means
         # tools go unreachable until doctor self-heals it
         try:
-            from confluence_knowledge.registration import _http_meta
-            meta = _http_meta()
-            up = False
-            if meta:
-                import socket as _sock
-                with _sock.socket() as probe:
-                    probe.settimeout(2)
-                    probe.connect(("127.0.0.1", meta["port"]))
-                    up = True
-            checks.append({
-                "flag": "daemon_http", "ok": up,
-                "detail": ("mcp endpoint listening on 127.0.0.1:"
-                           f"{meta['port']}" if up else
-                           "no http endpoint — daemon down or pre-#206"),
-                "remediation": None if up else
-                "doctor self-heals the daemon"})
+            from confluence_knowledge.registration import daemon_http_status
+            checks.append(daemon_http_status("sharepoint-knowledge"))
         except Exception:                       # noqa: BLE001,S110 —
             pass                                # status must never fail
     last = None
@@ -326,6 +344,7 @@ def connect(root: str) -> dict:
     scope_key = profile.scope_key(principal, root_entry)
     idx = _index_for(scope_key, for_write=True)
     idx.meta_set("root_entry", root_entry)   # daemon orphan resume (#189)
+    idx.meta_set("root", root)               # _scope rebind proof (#229)
     st = idx.stats()
     handle = f"scope:{scope_key}:{root}"
     with _state_lock:
@@ -453,7 +472,7 @@ def _worker_loop(s: dict, job_id: str) -> None:
         _start_warmup()
         _models_ready.wait()
         prog = _progress.setdefault(job_id, Progress())
-        c = SPCrawler(s["client"], idx, embedder=_embedder(),
+        c = SPCrawler(_sp_client(s), idx, embedder=_embedder(),
                       downloader=download_file, sparse=_sparse(),
                       control=crawl_control(
                           idx, job_id, prog,
@@ -489,7 +508,7 @@ def _maybe_auto_reindex(s: dict, idx: Index) -> str | None:
                "re-indexing so search stays compatible")
     if os.environ.get("SP_KNOWLEDGE_AUTO_REINDEX", "1") == "0":
         return None
-    job_id = SPCrawler(s["client"], idx).start(s["root_entry"])
+    job_id = SPCrawler(_sp_client(s), idx).start(s["root_entry"])
     _cancel_flags.pop(job_id, None)
     _progress[job_id] = Progress()
     return "started" if _ensure_worker(s, job_id) else "queued"
@@ -615,7 +634,7 @@ def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
 
     s = _scope(scope_handle)
     idx = _index_for(s["key"])
-    c = SPCrawler(s["client"], idx)
+    c = SPCrawler(_sp_client(s), idx)
     job_id = c.start(s["root_entry"])
     _cancel_flags.pop(job_id, None)
     _progress[job_id] = Progress()
@@ -791,6 +810,8 @@ def search(scope_handle: str, question: str) -> dict:
             _evidence_sets.pop(next(iter(_evidence_sets)))
         _evidence_sets[set_id] = {"scope": s["key"], "ev": ev,
                                   "epoch": idx.snapshot_epoch()}
+    idx.persist_evset(set_id, [e["chunk_id"] for e in ev],
+                      _evidence_sets[set_id]["epoch"])   # #231
     return {
         "evidence_set": set_id,
         "coverage": _coverage(idx),
@@ -896,10 +917,14 @@ def verify_citations(scope_handle: str, evidence_set: str,
     s = _scope(scope_handle)
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)
+    idx = _index_for(s["key"])
+    if rec is None:
+        r = idx.evset_rebind(evidence_set)      # #231 daemon restart
+        if r:
+            rec = {"scope": s["key"], **r}
     if rec is None or rec["scope"] != s["key"]:
         raise SecurityException(
             "unknown or cross-scope evidence set — run search again and cite its evidence_set")
-    idx = _index_for(s["key"])
     if rec.get("epoch") != idx.snapshot_epoch():
         raise SecurityException(
             "evidence set predates the latest published snapshot — "

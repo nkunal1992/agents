@@ -159,6 +159,32 @@ def test_scope_survives_server_restart(wired):
     assert wait_done(c["scope_handle"], job["job_id"])["state"] == "done"
 
 
+def test_scope_rebind_needs_no_network(wired, monkeypatch):
+    """#229: a daemon restart drops _scopes — the rebind must not call
+    connect()'s live credential check (VPN/network blip = 'rejecting the
+    connected scope'). The scope's identity is proven by root_page meta
+    connect() already stamped — locally verifiable, zero network."""
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    wait_done(c["scope_handle"], job["job_id"])
+    server._scopes.clear()
+    # every network path now dead — rebind must still serve reads
+    def _no_network(*a, **k):
+        raise AssertionError("rebind touched the network")
+    monkeypatch.setattr(server, "_client_for", _no_network)
+    s = server._scope(c["scope_handle"])
+    assert s["key"] == c["scope_handle"].split(":")[1]
+    # fabricated + malformed handles still rejected
+    from confluence_knowledge.settings import SetupError
+    key = c["scope_handle"].split(":")[1]
+    for bad in (f"scope:{key}:999", "scope:deadbeef:1", "scope:x"):
+        try:
+            server._scope(bad)
+            raise SystemExit(f"{bad} accepted")
+        except SetupError:
+            pass
+
+
 def test_coverage_complete_despite_earlier_failed_job(wired, monkeypatch):
     emb, rr = _FakeEmbedder(), _FakeReranker()
     monkeypatch.setattr(server, "_embedder", lambda: emb)
@@ -177,6 +203,42 @@ def test_reconnect_after_crawl_sees_cache(wired):
     again = server.connect("1")
     assert again["cached"] is True
     assert again["cached_pages"] == 1
+
+
+def test_verify_survives_restart(wired, monkeypatch):
+    """#231: _evidence_sets is process memory — a daemon restart must not
+    turn verify_citations into 'unknown evidence set'. The persisted
+    shadow (chunk_ids + epoch in index meta) rebuilds the set."""
+    emb, rr = _FakeEmbedder(), _FakeReranker()
+    monkeypatch.setattr(server, "_embedder", lambda: emb)
+    monkeypatch.setattr(server, "_reranker", lambda: rr)
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    wait_done(c["scope_handle"], job["job_id"])
+    res = server.search(c["scope_handle"], "text")
+    set_id = res["evidence_set"]
+    q = res["evidence"][0]
+    mapping = [{"claim": "x", "chunk_id": q["chunk_id"],
+                "quote": q["text"][:12]}]
+    server._evidence_sets.clear()            # daemon restarted
+    v = server.verify_citations(c["scope_handle"], set_id, mapping)
+    assert v["ok"], v
+
+
+def test_orphan_reclaim_needs_no_network(wired, monkeypatch):
+    """#231: daemon boot reclaims a 'running' job whose worker died — the
+    scope_key check must not need a live API (offline daemon boot after
+    a crash). connect() stamps `principal` — reclaim validates locally."""
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    key = c["scope_handle"].split(":")[1]
+    server._workers.clear()
+    def _no_network(*a, **k):
+        raise AssertionError("reclaim touched the network")
+    monkeypatch.setattr(server, "_client_for", _no_network)
+    server._resume_job(key, job["job_id"])
+    assert job["job_id"] in server._workers or wait_done(
+        c["scope_handle"], job["job_id"])["state"] == "done"
 
 
 def test_verify_citations_routes_to_daemon(monkeypatch, wired):

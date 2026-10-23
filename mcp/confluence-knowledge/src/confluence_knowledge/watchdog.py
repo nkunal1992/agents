@@ -33,19 +33,33 @@ _TERM = signal.SIGTERM
 _PID_FILE = ".watchdog.pid"
 
 
+def _cmdline_is(pid: int, needle: str) -> bool:
+    """Pid-file entries can outlive their process — pid reuse hands the
+    number to an innocent program, so a bare os.kill is wrong. Verify
+    the cmdline before signalling (mirrors watchdog_running's check)."""
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode()
+        return needle in cmdline
+    except OSError:
+        try:
+            import psutil
+            return needle in " ".join(
+                psutil.Process(pid).cmdline())
+        except Exception:                       # noqa: BLE001 — can't
+            return False                        # verify → don't signal
+
+
 def watchdog_running(home: Path) -> bool:
     """True when a live watchdog holds its pid file in `home`. Pid-reuse
-    makes a bare os.kill check lie — verify the cmdline too."""
+    makes a bare os.kill check lie — verify the cmdline too. On macOS a
+    STALE pid file pointing at a live, unrelated process must not count
+    (no /proc — the old 'alive check stands' path suppressed spawns)."""
     try:
         pid = int((home / _PID_FILE).read_text().strip())
         os.kill(pid, 0)
     except Exception:                           # noqa: BLE001 —
         return False                             # absent or dead
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode()
-        return "confluence_knowledge.watchdog" in cmdline
-    except OSError:
-        return True                    # non-Linux — alive check stands
+    return _cmdline_is(pid, "confluence_knowledge.watchdog")
 
 
 def spawn_watchdog(home: Path) -> None:
@@ -100,22 +114,6 @@ def run(home: Path) -> int:
     return 0
 
 
-def _cmdline_is(pid: int, needle: str) -> bool:
-    """Pid-file entries can outlive their process — pid reuse hands the
-    number to an innocent program, so a bare os.kill is wrong. Verify
-    the cmdline before signalling (mirrors watchdog_running's check)."""
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode()
-        return needle in cmdline
-    except OSError:
-        try:
-            import psutil
-            return needle in " ".join(
-                psutil.Process(pid).cmdline())
-        except Exception:                       # noqa: BLE001 — can't
-            return False                        # verify → don't signal
-
-
 def _daemon_pid_file(home: Path) -> int | None:
     try:
         pid = int((home / ".daemon.pid").read_text().strip())
@@ -163,6 +161,19 @@ def stop_daemon(home: Path, timeout: float = 8) -> dict:
         time.sleep(0.2)
     out["daemon_down"] = not rpc.daemon_alive()
     return out
+
+
+def restart_daemon(home: Path, timeout: float = 8) -> None:
+    """Doctor/upgrade path — stop the pair and spawn a fresh daemon, then
+    CLEAR the stop-file so the new watchdog actually runs. Distinct from
+    `stop_daemon`'s "user wants it off" semantics: here the intent is
+    restart, so the marker must not survive or the watchdog refuses to
+    loop and the daemon ends up watchdog-less (#226)."""
+    stop_daemon(home, timeout=timeout)
+    (home / _STOP_FILE).unlink(missing_ok=True)
+    from .rpc import RpcDb, ensure_daemon
+    ensure_daemon(RpcDb(home / "rpc.db"))
+    spawn_watchdog(home)
 
 
 def main() -> int:
