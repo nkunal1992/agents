@@ -251,6 +251,13 @@ Recover in order:
    "I found a previously cached index of this path from `<cached_as_of>`.
    I will use this to answer your question. Would you like me to refresh it
    to check for file changes?" — wait for the answer before searching.
+   - If `covered_by` is present, the path is inside an already-indexed
+     ancestor root — answers come from that index filtered to this
+     subtree. Say so: "This folder is inside `<covered_by>` which I
+     indexed on `<cached_as_of>` — I'll answer from that index. Say
+     're-index' if you want a dedicated index for just this path."
+     `start_crawl` then materializes it (unchanged files keep their
+     embeddings — far cheaper than a cold crawl).
 4. **Crawl.** `start_crawl` begins a **background crawl** — the server
    indexes the whole tree on its own and posts a desktop notification
    when it finishes. Say what started: "Indexing in the background —

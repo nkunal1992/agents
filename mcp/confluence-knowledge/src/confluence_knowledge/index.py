@@ -80,14 +80,15 @@ class _SearchCache:
     Without it every search query re-read the whole scope from SQLite —
     hundreds of MB of transient allocations per question on big scopes.
     """
-    __slots__ = ("dense", "df", "epoch", "ids", "ids_set", "n_docs",
-                 "pages", "row", "sparse_idx")
+    __slots__ = ("chunk_page", "dense", "df", "epoch", "ids", "ids_set",
+                 "n_docs", "pages", "row", "sparse_idx")
 
     def __init__(self, epoch):
         self.epoch = epoch
         self.ids: list[str] = []
         self.ids_set: set[str] = set()
         self.row: dict[str, int] = {}
+        self.chunk_page: dict[str, str] = {}
         self.dense = np.zeros((0, 0), dtype=np.float16)
         self.sparse_idx: dict[int, tuple] = {}
         self.df: dict[int, int] = {}
@@ -315,6 +316,10 @@ class Index:
         with self.lock, _LockedRetry(self.db):
             self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                             (key, value))
+
+    def meta_del(self, key: str) -> None:
+        with self.lock, _LockedRetry(self.db):
+            self.db.execute("DELETE FROM meta WHERE key=?", (key,))
 
     # ---- evidence-set persistence (#231) ----
     # _evidence_sets is process memory — a daemon restart must not turn
@@ -812,6 +817,7 @@ class Index:
         c.ids = [r[0] for r in rows]
         c.ids_set = set(c.ids)
         c.row = {cid: i for i, cid in enumerate(c.ids)}
+        c.chunk_page = dict(rows)
         # dense: float16 halves RSS vs float32; search-time matmul runs
         # blocked in float32. Mismatched-dim blobs (model swap leftovers)
         # stay zero → score 0, mirroring _cosine's skip.
@@ -909,3 +915,188 @@ class Index:
             snap = r.execute(
                 "SELECT MAX(fetched_at) FROM pages WHERE active=1").fetchone()[0]
             return {"pages": p, "chunks": c, "as_of": snap}
+
+    # ---- #240 descendent-scope reuse ---------------------------------
+
+    def has_page(self, page_id: str) -> bool:
+        """True when page_id is in the LIVE snapshot."""
+        with self._rlock:
+            return self._read().execute(
+                "SELECT 1 FROM pages WHERE page_id=? AND active=1",
+                (page_id,)).fetchone() is not None
+
+    def subtree_pages(self, root_id: str) -> set[str]:
+        """root_id plus every live page whose parent chain reaches it.
+        parent_id is maintained by the crawler's BFS — a page outside
+        the subtree never names root_id as an ancestor."""
+        with self._rlock:
+            rows = self._read().execute(
+                "SELECT page_id,parent_id FROM pages WHERE active=1"
+            ).fetchall()
+        parent = {pid: par for pid, par in rows}
+        out = {root_id} if root_id in parent else set()
+        for pid in parent:
+            cur = pid
+            seen: set[str] = set()
+            while cur in parent and cur not in seen:
+                seen.add(cur)
+                if parent[cur] == root_id:
+                    out.add(pid)
+                    break
+                cur = parent[cur]
+        return out
+
+    def subtree_pages_prefix(self, rel_prefix: str) -> set[str]:
+        """Local-knowledge variant: pages are keyed by path relative to
+        the scope root — a descendent folder's subtree is a prefix set."""
+        with self._rlock:
+            rows = self._read().execute(
+                "SELECT page_id FROM pages WHERE active=1 AND "
+                "(page_id=? OR page_id LIKE ?)",
+                (rel_prefix, rel_prefix.rstrip("/") + "/%")).fetchall()
+        return {r[0] for r in rows}
+
+    def subtree_chunk_ids(self, page_ids: set[str]) -> set[str]:
+        """Active chunk_ids belonging to the given pages — the
+        `allow_chunks` filter a descendent scope applies over its
+        ancestor's snapshot."""
+        cache = self.search_cache()
+        return {cid for cid, pid in cache.chunk_page.items()
+                if pid in page_ids}
+
+    def subtree_pages_entry(self, root_entry: str) -> set[str]:
+        """SharePoint variant (#240): SP folders are queue entries, not
+        page rows — the crawler persists the entry→parent map into
+        `entry_parents` meta at publish. The subtree = all live pages
+        whose entry is a descendant of root_entry (plus the entry itself
+        when it is a live page)."""
+        raw = self.meta_get("entry_parents")
+        if not raw:
+            return set()
+        parents: dict[str, str] = json.loads(raw)
+        kids: dict[str, set[str]] = {}
+        for child, par in parents.items():
+            kids.setdefault(par, set()).add(child)
+        live = set(self.active_pages())
+        out: set[str] = set()
+        stack = [root_entry]
+        while stack:
+            for c in kids.get(stack.pop(), ()):
+                if c not in out:
+                    out.add(c)
+                    stack.append(c)
+        # an item: entry's page row is file:{drive}:{id}; page: entries
+        # are already page ids — translate before intersecting live
+        def _page_form(entry: str) -> str:
+            return ("file:" + entry[5:]
+                    if entry.startswith("item:") else entry)
+        return {_page_form(e) for e in (out | {root_entry})} & live
+
+    def import_subtree(self, src: Index, page_ids: set[str]) -> int:
+        """Copy the listed pages + their chunk/vector/sparse/FTS rows from
+        `src`'s live snapshot into THIS index's live tables — the seed
+        for a descendent scope materializing out of an ancestor. Rows
+        carry content_hash so the following crawl's hash-match reuses
+        embeddings instead of recomputing them. One transaction; bumps
+        this index's epoch. Returns pages imported."""
+        if not page_ids:
+            return 0
+        ids = sorted(page_ids)
+        with self.lock, _LockedRetry(self.db):
+            pages = []
+            for batch in _batches(ids):
+                pages += src._read().execute(
+                    "SELECT page_id,parent_id,title,url,level,version,"
+                    "fetched_at,content_hash,warnings FROM pages "
+                    f"WHERE active=1 AND page_id IN "
+                    f"({','.join('?' * len(batch))})",
+                    batch).fetchall()
+            self.db.executemany(
+                "INSERT OR REPLACE INTO pages(page_id,parent_id,title,url,"
+                "level,version,fetched_at,content_hash,warnings,active) "
+                "VALUES (?,?,?,?,?,?,?,?,?,1)", pages)
+            chunks = []
+            for batch in _batches(ids):
+                chunks += src._read().execute(
+                    "SELECT chunk_id,page_id,heading,kind,ordinal,text "
+                    "FROM chunks WHERE active=1 AND page_id IN "
+                    f"({','.join('?' * len(batch))})",
+                    batch).fetchall()
+            chunk_ids = [c[0] for c in chunks]
+            for batch in _batches(chunk_ids):
+                self.db.executemany(
+                    "DELETE FROM chunks_fts WHERE chunk_id=?",
+                    [(c,) for c in batch])
+                self.db.execute(
+                    f"DELETE FROM chunks WHERE chunk_id IN "
+                    f"({','.join('?' * len(batch))})", batch)
+            self.db.executemany(
+                "INSERT INTO chunks(chunk_id,page_id,heading,kind,ordinal,"
+                "text,active) VALUES (?,?,?,?,?,?,1)", chunks)
+            fts_rows, vecs, sparse = [], [], []
+            for batch in _batches(chunk_ids):
+                ph = ",".join("?" * len(batch))
+                fts_rows += src._read().execute(
+                    "SELECT chunk_id,text FROM chunks_fts "
+                    f"WHERE chunk_id IN ({ph})", batch).fetchall()
+                vecs += src._read().execute(
+                    "SELECT chunk_id,vec FROM vectors "
+                    f"WHERE chunk_id IN ({ph})", batch).fetchall()
+                sparse += src._read().execute(
+                    "SELECT chunk_id,payload FROM sparse_vectors "
+                    f"WHERE chunk_id IN ({ph})", batch).fetchall()
+            self.db.executemany(
+                "INSERT INTO chunks_fts(chunk_id,text) VALUES (?,?)",
+                fts_rows)
+            for batch in _batches(chunk_ids):
+                ph = ",".join("?" * len(batch))
+                self.db.execute(
+                    f"DELETE FROM vectors WHERE chunk_id IN ({ph})", batch)
+                self.db.execute(
+                    f"DELETE FROM sparse_vectors WHERE chunk_id IN ({ph})",
+                    batch)
+            self.db.executemany(
+                "INSERT INTO vectors VALUES (?,?)", vecs)
+            self.db.executemany(
+                "INSERT INTO sparse_vectors VALUES (?,?)", sparse)
+            self._rebuild_term_stats()
+            self.db.execute(
+                "INSERT OR REPLACE INTO meta VALUES ('snapshot_epoch', ?)",
+                (str(self.snapshot_epoch() + 1),))
+            return len(pages)
+
+
+def find_covering(index_root: Path, exclude_key: str, covers,
+                  principal: str | None = None) -> dict | None:
+    """#240: find the freshest fully-crawled sibling index that covers the
+    requested root — the ancestor scope a descendent can read through.
+
+    index_root: the directory holding per-scope `<key>.db` files.
+    covers(idx): membership check — returns the subtree size when the
+    candidate's snapshot contains the root, else 0/None.
+    principal: when set, only indexes stamped with the same `principal`
+    meta are eligible — a different account may not see these pages.
+
+    Returns {key, pages, as_of} of the freshest covering ancestor."""
+    best = None
+    for p in index_root.glob("*.db"):
+        key = p.stem
+        if key == exclude_key:
+            continue
+        try:
+            src = Index(p, readonly=True)
+            job = src.latest_job()
+            if not job or job["state"] != "done":
+                continue                        # partial coverage only
+            if principal is not None and \
+                    src.meta_get("principal") != principal:
+                continue                        # different account's view
+            n = covers(src)
+            if not n:
+                continue
+            as_of = src.stats().get("as_of") or 0
+            if best is None or as_of > best["as_of"]:
+                best = {"key": key, "pages": n, "as_of": as_of}
+        except Exception:                       # noqa: BLE001,S112 —
+            continue                    # unreadable sibling / mid-write race
+    return best

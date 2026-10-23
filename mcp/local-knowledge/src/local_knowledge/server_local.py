@@ -20,7 +20,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
-from confluence_knowledge.index import Index
+from confluence_knowledge.index import Index, find_covering
 from confluence_knowledge.jobs import (
     CrawlCancelled,
     LeaseOwner,
@@ -77,6 +77,19 @@ _warm_started = False
 
 LOADING_NOTE = "loading local models — call this tool again"
 EVIDENCE_CHAR_CAP = 12000  # payload cap; `truncated` flags longer chunks
+
+
+def _read_index(s: dict) -> Index:
+    """Index the scope READS — its own DB normally, the ancestor's when
+    the scope is a #240 descendent alias (reads_from)."""
+    return _index_for(s.get("reads_from") or s["key"])
+
+
+def _subtree_allow(s: dict, idx: Index) -> set[str] | None:
+    if not s.get("subtree_root"):
+        return None
+    pages = idx.subtree_pages_prefix(s["subtree_root"])
+    return idx.subtree_chunk_ids(pages) if pages else set()
 
 
 def _index_for(scope_key: str, *, for_write: bool = False) -> Index:
@@ -193,6 +206,18 @@ def _scope(scope_handle: str) -> dict:
             idx = _index_for(key)
             if idx.meta_get("root_path") == root:
                 s = {"key": key, "root": Path(root)}
+                alias = idx.meta_get("alias_scope")
+                if alias and (index_root() / f"{alias}.db").exists():
+                    # #240 alias persists across restarts — recompute the
+                    # rel prefix under the ancestor root, offline
+                    aroot = (_index_for(alias).meta_get("root_path") or "")
+                    if aroot:
+                        try:
+                            s["reads_from"] = alias
+                            s["subtree_root"] = os.path.relpath(
+                                root, Path(aroot).parent)
+                        except ValueError:
+                            pass        # drive changed → stay uncached
                 with _state_lock:
                     _scopes[scope_handle] = s
                 return s
@@ -348,13 +373,43 @@ def connect(root: str) -> dict:
     idx = _index_for(scope_key, for_write=True)
     idx.meta_set("root_path", str(path))   # daemon orphan resume (#189)
     st = idx.stats()
+    covering = None
+    if st["pages"] == 0:
+        # #240: a folder inside a fully-indexed parent root answers
+        # through the ancestor's snapshot — the subtree is a rel-path
+        # prefix set, no re-crawl
+        def _covers(a: Index) -> int:
+            aroot = a.meta_get("root_path")
+            if not aroot:
+                return 0
+            try:
+                under = os.path.relpath(str(path), aroot)
+            except ValueError:
+                return 0               # different drive
+            if under == "." or under.startswith(".."):
+                return 0               # same root or outside it
+            # A's page_ids are relative to A's root.parent (_rel) — the
+            # subtree's prefix inside A is B's rel under that scheme
+            return len(a.subtree_pages_prefix(
+                os.path.relpath(str(path), Path(aroot).parent)))
+        covering = find_covering(index_root(), scope_key, covers=_covers)
+        if covering:
+            idx.meta_set("alias_scope", covering["key"])
+            idx.meta_set("alias_root", str(path))
     handle = f"scope:{scope_key}:{path}"
+    s = {"key": scope_key, "root": path}
+    if covering:
+        aroot = _index_for(covering["key"]).meta_get("root_path")
+        s["reads_from"] = covering["key"]
+        # subtree prefix in the ancestor's rel scheme (rel to root.parent)
+        s["subtree_root"] = os.path.relpath(
+            str(path), Path(aroot).parent)
     with _state_lock:
-        _scopes[handle] = {"key": scope_key, "root": path}
+        _scopes[handle] = s
     _start_warmup()
     stale = idx.model_id() is not None and idx.model_id() != EMBED_MODEL_ID
     auto = _maybe_auto_reindex(_scopes[handle], idx) if stale else None
-    return {
+    out = {
         "scope_handle": handle,
         "root": str(path),
         "kind": "folder" if path.is_dir() else "file",
@@ -369,6 +424,17 @@ def connect(root: str) -> dict:
                     if auto else "run start_crawl once to rebuild it "
                     "with the current models") if stale else None),
     }
+    if covering:
+        out.update({
+            "cached": True,
+            "cached_pages": covering["pages"],
+            "cached_as_of": covering["as_of"] or None,
+            "covered_by": _index_for(covering["key"]).meta_get("root_path"),
+            "note": "folder is inside an indexed ancestor root — "
+                    "answering from the ancestor's index. "
+                    "start_crawl(scope_handle) builds a dedicated index "
+                    "if you need fresher data."})
+    return out
 
 
 _workers: dict[str, threading.Thread] = {}
@@ -569,6 +635,17 @@ def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
 
     s = _scope(scope_handle)
     idx = _index_for(s["key"], for_write=True)
+    if s.get("reads_from"):
+        # #240: materialize — clone the subtree (rel-prefix set) from the
+        # ancestor into this scope's own index, then crawl normally;
+        # content_hash reuse keeps unchanged embeddings
+        anc = _index_for(s["reads_from"])
+        idx.import_subtree(
+            anc, anc.subtree_pages_prefix(s["subtree_root"]))
+        idx.meta_del("alias_scope")
+        idx.meta_del("alias_root")
+        s.pop("reads_from", None)
+        s.pop("subtree_root", None)
     c = LocalCrawler(idx, s["root"])
     job_id = c.start()
     _cancel_flags.pop(job_id, None)
@@ -715,10 +792,10 @@ def search(scope_handle: str, question: str) -> dict:
     if out is not None:
         return out
     s = _scope(scope_handle)
-    idx = _index_for(s["key"])
+    idx = _read_index(s)
     st = idx.stats()
     if st["pages"] == 0:
-        job = idx.latest_job()
+        job = _index_for(s["key"]).latest_job()
         if job and job["state"] == "running":
             return {"evidence": [], "coverage": "crawling",
                     "note": f"crawl {job['job_id']} still running — keep calling crawl_step "
@@ -732,7 +809,8 @@ def search(scope_handle: str, question: str) -> dict:
                 "note": "this index was built with an older embedding model "
                         "— run start_crawl once to rebuild it, then search again"}
     emb = _embedder()
-    ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse())
+    ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse(),
+                  allow_chunks=_subtree_allow(s, idx))
     corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
     # unique immutable handle — never derived from cache size; bound to the
     # snapshot epoch so a refresh can't silently re-point a citation
@@ -771,8 +849,11 @@ def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
     previously returned chunks, or `page_id` to list that page's chunks in
     ordinal order (Failure Hunt boundary probe: first/last chunks)."""
     s = _scope(scope_handle)
-    idx = _index_for(s["key"])
+    idx = _read_index(s)
     pages = idx.active_pages()
+    if s.get("subtree_root"):
+        keep = idx.subtree_pages_prefix(s["subtree_root"])
+        pages = {pid: p for pid, p in pages.items() if pid in keep}
     out = []
     if page_id is not None:
         if page_id not in pages:
@@ -783,7 +864,8 @@ def get_evidence(scope_handle: str, chunk_ids: list[str] | None = None,
         by_id = {c["chunk_id"]: c for c in idx.chunks_by_ids(wanted)}
         for cid in wanted:
             c = by_id.get(cid)
-            if c is None:
+            if c is None or (s.get("subtree_root")
+                             and c["page_id"] not in pages):
                 raise SecurityException(
                     f"chunk {cid} not in this scope's index")
             out.append(c)
@@ -848,7 +930,8 @@ def verify_citations(scope_handle: str, evidence_set: str,
     s = _scope(scope_handle)
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)
-    idx = _index_for(s["key"])
+    idx = _read_index(s)          # aliased scopes' evsets live in the
+                                  # ancestor's meta (#240)
     if rec is None:
         r = idx.evset_rebind(evidence_set)      # #231 daemon restart
         if r:

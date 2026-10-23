@@ -54,7 +54,13 @@ def sp_env(tmp_path, monkeypatch):
         "fake-e2e-token", fake)
     monkeypatch.setattr(server_sp, "download_file",
                         lambda url: BLOBS[url])
-    return server_sp
+    yield server_sp
+    # cached scopes/indexes are process state — without a reset the next
+    # test's fresh workdir connects hit the previous test's Index objects
+    server_sp._scopes.clear()
+    server_sp._indexes.clear()
+    server_sp._evidence_sets.clear()
+    server_sp._models_ready.clear()
 
 
 def test_full_flow(sp_env):
@@ -121,3 +127,93 @@ def test_verify_survives_restart(sp_env):
     sp_env._evidence_sets.clear()          # daemon restarted
     v = sp_env.verify_citations(c["scope_handle"], set_id, mapping)
     assert v["ok"], v
+
+
+def _routes_with_subtree() -> dict:
+    """site_routes + a 'policies' folder holding two real files — the
+    #240 alias-test subtree (item:{DRIVE_ID}:f1 → f4,f5 pages)."""
+    from _fake_graph import DRIVE_ID as _D, SITE_ID as _S
+    r = site_routes()
+    r[f"drives/{_D}/items/f1/children"] = {"value": [
+        {"id": "f4", "name": "policy.md"},
+        {"id": "f5", "name": "handbook.md"},
+    ]}
+    for i, name in ((4, "policy"), (5, "handbook")):
+        r[f"drives/{_D}/items/f{i}"] = {
+            "id": f"f{i}", "name": f"{name}.md", "size": 60,
+            "webUrl": f"https://t.sharepoint.com/sites/x/{name}.md",
+            "lastModifiedDateTime": "2026-01-01T00:00:00Z",
+            "@microsoft.graph.downloadUrl":
+                f"https://t.sharepoint.com/dl/{name}.md"}
+    return r
+
+
+def _sp_crawl(sp_env, monkeypatch):
+    """Crawl the subtree fixture; returns the site connect dict."""
+    from _fake_graph import BLOBS as _B, FakeGraph
+    _B["https://t.sharepoint.com/dl/policy.md"] = \
+        b"# Policy\n\nApprovals need CAB sign-off.\n"
+    _B["https://t.sharepoint.com/dl/handbook.md"] = \
+        b"# Handbook\n\nProduction deploys happen on Thursdays.\n"
+    sp_env._clients["https://t.sharepoint.com/sites/x"] = (
+        "fake-e2e-token", FakeGraph(_routes_with_subtree()))
+    c = sp_env.connect("site:" + SITE_ID)
+    job = sp_env.start_crawl(c["scope_handle"])
+    r = sp_env.crawl_step(c["scope_handle"], job["job_id"])
+    while r["state"] == "running":
+        r = sp_env.crawl_step(c["scope_handle"], job["job_id"])
+    assert r["state"] == "done"
+    return c
+
+
+def test_descendent_item_scope_answers_from_ancestor(sp_env, monkeypatch):
+    """#240: connect(item:folder ⊂ indexed site) aliases reads — subtree
+    evidence only, no re-crawl."""
+    from _fake_graph import DRIVE_ID
+    _sp_crawl(sp_env, monkeypatch)
+    c = sp_env.connect(f"item:{DRIVE_ID}:f1")
+    assert c.get("covered_by") == f"site:{SITE_ID}"
+    assert c["cached"] is True and c["cached_pages"] == 2
+    res = sp_env.search(c["scope_handle"], "deploys")
+    assert res["evidence"]
+    subtree = {f"file:{DRIVE_ID}:f4", f"file:{DRIVE_ID}:f5"}
+    assert {e["page_id"] for e in res["evidence"]} <= subtree
+    with pytest.raises(Exception):
+        sp_env.get_evidence(c["scope_handle"], page_id=f"file:{DRIVE_ID}:f2")
+
+
+def test_descendent_alias_survives_restart(sp_env, monkeypatch):
+    from _fake_graph import DRIVE_ID
+    _sp_crawl(sp_env, monkeypatch)
+    c = sp_env.connect(f"item:{DRIVE_ID}:f1")
+    sp_env._scopes.clear()
+    sp_env._evidence_sets.clear()
+    res = sp_env.search(c["scope_handle"], "deploys")
+    assert res["evidence"]
+    assert {e["page_id"] for e in res["evidence"]} <= \
+        {f"file:{DRIVE_ID}:f4", f"file:{DRIVE_ID}:f5"}
+
+
+def test_descendent_materializes_on_start_crawl(sp_env, monkeypatch):
+    from _fake_graph import DRIVE_ID
+    _sp_crawl(sp_env, monkeypatch)
+    c = sp_env.connect(f"item:{DRIVE_ID}:f1")
+    job = sp_env.start_crawl(c["scope_handle"])
+    r = sp_env.crawl_step(c["scope_handle"], job["job_id"])
+    while r["state"] == "running":
+        r = sp_env.crawl_step(c["scope_handle"], job["job_id"])
+    assert r["state"] == "done"
+    assert "reads_from" not in sp_env._scopes[c["scope_handle"]]
+    res = sp_env.search(c["scope_handle"], "deploys")
+    assert {e["page_id"] for e in res["evidence"]} <= \
+        {f"file:{DRIVE_ID}:f4", f"file:{DRIVE_ID}:f5"}
+
+
+def test_descendent_alias_needs_same_principal(sp_env, monkeypatch):
+    """#240 security: an index from another account never aliases."""
+    from _fake_graph import DRIVE_ID
+    c = _sp_crawl(sp_env, monkeypatch)
+    a = sp_env._scopes[c["scope_handle"]]["key"]
+    sp_env._index_for(a).meta_set("principal", "other-user")
+    c2 = sp_env.connect(f"item:{DRIVE_ID}:f1")
+    assert "covered_by" not in c2 and c2["cached"] is False

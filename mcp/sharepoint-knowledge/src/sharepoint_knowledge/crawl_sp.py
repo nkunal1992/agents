@@ -233,12 +233,16 @@ class SPCrawler:
         return job_id
 
     def _checkpoint(self, job_id, queue, errors, seen, levels, warns,
-                    keep=()) -> None:
+                    keep=(), parents=None) -> None:
         with self.index.lock, self.index.db:
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"seen:{job_id}", json.dumps(sorted(seen))))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"levels:{job_id}", json.dumps(levels)))
+            if parents is not None:
+                self.index.db.execute(
+                    "INSERT OR REPLACE INTO meta VALUES (?,?)",
+                    (f"parents:{job_id}", json.dumps(parents)))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
                                   (f"warns:{job_id}", json.dumps(warns)))
             self.index.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
@@ -283,6 +287,11 @@ class SPCrawler:
         seen: set[str] = set(json.loads(seen_raw)) if seen_raw else set()
         levels_raw = self.index.meta_get(f"levels:{job_id}")
         levels: dict[str, int] = (json.loads(levels_raw) if levels_raw else {})
+        parents_raw = self.index.meta_get(f"parents:{job_id}")
+        # #240: entry→parent map — the folder tree a descendent scope
+        # later reads through (folders are entries, not page rows)
+        parents: dict[str, str] = (json.loads(parents_raw)
+                                   if parents_raw else {})
         warns_raw = self.index.meta_get(f"warns:{job_id}")
         warns: list[str] = json.loads(warns_raw) if warns_raw else []
 
@@ -432,7 +441,8 @@ class SPCrawler:
                                   or processed - last_ckpt_n >= 50):
                     self._checkpoint(
                         job_id, list(queue) + sorted(inflight.values()),
-                        errors, seen, levels, warns, keep_failed)
+                        errors, seen, levels, warns, keep_failed,
+                        parents=parents)
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
                 _submit(pool)
                 if not inflight:
@@ -459,11 +469,17 @@ class SPCrawler:
                         kids, w = (result if entry.startswith("site:")
                                    else (result, []))
                         warns.extend(w)
+                        for k in kids:
+                            if k not in seen:
+                                parents.setdefault(k, entry)
                         queue.extend(k for k in kids if k not in seen)
                         continue
                     if entry.startswith("item:"):
                         tag = result[0]
                         if tag == "kids":
+                            for k in result[1]:
+                                if k not in seen:
+                                    parents.setdefault(k, entry)
                             queue.extend(k for k in result[1]
                                          if k not in seen)
                             continue
@@ -541,7 +557,8 @@ class SPCrawler:
                     "errors": errors, "warnings": warns}
 
         self._checkpoint(job_id, list(queue) + sorted(inflight.values()),
-                         errors, seen, levels, warns, keep_failed)
+                         errors, seen, levels, warns, keep_failed,
+                         parents=parents)
         # fence: an abandoned/superseded job must never publish or resurrect
         current = self.index.job(job_id)
         if current is None or current["state"] != "running":
@@ -556,6 +573,9 @@ class SPCrawler:
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
             pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            # the published entry tree — a later connect() on a folder or
+            # page inside this scope reads through it (#240)
+            self.index.meta_set("entry_parents", json.dumps(parents))
             # auditable outcome: what the refresh added vs tombstoned vs
             # carried forward — stored so status/last_crawl can report it
             self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
