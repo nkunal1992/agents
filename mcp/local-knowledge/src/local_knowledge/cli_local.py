@@ -66,8 +66,7 @@ def _doctor() -> int:
     if any(c["flag"] == "daemon_http" and not c["ok"]
            for c in s.get("checks", [])):
         try:
-            from confluence_knowledge.registration import (
-                register, registered_transport)
+            from confluence_knowledge.registration import register, registered_transport
             from confluence_knowledge.settings import daemon_home
             from confluence_knowledge.watchdog import restart_daemon
             root = daemon_home()

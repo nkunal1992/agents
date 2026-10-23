@@ -273,8 +273,7 @@ def status() -> dict:
         # points at the daemon's URL — a dead daemon or stale port means
         # tools go unreachable until doctor self-heals it
         try:
-            from confluence_knowledge.registration import \
-                daemon_http_status
+            from confluence_knowledge.registration import daemon_http_status
             checks.append(daemon_http_status("local-knowledge"))
         except Exception:                       # noqa: BLE001,S110 —
             pass                                # status must never fail
