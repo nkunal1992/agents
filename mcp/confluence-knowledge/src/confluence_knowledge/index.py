@@ -143,11 +143,14 @@ class Index:
     def __init__(self, path: Path, readonly: bool = False):
         self._path = path
         self._readonly = readonly
-        # read-only shadow connection: WAL lets a second reader see the
-        # last-committed snapshot without touching the writer's
-        # transaction — light tools (status/crawl_step/evidence) must
-        # never queue behind a publish sweep or a cache rebuild (#188)
-        self._rdb: sqlite3.Connection | None = None
+        # read-only shadow connections, one PER THREAD: WAL lets a second
+        # reader see the last-committed snapshot without touching the
+        # writer's transaction — light tools (status/crawl_step/evidence)
+        # must never queue behind a publish sweep or a cache rebuild
+        # (#188). A single shared conn can't run cursors from two threads
+        # safely — publish's cache-warm thread proved that (#255)
+        self._rdb_local = threading.local()
+        self._rconns: set[sqlite3.Connection] = set()
         self._rlock = threading.RLock()
         path.parent.mkdir(parents=True, exist_ok=True)
         # timeout: retry transient locks (AV scan, second process, WAL
@@ -196,7 +199,9 @@ class Index:
         self._cache: _SearchCache | None = None
         self._ann: bool | None = None   # None=untried, True=ready, False=no ext
         if readonly:
-            self._rdb = self.db        # the main conn already is ro
+            # proxy mode (#189): the main conn already is ro — every
+            # thread shares it, matching the pre-thread-local behavior
+            self._rdb_local.conn = self.db
             return
         with self.lock:
             self.db.executescript(SCHEMA)
@@ -216,32 +221,42 @@ class Index:
                 self.db.commit()
 
     def close(self) -> None:
-        """Release both connections — Windows refuses file deletion while
-        the read conn is still open (e2e cleanup hit WinError 32)."""
-        for conn in (self._rdb, self.db):
+        """Release all connections — Windows refuses file deletion while
+        a read conn is still open (e2e cleanup hit WinError 32)."""
+        with self._rlock:
+            conns = list(self._rconns) + [self.db]
+            self._rconns.clear()
+        for conn in conns:
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:           # noqa: BLE001,S110 — close
                     pass                     # is best-effort at teardown
-        self._rdb = None
+        self._rdb_local.conn = None
+
+    def _open_read_conn(self) -> sqlite3.Connection:
+        """Fresh read-only WAL connection — registered so close() can
+        reach it from the owner thread at teardown."""
+        conn = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True,
+                               timeout=5, check_same_thread=False)
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        if mode != "wal":
+            from .settings import SetupError
+            conn.close()
+            raise SetupError(
+                f"index journal_mode is {mode!r}, expected wal")
+        with self._rlock:
+            self._rconns.add(conn)
+        return conn
 
     def _read(self) -> sqlite3.Connection:
-        """Read-only connection for pure queries — WAL snapshot semantics
+        """This thread's read-only connection — WAL snapshot semantics
         mean a mid-publish read simply sees the previous snapshot."""
-        if self._rdb is None:
-            uri = f"file:{self._path}?mode=ro"
-            self._rdb = sqlite3.connect(uri, uri=True, timeout=5,
-                                        check_same_thread=False)
-            # assert once, on the READ conn — touching self.db here would
-            # corrupt an in-flight write transaction (readers race it)
-            mode = self._rdb.execute("PRAGMA journal_mode").fetchone()[0]
-            if mode != "wal":
-                # read/write deadlock risk — WAL is load-bearing (#188)
-                from .settings import SetupError
-                raise SetupError(
-                    f"index journal_mode is {mode!r}, expected wal")
-        return self._rdb
+        conn = getattr(self._rdb_local, "conn", None)
+        if conn is None:
+            conn = self._open_read_conn()
+            self._rdb_local.conn = conn
+        return conn
 
     # ---- jobs ----
     def create_job(self, job_id: str, root_page: str) -> None:
@@ -571,13 +586,21 @@ class Index:
         """Recompute per-term document frequency from the live sparse vectors.
         Called inside the publish transaction so BM25 idf is always in step
         with the snapshot. Must run inside a transaction on self.db."""
-        counts: dict[int, int] = {}
         n = 0
+        term_chunks: list = []
         for (blob,) in self.db.execute("SELECT payload FROM sparse_vectors"):
             k = len(blob) // 12
             n += 1
-            for t in np.unique(np.frombuffer(blob[:8 * k], dtype=np.int64)):
-                counts[int(t)] = counts.get(int(t), 0) + 1
+            # df is documents-per-term — dedupe terms inside each doc,
+            # then one vectorized unique+count over the corpus (#255)
+            term_chunks.append(
+                np.unique(np.frombuffer(blob[:8 * k], dtype=np.int64)))
+        if term_chunks:
+            uniq, cnts = np.unique(np.concatenate(term_chunks),
+                                   return_counts=True)
+            counts = dict(zip(uniq.tolist(), cnts.tolist()))
+        else:
+            counts = {}
         self.db.execute("DELETE FROM term_stats")
         self.db.executemany("INSERT INTO term_stats VALUES (?,?)",
                             sorted(counts.items()))
@@ -698,7 +721,22 @@ class Index:
                 "INSERT OR REPLACE INTO meta VALUES ('snapshot_epoch', ?)",
                 (str(self.snapshot_epoch() + 1),))
         kept = max(0, len(seen_page_ids) - staged_n)
+        self._warm_search_cache()
         return {"staged": staged_n, "deleted": deleted_n, "kept": kept}
+
+    def _warm_search_cache(self) -> None:
+        """Pre-build the retrieval structures off the request path — the
+        first search after a publish used to pay the full postings scan
+        (~1s at 50k chunks) inside the user's query (#255). Epoch-guarded:
+        a publish landing mid-build is caught by search_cache()'s swap
+        check, so a stale build can never displace a fresher snapshot."""
+        def _run() -> None:
+            try:
+                self.search_cache()
+            except Exception:      # noqa: BLE001 — opportunistic warm only
+                pass
+        threading.Thread(target=_run, name="cache-warm",
+                         daemon=True).start()
 
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:
@@ -872,26 +910,45 @@ class Index:
             n = np.linalg.norm(dense, axis=1, keepdims=True)
             dense = dense / (n + 1e-9)
             c.dense = dense.astype(np.float16)
-        # inverted sparse index: term → (row indices, weights)
-        postings: dict[int, tuple[list[int], list[float]]] = {}
+        # inverted sparse index: term → (row indices, weights). One argsort
+        # over a single concatenated postings array replaces the per-term
+        # Python get/append loop — ~8.9M appends → a few vector ops at 50k
+        # chunks (#255)
+        term_chunks: list = []
+        row_chunks: list = []
+        wt_chunks: list = []
         for cid, blob in self._read().execute(
                 "SELECT s.chunk_id,s.payload FROM sparse_vectors s "
                 "JOIN chunks ch ON ch.chunk_id=s.chunk_id "
                 "WHERE ch.active=1"):
-            i = c.row[cid]
+            i = c.row.get(cid)
+            if i is None:
+                # the two read-txns above can straddle a publish — a
+                # chunk from the newer epoch isn't in c.row; the epoch
+                # swap check rebuilds instead of serving it torn
+                continue
             k = len(blob) // 12
-            idx_arr = np.frombuffer(blob[:8 * k], dtype=np.int64)
-            val_arr = np.frombuffer(blob[8 * k:], dtype=np.float32)
-            for t, w in zip(idx_arr.tolist(), val_arr.tolist()):
-                ent = postings.get(t)
-                if ent is None:
-                    postings[t] = ([i], [w])
-                else:
-                    ent[0].append(i)
-                    ent[1].append(w)
-        c.sparse_idx = {t: (np.asarray(rs, dtype=np.int32),
-                            np.asarray(ws, dtype=np.float32))
-                        for t, (rs, ws) in postings.items()}
+            term_chunks.append(np.frombuffer(blob[:8 * k], dtype=np.int64))
+            row_chunks.append(np.full(k, i, dtype=np.int32))
+            wt_chunks.append(np.frombuffer(blob[8 * k:], dtype=np.float32))
+        if term_chunks:
+            terms = np.concatenate(term_chunks)
+            rows = np.concatenate(row_chunks)
+            wts = np.concatenate(wt_chunks)
+            # stable: blobs arrive in chunk order, so per-term row lists
+            # stay ascending like the old append loop produced
+            order = np.argsort(terms, kind="stable")
+            terms, rows, wts = terms[order], rows[order], wts[order]
+            # sorted → term boundaries are just diffs; np.unique would pay
+            # a second full sort
+            first = np.concatenate(
+                ([0], np.flatnonzero(np.diff(terms)) + 1))
+            uniq = terms[first]
+            bounds = np.append(first[1:], len(terms))
+            c.sparse_idx = {
+                t: (rows[s:e], wts[s:e])
+                for t, s, e in zip(uniq.tolist(), first.tolist(),
+                                   bounds.tolist())}
         c.df, c.n_docs = self.term_stats()
         c.pages = self.active_pages()
         return c
@@ -1022,7 +1079,10 @@ class Index:
                 "SELECT chunk_id, distance FROM vec_chunks "
                 "WHERE embedding MATCH ? AND k = ?",
                 (qvec.astype(np.float32).tobytes(), fetch)).fetchall()
-        except sqlite3.OperationalError:
+        except sqlite3.DatabaseError:
+            # any read-side sqlite failure (OperationalError and kin —
+            # torn publish/close races surface as plain DatabaseError) →
+            # the sparse/FTS legs still answer (#255)
             return []
         out = []
         for cid, dist in rows:
