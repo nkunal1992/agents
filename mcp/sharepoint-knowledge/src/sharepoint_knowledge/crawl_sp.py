@@ -330,21 +330,21 @@ class SPCrawler:
         pool_n = (self.control.fetch_ceiling(conc)
                   if self.control is not None else conc)
         inflight: dict = {}             # future -> entry string
-        pending: list = []              # (pid, page, chunks, hash) to stage
+        pending: list = []              # (pid, page, chunks, hash, entry)
         visited_submit: set[str] = set()
+        # single embed/stage worker: dense embedding is the dominant serial
+        # phase — running it beside the fetch loop overlaps model time with
+        # network time. One worker bounds in-flight buffers to
+        # ~2×FLUSH_MAX_CHUNKS (#255, parity with confluence crawl)
+        flush_fut = None
+        flush_entries: set[str] = set()  # queue entries inside the in-flight
+                                         # flush — checkpoints re-queue them
+                                         # so a crash mid-flush re-crawls
 
-        def _flush_pending() -> bool:
-            nonlocal pending
-            if not pending:
-                return True
-            # cap each flush at ~FLUSH_MAX_CHUNKS — bounds a single
-            # flush's embed time; the rest stay pending (#244, parity
-            # with confluence crawl)
-            buf, n_chunks = [], 0
-            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
-                pid, pg, chunks, h = pending.pop(0)
-                buf.append((pid, pg, chunks, h))
-                n_chunks += len(chunks)
+        def _do_flush(buf: list, n_chunks: int) -> None:
+            """Embed + stage a page buffer on the embed worker; marks `seen`
+            only after rows land. Raises where the inline version returned
+            False — `_join_flush` restores the bool contract."""
             vecs = sp = None
             if self.embedder is not None:
                 if self.control is not None:
@@ -354,7 +354,7 @@ class SPCrawler:
                                           self.control.battery_saver()
                                           else ""))
                 texts = [f"{pg['title']}\n{c.heading_path}\n{c.text}"
-                         for _, pg, chunks, _ in buf for c in chunks]
+                         for _, pg, chunks, *_ in buf for c in chunks]
                 if texts:
                     tick_t0 = time.monotonic()
 
@@ -393,20 +393,17 @@ class SPCrawler:
                             (time.monotonic() - t0) * 1000
             off = 0
             t0 = time.monotonic()
-            for pid, pg, chunks, h in buf:
+            for pid, pg, chunks, h, _e in buf:
                 n = len(chunks)
-                try:
-                    self.index.upsert_page({
-                        "page_id": pid, "parent_id": None,
-                        "title": pg["title"], "url": pg["url"],
-                        "level": levels.get(pid, 0),
-                        "version": pg["version"], "content_hash": h,
-                        "warnings": pg["warnings"]}, chunks,
-                        vecs[off:off + n] if vecs is not None else None,
-                        sp[off:off + n] if sp is not None else None,
-                        job_id=job_id)
-                except StaleJobError:
-                    return False
+                self.index.upsert_page({
+                    "page_id": pid, "parent_id": None,
+                    "title": pg["title"], "url": pg["url"],
+                    "level": levels.get(pid, 0),
+                    "version": pg["version"], "content_hash": h,
+                    "warnings": pg["warnings"]}, chunks,
+                    vecs[off:off + n] if vecs is not None else None,
+                    sp[off:off + n] if sp is not None else None,
+                    job_id=job_id)
                 off += n
             stats["store_ms"] += (time.monotonic() - t0) * 1000
             stats["pages"] += len(buf)
@@ -415,13 +412,47 @@ class SPCrawler:
             if self.control is not None:
                 self.control.page_done(len(buf))
                 self.control.phase("fetching")
+
+        def _join_flush() -> bool:
+            """False when the in-flight flush hit StaleJobError; other
+            failures (cancel, embed) propagate like the inline version."""
+            nonlocal flush_fut, flush_entries
+            if flush_fut is None:
+                return True
+            try:
+                flush_fut.result()
+            except StaleJobError:
+                return False
+            finally:
+                flush_fut = None
+                flush_entries = set()
             return True
 
-        def _stage_result(pid, page, chunks) -> bool:
+        def _flush_pending() -> bool:
+            """Join the previous flush (back-pressure: ≤1 in flight), then
+            hand the next ≤FLUSH_MAX_CHUNKS buffer to the embed worker."""
+            nonlocal pending, flush_fut, flush_entries
+            if not _join_flush():
+                return False
+            if not pending:
+                return True
+            # cap each flush at ~FLUSH_MAX_CHUNKS — bounds a single
+            # flush's embed time; the rest stay pending (#244, parity
+            # with confluence crawl)
+            buf, n_chunks = [], 0
+            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
+                pending_item = pending.pop(0)
+                buf.append(pending_item)
+                n_chunks += len(pending_item[2])
+            flush_entries = {e for *_, e in buf}
+            flush_fut = epool.submit(_do_flush, buf, n_chunks)
+            return True
+
+        def _stage_result(pid, page, chunks, entry) -> bool:
             """Buffer one fetched page for the next flush."""
             pending.append((pid, page, chunks,
-                            page["content_hash"]))
-            if sum(len(c) for _, _, c, _ in pending) >= 64:
+                            page["content_hash"], entry))
+            if sum(len(c) for _, _, c, *_ in pending) >= 64:
                 return _flush_pending()
             return True
 
@@ -488,7 +519,9 @@ class SPCrawler:
                     errors.append(f"{entry}: {type(e).__name__}: {e}")
 
         with ThreadPoolExecutor(max_workers=pool_n,
-                                thread_name_prefix="crawl-fetch") as pool:
+                                thread_name_prefix="crawl-fetch") as pool, \
+                ThreadPoolExecutor(max_workers=1,
+                                   thread_name_prefix="crawl-embed") as epool:
             while queue or inflight:
                 if self.control is not None:
                     self.control.check()
@@ -509,7 +542,8 @@ class SPCrawler:
                 if processed and (time.monotonic() - last_ckpt >= 5.0
                                   or processed - last_ckpt_n >= 50):
                     self._checkpoint(
-                        job_id, list(queue) + sorted(inflight.values()),
+                        job_id, list(queue) + sorted(inflight.values())
+                        + sorted(flush_entries),
                         errors, seen, levels, warns, keep_failed,
                         parents=parents)
                     _save_stats()
@@ -592,7 +626,7 @@ class SPCrawler:
                         warns.extend(w)
                         for c in chunks:
                             c.chunk_id = f"{pid}:{h[:8]}:{c.ordinal}"
-                        if not _stage_result(pid, meta, chunks):
+                        if not _stage_result(pid, meta, chunks, entry):
                             return {"job_id": job_id, "state": "abandoned",
                                     "remaining": len(queue),
                                     "pages_seen": len(seen),
@@ -614,7 +648,7 @@ class SPCrawler:
                     warns.extend(w)
                     for c in chunks:
                         c.chunk_id = f"{pid}:{h[:8]}:{c.ordinal}"
-                    if not _stage_result(pid, page, chunks):
+                    if not _stage_result(pid, page, chunks, entry):
                         return {"job_id": job_id, "state": "abandoned",
                                 "remaining": len(queue),
                                 "pages_seen": len(seen),
@@ -626,12 +660,21 @@ class SPCrawler:
                     errors.append(
                         f"prefetch {entry}: "
                         f"{type(e).__name__} (refetches on resume)")
-        if not _flush_pending():
-            return {"job_id": job_id, "state": "abandoned",
-                    "remaining": len(queue), "pages_seen": len(seen),
-                    "errors": errors, "warnings": warns}
+            # drain the buffer the fetch loop left behind, then join the
+            # last in-flight flush — publish must not run over half-staged
+            # pages (inside the `with`: the embed pool is still open)
+            while pending:
+                if not _flush_pending():
+                    return {"job_id": job_id, "state": "abandoned",
+                            "remaining": len(queue), "pages_seen": len(seen),
+                            "errors": errors, "warnings": warns}
+            if not _join_flush():
+                return {"job_id": job_id, "state": "abandoned",
+                        "remaining": len(queue), "pages_seen": len(seen),
+                        "errors": errors, "warnings": warns}
 
-        self._checkpoint(job_id, list(queue) + sorted(inflight.values()),
+        self._checkpoint(job_id, list(queue) + sorted(inflight.values())
+                         + sorted(flush_entries),
                          errors, seen, levels, warns, keep_failed,
                          parents=parents)
         # fence: an abandoned/superseded job must never publish or resurrect
@@ -647,7 +690,10 @@ class SPCrawler:
                 self.control.progress.remaining = 0
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
+            t_pub = time.monotonic()
             pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            stats["publish_ms"] = stats.get("publish_ms", 0.0) + \
+                (time.monotonic() - t_pub) * 1000
             # the published entry tree — a later connect() on a folder or
             # page inside this scope reads through it (#240)
             self.index.meta_set("entry_parents", json.dumps(parents))
@@ -657,7 +703,7 @@ class SPCrawler:
             self.index.set_model_id(_MODEL_ID)
             _save_stats()
         self.index.save_job(job_id, "done" if not queue else "running",
-                            list(queue), errors)
+                            list(queue) + sorted(flush_entries), errors)
         return {"job_id": job_id,
                 "state": "done" if not queue else "running",
                 "remaining": len(queue), "pages_seen": len(seen),
