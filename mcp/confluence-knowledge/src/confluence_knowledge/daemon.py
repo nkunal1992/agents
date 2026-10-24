@@ -186,9 +186,7 @@ class Daemon:
         self.rpc.heartbeat_daemon(self.owner)
         self._http = self._serve_http()
         self.rpc.heartbeat_daemon(self.owner)
-        # _reap_strays() disabled for CI bisect (#253): it is the only
-        # new component that kills processes — if the respawn/reap
-        # spiral stops without it, it is the root cause
+        self._reap_strays()
         self.rpc.heartbeat_daemon(self.owner)
         self._resume_orphans()
         self.rpc.heartbeat_daemon(self.owner)
@@ -429,17 +427,25 @@ class Daemon:
             return
         me = os.getpid()
         home = str(self.workdir)
-        for proc in psutil.process_iter(["pid", "cmdline"]):
+        now = time.time()
+        for proc in psutil.process_iter(["pid", "cmdline", "create_time"]):
             try:
                 if proc.pid == me:
                     continue
                 argv = proc.cmdline()
                 joined = " ".join(argv)
+                # only ANCIENT strays (>10 min): a same-boot predecessor
+                # is seconds old and must never be reaped — killing it
+                # was the CI respawn->reap death spiral (#253). The
+                # reaper's real job is leaked processes from pre-fix
+                # sessions, all hours/days old by definition.
                 if (("confluence_knowledge.daemon" in joined
                         or "confluence_knowledge.watchdog" in joined)
-                        and home in argv):
-                    log.info("reaping stray %s pid=%s",
-                             joined.split()[-1], proc.pid)
+                        and home in argv
+                        and now - proc.create_time() > 600):
+                    log.info("reaping stray %s pid=%s age=%dm",
+                             joined.split()[-1], proc.pid,
+                             int((now - proc.create_time()) / 60))
                     proc.terminate()
             except (psutil.NoSuchProcess, psutil.AccessDenied,
                     psutil.ZombieProcess):
