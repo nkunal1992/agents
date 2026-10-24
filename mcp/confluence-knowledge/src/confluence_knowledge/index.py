@@ -114,8 +114,11 @@ class _LockedRetry:
     reader's snapshot (real failure on loaded Windows CI runners). A
     small bounded retry turns the snapshot conflict into a transient.
     """
-    _TRIES = 6
-    _BACKOFF = (0.05, 0.1, 0.2, 0.4, 0.8)
+    # ~10s total — must outlast a sibling install's publish txn now that
+    # separate venvs share the same index files (#257); the pre-#257 ~1.5s
+    # budget only covered checkpoint starvation
+    _TRIES = 9
+    _BACKOFF = (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 3.0)
 
     def __init__(self, db: sqlite3.Connection):
         self.db = db
@@ -193,13 +196,51 @@ class Index:
                 self.db.close()
             from .settings import SetupError
             raise SetupError(
-                f"index unreadable at {path} — delete it and re-crawl "
-                "(or run `clean` to drop every index)") from e
+                f"index unreadable at {path} — if a different package "
+                "version wrote it, align every install on one version; "
+                "otherwise run `clean` and re-crawl") from e
         self.lock = threading.RLock()
         self._cache: _SearchCache | None = None
         self._cache_cv = threading.Condition(self.lock)
         self._building_cache = False
+        self._warm_threads: set[threading.Thread] = set()
         self._ann: bool | None = None   # None=untried, True=ready, False=no ext
+        # strict schema gate (#257): separate IDE installs share the index
+        # files — a version-skewed second install must refuse cleanly, not
+        # misread a newer layout. Pre-production: no migrations, one rule.
+        has_meta = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='meta'").fetchone() is not None
+        if has_meta:
+            row = self.db.execute(
+                "SELECT value FROM meta WHERE key='schema_version'"
+                ).fetchone()
+            stored = row[0] if row is not None else None
+            if stored != str(SCHEMA_VERSION):
+                self.db.close()
+                from .settings import SetupError
+                raise SetupError(
+                    f"index at {path} "
+                    + ("predates schema versioning" if stored is None else
+                       f"was written by schema v{stored}")
+                    + f" — this build expects v{SCHEMA_VERSION}. Run every "
+                    "install on the same package version, or `clean` and "
+                    "re-crawl")
+        elif self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "LIMIT 1").fetchone() is not None:
+            # tables but no meta — a pre-versioning index; refuse rather
+            # than silently adopt a layout this build can't trust
+            self.db.close()
+            from .settings import SetupError
+            raise SetupError(
+                f"index at {path} predates schema versioning — this build "
+                f"expects v{SCHEMA_VERSION}. Run `clean` and re-crawl")
+        elif readonly:
+            self.db.close()
+            from .settings import SetupError
+            raise SetupError(
+                f"index at {path} holds no schema — run `clean` and re-crawl")
         if readonly:
             # proxy mode (#189): the main conn already is ro — every
             # thread shares it, matching the pre-thread-local behavior
@@ -225,6 +266,12 @@ class Index:
     def close(self) -> None:
         """Release all connections — Windows refuses file deletion while
         a read conn is still open (e2e cleanup hit WinError 32)."""
+        # a publish's cache-warm thread iterates a registered read conn —
+        # closing it mid-query frees the buffer numpy is viewing (the
+        # frombuffer zero-copy path) → use-after-free segfault. The build
+        # is one bounded scan; joining is always finite (#257)
+        for t in list(self._warm_threads):
+            t.join()
         with self._rlock:
             conns = list(self._rconns) + [self.db]
             self._rconns.clear()
@@ -737,8 +784,14 @@ class Index:
                 self.search_cache()
             except Exception:      # noqa: BLE001,S110 — opportunistic warm only
                 pass
-        threading.Thread(target=_run, name="cache-warm",
-                         daemon=True).start()
+            finally:
+                with self._rlock:
+                    self._warm_threads.discard(
+                        threading.current_thread())
+        t = threading.Thread(target=_run, name="cache-warm", daemon=True)
+        with self._rlock:
+            self._warm_threads.add(t)
+        t.start()
 
     # ---- query ----
     def active_pages(self) -> dict[str, dict]:
