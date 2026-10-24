@@ -104,6 +104,7 @@ def test_server_process_count_via_psutil(monkeypatch):
             SimpleNamespace(cmdline=lambda: ["py", "-m", "other.app"])]
     monkeypatch.setattr("psutil.process_iter",
                         lambda *a, **k: iter(fake))
+    monkeypatch.setattr(health, "_proc_count_cache", None)
     assert health._server_process_count() == 2
 
 
