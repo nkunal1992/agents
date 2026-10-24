@@ -338,13 +338,16 @@ def _spawn_lock(workdir) -> os.PathLike | None:
     return _locked()
 
 
-def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
+def ensure_daemon(rpc: RpcDb, env: dict | None = None,
+                  await_up: bool = True) -> None:
     """Spawn the shared daemon lazily if no live owner holds the lease.
     Racing proxies may double-spawn — self-correcting: the loser's
     acquire_daemon fails and it exits. The proxy never manages the
     lifecycle beyond this — a dead lease means the next request simply
     respawns it. The daemon anchors at daemon_home(): one process per
-    interpreter serving every installed knowledge service (#206)."""
+    interpreter serving every installed knowledge service (#206).
+    await_up=False for pollers (the watchdog) that retry anyway — the
+    wait is for callers who need the daemon NOW."""
     if rpc.daemon_alive():
         return
     try:
@@ -369,7 +372,7 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
                     _spawn_daemon(rpc, workdir, env)
                     stamp.write_text("1")
                 spawn = True
-        if spawn:                       # spawner and waiters share the
+        if spawn and await_up:          # spawner and waiters share the
             _await_daemon(rpc, workdir)  # same bounded boot wait
     except DaemonUnavailable:
         raise
@@ -417,6 +420,9 @@ def _spawn_daemon(rpc: RpcDb, workdir, env: dict | None = None) -> None:
                 stop.unlink(missing_ok=True)
         cli_env = dict(os.environ)
         cli_env["KNOWLEDGE_DAEMON_ROLE"] = "1"   # the brain never proxies
+        cli_env.pop("KNOWLEDGE_WATCHDOG_ROLE", None)  # a daemon spawned
+        # BY the watchdog must still spawn its own — the role marker is
+        # for the watchdog itself, not its children (#253)
         if env:
             cli_env.update(env)
         proc = _popen_detached(

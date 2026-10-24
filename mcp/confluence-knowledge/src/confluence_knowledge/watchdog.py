@@ -108,9 +108,9 @@ def run(home: Path) -> int:
             log.info("daemon lease dead — respawning")
             try:
                 from .rpc import ensure_daemon
-                ensure_daemon(rpc)
-                fails = 0
-            except Exception:
+                ensure_daemon(rpc, await_up=False)   # the 2s loop IS
+                fails = 0                             # the wait — don't
+            except Exception:                         # sit in _await_daemon
                 fails += 1
                 log.warning("respawn failed (%d/3)", fails,
                             exc_info=True)
