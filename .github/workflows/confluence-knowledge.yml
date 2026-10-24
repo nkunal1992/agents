@@ -24,6 +24,8 @@ jobs:
         run: pip install -e './mcp/confluence-knowledge[dev]'
       - name: Lint
         run: ruff check mcp/confluence-knowledge/src mcp/confluence-knowledge/tests
+      - name: Managed-laptop pattern gate
+        run: python scripts/check_managed.py
       - name: Unit tests (offline — no models, no network)
         run: pytest mcp/confluence-knowledge/tests -q
       - name: CLI smoke

@@ -35,6 +35,8 @@ jobs:
           pip install -e './mcp/sharepoint-knowledge[dev]'
       - name: Lint
         run: ruff check mcp/sharepoint-knowledge/src mcp/sharepoint-knowledge/tests
+      - name: Managed-laptop pattern gate
+        run: python scripts/check_managed.py
       - name: Unit tests (offline — no models, no network)
         run: pytest mcp/sharepoint-knowledge/tests -q
       - name: CLI smoke
