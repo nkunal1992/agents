@@ -246,6 +246,20 @@ def stop_shared_daemon(cli: Path, env: dict) -> None:
         import subprocess as _sp
         _sp.run([str(cli), "stop"], env=env, capture_output=True,
                 timeout=30, check=False)
+        # dump the daemon pair's tails — CI artifacts can't see the
+        # sandboxed KNOWLEDGE_SHARED_HOME, so this is the only place
+        # the logs ever surface
+        import glob as _g
+        for pat in ("**/daemon.log", "**/watchdog.log"):
+            for f in _g.glob(str(Path(env.get(
+                    "KNOWLEDGE_SHARED_HOME", "")) / pat), recursive=True):
+                try:
+                    lines = Path(f).read_text(
+                        errors="replace").splitlines()
+                    print(f"---- {f} (last 40) ----")
+                    print("\n".join(lines[-40:]))
+                except OSError:
+                    pass
     except Exception:                       # noqa: BLE001,S110 —
         pass                                 # teardown is best-effort
 
