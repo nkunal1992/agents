@@ -23,7 +23,7 @@ import sys
 import time
 from pathlib import Path
 
-from .rpc import RpcDb
+from .rpc import RpcDb, _cmdline_is
 
 log = logging.getLogger("knowledge.watchdog")
 
@@ -31,22 +31,6 @@ _POLL_S = 2.0
 _STOP_FILE = ".watchdog.stop"
 _TERM = signal.SIGTERM
 _PID_FILE = ".watchdog.pid"
-
-
-def _cmdline_is(pid: int, needle: str) -> bool:
-    """Pid-file entries can outlive their process — pid reuse hands the
-    number to an innocent program, so a bare os.kill is wrong. Verify
-    the cmdline before signalling (mirrors watchdog_running's check)."""
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode()
-        return needle in cmdline
-    except OSError:
-        try:
-            import psutil
-            return needle in " ".join(
-                psutil.Process(pid).cmdline())
-        except Exception:                       # noqa: BLE001 — can't
-            return False                        # verify → don't signal
 
 
 def watchdog_running(home: Path) -> bool:
@@ -71,9 +55,9 @@ def watchdog_running(home: Path) -> bool:
             pass                     # can't probe on Windows without psutil —
         else:                        # trust the pid file + cmdline check
             try:
-                os.kill(pid, 0)
+                os.kill(pid, 0)                  # managed-ok — POSIX
             except Exception:                    # noqa: BLE001 —
-                return False
+                return False                     # fallback only
     return _cmdline_is(pid, "confluence_knowledge.watchdog")
 
 

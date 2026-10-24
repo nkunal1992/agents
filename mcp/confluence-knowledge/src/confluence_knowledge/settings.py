@@ -23,6 +23,25 @@ class SetupError(RuntimeError):
     """A problem the user can fix via setup instructions."""
 
 
+def is_app_control_block(exc: BaseException) -> bool:
+    """True when a WDAC/AppLocker policy blocked a native library —
+    WinError 4551 "An Application Control policy has blocked this file"
+    (unsigned .pyd/.dll such as onnxruntime, tokenizers, sqlite-vec).
+    Reinstalling cannot fix it; only an IT allowlist/signer exception
+    can. Detectable so we don't emit the misleading "reinstall" advice."""
+    if getattr(exc, "winerror", None) == 4551:
+        return True
+    msg = str(exc).lower()
+    return "application control policy" in msg or "blocked by a policy" in msg
+
+
+def app_control_remediation(what: str) -> str:
+    return (f"{what} is blocked by a Windows Application Control "
+            "(WDAC/AppLocker) policy — its DLL isn't signed. Ask IT to "
+            "allowlist python + site-packages (managed-installer rule) "
+            "or run under an approved interpreter; reinstalling won't help.")
+
+
 def default_home(env_var: str = "CONF_KNOWLEDGE_HOME",
                  dir_name: str = ".confluence-knowledge") -> Path:
     env = os.environ.get(env_var)
@@ -79,7 +98,7 @@ def ensure_gitignore(path: Path, entries: list[str],
     Raises SetupError if a protected path is already tracked by git.
     """
     gi = path / ".gitignore"
-    existing = set(gi.read_text().splitlines()) if gi.exists() else set()
+    existing = set(gi.read_text(encoding="utf-8").splitlines()) if gi.exists() else set()
     missing = [e for e in entries if e not in existing]
     if missing:
         with gi.open("a") as f:
@@ -120,7 +139,7 @@ def _git_info_exclude(path: Path, entries: list[str]) -> None:
         pat = e if str(prefix) == "." else str(prefix / e)
         rel.append(pat.replace("\\", "/"))
     ex = git_dir / "info" / "exclude"
-    existing = set(ex.read_text().splitlines()) if ex.exists() else set()
+    existing = set(ex.read_text(encoding="utf-8").splitlines()) if ex.exists() else set()
     missing = [e for e in rel if e not in existing]
     if missing:
         ex.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +200,7 @@ class SiteProfile:
         tmp.write_text(json.dumps({
             "env": self.env, "base_url": self.base_url,
             "email": self.email, "credential_ref": self.credential_ref,
-        }, indent=2))
+        }, indent=2), encoding="utf-8")
         os.replace(tmp, p)  # atomic
         return p
 

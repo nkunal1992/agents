@@ -60,12 +60,14 @@ def _daemon_services_version(meta: dict) -> str | None:
     try:
         import json as _json
         import urllib.request as _req
+
+        from .rpc import _local_urlopen
         req = _req.Request(
             f"http://127.0.0.1:{meta['port']}/_services",
             headers={"Authorization": f"Bearer {meta['token']}"})
         if not req.full_url.startswith("http://127.0.0.1:"):
             return None
-        with _req.urlopen(req, timeout=2) as r:     # nosec B310
+        with _local_urlopen(req, timeout=2) as r:   # nosec B310
             return _json.loads(r.read()).get("version")
     except Exception:                               # noqa: BLE001
         return None
@@ -131,7 +133,7 @@ def _http_meta(workdir: Path | None = None) -> dict | None:
     from .settings import daemon_home
     root = workdir if workdir is not None else daemon_home()
     try:
-        meta = _json.loads((root / "http.json").read_text())
+        meta = _json.loads((root / "http.json").read_text(encoding="utf-8"))
         if isinstance(meta.get("port"), int) and meta.get("token"):
             return meta
     except Exception:                           # noqa: BLE001,S110
@@ -244,7 +246,7 @@ def _merge(path: Path, entry: dict | None, server_id: str = SERVER_ID) -> str:
     replaced = False
     if path.exists():
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             data = {}
             replaced = True  # unparseable (JSONC etc.) — back up and rewrite
@@ -257,7 +259,7 @@ def _merge(path: Path, entry: dict | None, server_id: str = SERVER_ID) -> str:
         servers[server_id] = entry
         action = "backup-replaced" if replaced else "written"
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return action
 
@@ -268,12 +270,13 @@ def _mounted_services(meta: dict) -> list[str]:
     import json as _json
     import urllib.request
     try:
+        from .rpc import _local_urlopen
         req = urllib.request.Request(
             f"http://127.0.0.1:{meta['port']}/_services",
             headers={"Authorization": f"Bearer {meta['token']}"})
         if not req.full_url.startswith("http://127.0.0.1:"):
             return []                          # refuse a tampered meta URL
-        with urllib.request.urlopen(req, timeout=3) as r:  # nosec B310
+        with _local_urlopen(req, timeout=3) as r:  # nosec B310
             return _json.loads(r.read()).get("services", [])
     except Exception:                           # noqa: BLE001 — probe is
         return []                                # best-effort
@@ -296,10 +299,24 @@ def _restart_daemon() -> None:
             os.kill(row[0], signal.SIGTERM)
             deadline = _t.monotonic() + 8
             while _t.monotonic() < deadline:
+                # psutil liveness, never os.kill(pid,0) — on Windows that
+                # is CTRL_C_EVENT (throws or terminates; #260), and a bare
+                # pid check lies on pid reuse → require the cmdline too
                 try:
-                    os.kill(row[0], 0)
-                except OSError:
-                    break
+                    import psutil
+
+                    from .rpc import _cmdline_is
+                    if not psutil.pid_exists(int(row[0])) or not \
+                            _cmdline_is(int(row[0]),
+                                        "confluence_knowledge.daemon"):
+                        break
+                except ImportError:
+                    if os.name == "nt":
+                        break       # unverifiable → don't loop forever
+                    try:
+                        os.kill(row[0], 0)  # managed-ok — POSIX-only
+                    except OSError:         # fallback; on Windows it's
+                        break               # CTRL_C_EVENT, never a probe
                 _t.sleep(0.2)
     except Exception:                           # noqa: BLE001,S110 —
         pass                                     # best-effort restart
@@ -374,7 +391,7 @@ def registered_transport(server_id: str = SERVER_ID) -> str | None:
     user's choice is preserved (#226)."""
     for p in targets("all"):
         try:
-            entry = (json.loads(p.read_text())
+            entry = (json.loads(p.read_text(encoding="utf-8"))
                      .get(_root_key(p), {}).get(server_id))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
@@ -396,7 +413,7 @@ def registered_paths(server_id: str = SERVER_ID,
                      else workspace.parent}]
     for p in dict.fromkeys(q for q in probes if q):
         try:
-            servers = json.loads(p.read_text()).get(_root_key(p), {})
+            servers = json.loads(p.read_text(encoding="utf-8")).get(_root_key(p), {})
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
         if p.exists() and server_id in servers:

@@ -38,7 +38,7 @@ import traceback
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
-from .rpc import RpcDb, daemon_owner
+from .rpc import RpcDb, _local_urlopen, daemon_owner
 
 log = logging.getLogger("knowledge.daemon")
 
@@ -333,11 +333,13 @@ class Daemon:
         try:
             # localhost-only probe — the URL is built above from our own
             # http.json; assert the scheme/host so a tampered meta can't
-            # smuggle file:/ or a remote origin into urllib
+            # smuggle file:/ or a remote origin into urllib. _local_urlopen
+            # bypasses proxies — a corp proxy that hijacks loopback would
+            # otherwise fail this probe twice and self-eject us forever.
             if not req.full_url.startswith("http://127.0.0.1:"):
                 log.warning("mcp self-probe refused non-local URL")
                 return False
-            with urllib.request.urlopen(req, timeout=10) as r:  # nosec B310
+            with _local_urlopen(req, timeout=10) as r:  # nosec B310
                 return r.status == 200
         except Exception:
             log.warning("mcp self-probe failed", exc_info=True)
@@ -349,14 +351,14 @@ class Daemon:
         path = self.workdir / "http.json"
         meta = {}
         try:
-            meta = json.loads(path.read_text())
+            meta = json.loads(path.read_text(encoding="utf-8"))
         except Exception:                       # noqa: BLE001,S110
             pass
         token = meta.get("token") or secrets.token_hex(16)
         port = meta.get("port")
         if not (isinstance(port, int) and _port_free(port)):
             port = _free_port()
-        path.write_text(json.dumps({"port": port, "token": token}))
+        path.write_text(json.dumps({"port": port, "token": token}), encoding="utf-8")
         os.chmod(path, 0o600)
         return meta | {"port": port, "token": token}
 

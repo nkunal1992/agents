@@ -23,6 +23,14 @@ from confluence_knowledge.resources import limits
 from confluence_knowledge.settings import SetupError
 
 # dirs never worth indexing — noise or actively harmful to read
+# Windows file-attribute bits marking OneDrive files-on-demand
+# placeholders — FILE_ATTRIBUTE_OFFLINE | RECALL_ON_DATA_ACCESS |
+# RECALL_ON_OPEN. They are NOT symlinks, and reading one hydrates it
+# from the cloud: a managed laptop with Known Folder Move (Documents →
+# OneDrive is the default) turns a local crawl into a hydrate-storm
+# indistinguishable from a freeze. Skip + disclose instead.
+_CLOUD_ONLY_ATTRS = 0x1000 | 0x400000 | 0x40000
+
 SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv",
              "venv", ".idea", ".vscode", "target", "dist", "build", ".tox"}
 MAX_FILE_BYTES = 25 * 1024 * 1024  # 25MB — bigger files get a warning, not a crash
@@ -76,6 +84,16 @@ class LocalCrawler:
         except ValueError:
             return path.name
 
+    @staticmethod
+    def _cloud_only(e: Path) -> bool:
+        """True when `e` is a OneDrive-style placeholder — reading it
+        hydrates from the cloud. st_file_attributes is Windows-only;
+        POSIX returns False through the AttributeError guard."""
+        try:
+            return bool(e.stat().st_file_attributes & _CLOUD_ONLY_ATTRS)
+        except (OSError, AttributeError):
+            return False
+
     def _children(self, d: Path) -> tuple[list[str], list[str]]:
         """(new queue entries, warnings) — guarded, secret-aware listing."""
         out, warns = [], []
@@ -96,6 +114,10 @@ class LocalCrawler:
                     warns.append(f"{self._rel(e)}: symlink escapes the root — skipped")
                     continue
                 e = rp
+            if self._cloud_only(e):
+                warns.append(f"{self._rel(e)}: cloud placeholder "
+                             "(files-on-demand) — skipped")
+                continue
             if e.is_dir():
                 if e.name in SKIP_DIRS or e.name.startswith(".git"):
                     continue
@@ -117,6 +139,13 @@ class LocalCrawler:
     def _read(self, f: Path) -> tuple[dict, bytes, str]:
         """Fetch worker: stat + read + hash — extraction stays on the
         main thread so unchanged files can skip it entirely."""
+        if self._cloud_only(f):          # belt: a `file:` root can be a
+            return ({"page_id": self._rel(f), "title": f.name,  # placeholder
+                     "url": f"file://{f}", "version": "0",
+                     "content_hash": "",
+                     "warnings": [("cloud placeholder "
+                                   "(files-on-demand) — skipped")]},
+                    b"", "")
         try:
             st = f.stat()
             if st.st_size > MAX_FILE_BYTES:

@@ -263,6 +263,35 @@ class RpcDb:
             return True                # the heartbeat
 
 
+def _local_urlopen(req, timeout: float):
+    """urlopen that can NEVER traverse a proxy — managed laptops set
+    HTTP_PROXY via env or the Windows registry (urllib.getproxies reads
+    both), and corp configs rarely exclude 127.0.0.1. A loopback call
+    routed through the proxy fails → _probe_http → daemon self-eject
+    loop (#260). Every http://127.0.0.1: call MUST go through here;
+    external calls (update.py → PyPI) keep the default opener — they
+    SHOULD honor the proxy."""
+    import urllib.request
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({})).open(req, timeout=timeout)
+
+
+def _cmdline_is(pid: int, needle: str) -> bool:
+    """cmdline contains `needle` — the pid-reuse guard for liveness
+    claims (pid files outlive processes; a bare pid check can hand the
+    number to an innocent program). /proc where it exists, psutil
+    elsewhere; False when neither can verify — callers treat
+    unverifiable as dead rather than signal/check wrongly."""
+    try:
+        return needle in Path(f"/proc/{pid}/cmdline").read_bytes().decode()
+    except OSError:
+        try:
+            import psutil
+            return needle in " ".join(psutil.Process(pid).cmdline() or [])
+        except Exception:                       # noqa: BLE001 —
+            return False                         # can't verify → False
+
+
 def daemon_enabled(service_env: str) -> bool:
     """Proxy mode gate (#189/#196): ON by default — the service env opt-out
     (e.g. LOCAL_KNOWLEDGE_DAEMON=0) is the only off switch. The daemon
@@ -336,8 +365,20 @@ def _spawn_lock(workdir) -> os.PathLike | None:
             fd = os.open(workdir / ".spawn.lock",
                          os.O_CREAT | os.O_RDWR, 0o600)
             if os.name == "nt":
+                # LK_LOCK retries ~10s then RAISES — a stuck lock-holder
+                # (killed mid-spawn) used to turn every subsequent spawn
+                # into DaemonUnavailable. Bounded NBLCK retry instead,
+                # windowed past the 60s .spawn.stamp freshness.
                 import msvcrt
-                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                deadline = time.monotonic() + 90
+                while True:
+                    try:
+                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError:
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.1)
             else:
                 import fcntl
                 fcntl.flock(fd, fcntl.LOCK_EX)
@@ -412,7 +453,7 @@ def _await_daemon(rpc: RpcDb, workdir) -> None:
     http_deadline = time.monotonic() + 20
     while time.monotonic() < http_deadline:
         try:
-            meta = _json.loads((workdir / "http.json").read_text())
+            meta = _json.loads((workdir / "http.json").read_text(encoding="utf-8"))
             with _sock.socket() as sock:
                 sock.settimeout(0.5)
                 sock.connect(("127.0.0.1", meta["port"]))
