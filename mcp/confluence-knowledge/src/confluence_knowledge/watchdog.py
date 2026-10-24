@@ -78,6 +78,11 @@ def spawn_watchdog(home: Path) -> None:
         with _spawn_lock(home):
             if watchdog_running(home):     # re-check under the lock
                 return
+            # a LIVE daemon asking for supervision means any leftover
+            # .watchdog.stop is stale — a previous `stop`'s marker must
+            # not stand the new supervisor down (#253: e2e teardown's
+            # stop file made every later spawn's watchdog exit on sight)
+            (home / _STOP_FILE).unlink(missing_ok=True)
             proc = _popen_detached(
                 [sys.executable, "-m", "confluence_knowledge.watchdog",
                  str(home)],

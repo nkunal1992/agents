@@ -202,8 +202,13 @@ class Daemon:
             Fire-and-forget on a daemon thread: heartbeats must never
             pause on a sibling's health check."""
             import threading as _t
-            _t.Thread(target=spawn_watchdog, args=(self.workdir,),
-                      daemon=True, name="watchdog-kicker").start()
+
+            def kick() -> None:
+                if self.stop.is_set():   # mid-shutdown — a kick now
+                    return               # would resurrect the pair
+                spawn_watchdog(self.workdir)
+            _t.Thread(target=kick, daemon=True,
+                      name="watchdog-kicker").start()
 
         # the FIRST kick is synchronous — supervision must be guaranteed
         # before the loop starts beating; a daemon killed between kick
