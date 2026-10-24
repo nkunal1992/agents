@@ -603,8 +603,8 @@ def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
         return rpc.wait(rid, timeout,
                         on_tick=lambda: heartbeat(
                             0, message=f"daemon {name}"))
-    except DaemonUnavailable:
-        return None
+    except DaemonUnavailable as e:
+        return {"_error": f"daemon unavailable: {e}"}
     except RuntimeError as e:
         return {"_error": str(e)}
 
