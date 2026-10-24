@@ -62,11 +62,16 @@ def watchdog_running(home: Path) -> bool:
     return _cmdline_is(pid, "confluence_knowledge.watchdog")
 
 
-def spawn_watchdog(home: Path) -> None:
-    """Detached watchdog process — survives the spawning daemon/CLI."""
+def spawn_watchdog(home: Path, live_daemon: bool = False) -> None:
+    """Detached watchdog process — survives the spawning daemon/CLI.
+    `live_daemon` marks calls made by the daemon itself: it is alive and
+    asking for supervision, so a leftover `.watchdog.stop` is stale and
+    gets cleared BEFORE the running-check — otherwise a supervisor on
+    its way out would satisfy the check while still exiting (#253: e2e
+    teardown's stop file idled the next generation's watchdog)."""
     if os.environ.get("KNOWLEDGE_WATCHDOG_ROLE"):
         return                       # a watchdog never spawns a sibling
-    if watchdog_running(home):
+    if watchdog_running(home) and not live_daemon:
         return
     env = dict(os.environ)
     env["KNOWLEDGE_WATCHDOG_ROLE"] = "1"
@@ -76,13 +81,10 @@ def spawn_watchdog(home: Path) -> None:
         # a daemon-revive and a restart_daemon racing here must not both
         # pass watchdog_running and land duplicate watchdogs
         with _spawn_lock(home):
+            if live_daemon:
+                (home / _STOP_FILE).unlink(missing_ok=True)
             if watchdog_running(home):     # re-check under the lock
                 return
-            # a LIVE daemon asking for supervision means any leftover
-            # .watchdog.stop is stale — a previous `stop`'s marker must
-            # not stand the new supervisor down (#253: e2e teardown's
-            # stop file made every later spawn's watchdog exit on sight)
-            (home / _STOP_FILE).unlink(missing_ok=True)
             proc = _popen_detached(
                 [sys.executable, "-m", "confluence_knowledge.watchdog",
                  str(home)],

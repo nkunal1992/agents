@@ -206,7 +206,7 @@ class Daemon:
             def kick() -> None:
                 if self.stop.is_set():   # mid-shutdown — a kick now
                     return               # would resurrect the pair
-                spawn_watchdog(self.workdir)
+                spawn_watchdog(self.workdir, live_daemon=True)
             _t.Thread(target=kick, daemon=True,
                       name="watchdog-kicker").start()
 
@@ -215,7 +215,8 @@ class Daemon:
         # and spawn would leave nothing to respawn it (#253 same-url
         # respawn regression). Periodic kicks go on the thread below so
         # a hung probe can't freeze heartbeats.
-        spawn_watchdog(self.workdir)   # it revives us; we revive it
+        spawn_watchdog(self.workdir, live_daemon=True)
+                                       # it revives us; we revive it
         try:
             while not self.stop.is_set():
                 alive = self.rpc.heartbeat_daemon(self.owner)
