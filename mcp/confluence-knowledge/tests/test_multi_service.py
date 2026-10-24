@@ -125,7 +125,7 @@ def test_watchdog_respawns_dead_daemon(tmp_path, monkeypatch):
 
     spawned = []
     monkeypatch.setattr("confluence_knowledge.rpc.ensure_daemon",
-                        lambda r, env=None: spawned.append(True)
+                        lambda r, env=None, **kw: spawned.append(True)
                         or _claim(rpc))
     def _claim(r):
         r.db.execute("INSERT OR REPLACE INTO daemon_lease "
@@ -266,7 +266,8 @@ def test_restart_daemon_clears_stop_file(tmp_path, monkeypatch):
                         lambda home: calls.append("spawn"))
     import confluence_knowledge.rpc as rpc_mod
     monkeypatch.setattr(rpc_mod, "ensure_daemon",
-                        lambda rpc, env=None: calls.append("ensure"))
+                        lambda rpc, env=None, **kw:
+                        calls.append("ensure"))
     watchdog.restart_daemon(tmp_path)
     assert calls == ["stop", "ensure", "spawn"], calls
     assert not (tmp_path / ".watchdog.stop").exists()
