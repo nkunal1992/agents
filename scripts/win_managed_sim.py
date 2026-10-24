@@ -80,7 +80,7 @@ def loopback():
         return "connectable (unexpected)"
     except ConnectionRefusedError:
         return "reachable (refused as expected) — loopback works"
-    except (TimeoutError, socket.timeout):
+    except TimeoutError:
         # Windows retries SYN to dead loopback ports instead of RST —
         # a timeout is the NORMAL refusal there, not a block. The
         # listener probe below is the definitive test.
