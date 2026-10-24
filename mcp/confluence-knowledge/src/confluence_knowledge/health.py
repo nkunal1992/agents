@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from .settings import SetupError
@@ -177,11 +178,28 @@ def _index_checks(index_root: Path) -> list[dict]:
     return out
 
 
+_LOOPBACK_TTL_S = 600.0     # the probe does real socket work — on AV-
+_loopback_probe_cache: tuple[float, dict] | None = None  # scanned hosts
+# each bind+connect costs ~seconds; status() is a hot path, so the
+# result caches process-wide (an EDR verdict can't change mid-session)
+
+
 def _loopback_listener_check() -> dict:
     """Bind + connect a 127.0.0.1 listener — the daemon serves MCP over
     exactly this; an EDR/WFP callout (CrowdStrike, SentinelOne, AV
     'encrypted web scan') that intercepts loopback turns daemon mode
-    into a crash-respawn loop. Cross-platform, one-time."""
+    into a crash-respawn loop. Cross-platform, cached."""
+    global _loopback_probe_cache
+    if (_loopback_probe_cache
+            and time.monotonic() - _loopback_probe_cache[0]
+            < _LOOPBACK_TTL_S):
+        return _loopback_probe_cache[1]
+    result = _loopback_probe()
+    _loopback_probe_cache = (time.monotonic(), result)
+    return result
+
+
+def _loopback_probe() -> dict:
     import socket
     srv = socket.socket()
     try:
@@ -221,7 +239,7 @@ def _managed_windows_checks(home: Path, workdir: Path) -> list[dict]:
     items only warn; hard blockers go `ok=False`."""
     if sys.platform != "win32":     # sys.platform, not os.name — tests
         return []                   # fake it; pathlib reads os.name
-    out = [_loopback_listener_check()]
+    out = []
 
     try:
         import winreg
