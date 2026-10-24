@@ -173,6 +173,10 @@ class Daemon:
         if not self.rpc.acquire_daemon(self.owner, os.getpid()):
             log.error("daemon lease held by a live process — exiting")
             return 2
+        try:
+            (self.workdir / ".spawn.stamp").unlink(missing_ok=True)
+        except OSError:
+            pass   # lease taken — a fresh stamp now means in-flight only
         log.info("daemon up: owner=%s workdir=%s services=%s",
                  self.owner, self.workdir, sorted(self.services))
         self._reap_strays()
