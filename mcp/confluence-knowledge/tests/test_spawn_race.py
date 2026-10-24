@@ -103,11 +103,14 @@ def test_stray_reaper_kills_same_home_only(tmp_path, monkeypatch):
     killed = []
 
     class P:
-        def __init__(self, pid, argv):
-            self.pid, self._argv = pid, argv
+        def __init__(self, pid, argv, age_s=3600):
+            self.pid, self._argv, self._age = pid, argv, age_s
 
         def cmdline(self):
             return self._argv
+
+        def create_time(self):
+            return time.time() - self._age
 
         def terminate(self):
             killed.append(self.pid)
@@ -119,6 +122,8 @@ def test_stray_reaper_kills_same_home_only(tmp_path, monkeypatch):
         P(103, ["py", "-m", "confluence_knowledge.daemon",
                 "/other/home"]),           # different home — legitimate
         P(104, ["py", "-m", "other.module", home]),
+        P(105, ["py", "-m", "confluence_knowledge.daemon",
+                home], age_s=30),          # same-boot sibling — spared
     ]
     import sys
     import types
