@@ -134,7 +134,7 @@ def test_stray_reaper_kills_same_home_only(tmp_path, monkeypatch):
     # exclude self: swap our pid onto proc 101's slot? simpler — own pid
     # won't be in `fake`; add a self-pid entry to prove exclusion
     fake.append(P(me, ["py", "-m", "confluence_knowledge.daemon", home]))
-    d._reap_strays()
+    d._reap_strays_inner()
     assert sorted(killed) == [101, 102], killed
 
 

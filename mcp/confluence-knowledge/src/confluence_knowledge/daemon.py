@@ -179,8 +179,11 @@ class Daemon:
             pass   # lease taken — a fresh stamp now means in-flight only
         log.info("daemon up: owner=%s workdir=%s services=%s",
                  self.owner, self.workdir, sorted(self.services))
-        self._reap_strays()
+        # reap AFTER the http endpoint binds — the sweep is janitorial,
+        # never worth delaying (or hanging, on Windows psutil cmdline)
+        # the surface callers are waiting on
         self._http = self._serve_http()
+        self._reap_strays()
         self._resume_orphans()
         last_gc = 0.0
         last_probe = 0.0
@@ -391,7 +394,17 @@ class Daemon:
         alive on this SAME workdir — each holds model RAM. We just won
         the lease, so anything else on our home is by definition a
         stray: SIGTERM it (own pid excluded). Different-home siblings
-        are legitimate — untouched."""
+        are legitimate — untouched. Runs on a daemon thread under a
+        10s cap — psutil cmdline probes can hang on Windows."""
+        import threading
+        t = threading.Thread(target=self._reap_strays_inner,
+                             daemon=True, name="stray-reaper")
+        t.start()
+        t.join(timeout=10)
+        if t.is_alive():
+            log.warning("stray reaper timed out — leaving strays")
+
+    def _reap_strays_inner(self) -> None:
         try:
             import psutil
         except ImportError:
