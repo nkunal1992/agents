@@ -208,6 +208,41 @@ Env knobs: `KNOWLEDGE_UPDATE_INDEX` (mirror URL template),
 
 `doctor` exits non-zero while any flag is red.
 
+## Sharing across IDEs
+
+One index per (site, account, root) lives in `~/.confluence-knowledge`
+— every IDE on the machine reads and writes the same files, so indexing
+a page once in VS Code makes it queryable from Windsurf, Cursor or
+JetBrains on the **very next query**, with no IDE reload.
+
+How it works:
+
+- Each IDE window's MCP server is a thin read-only **proxy** (#189); a
+  detached per-install **daemon** owns the index, crawl workers and the
+  model pool (#206). Two installs = two daemons over the same index.
+- `job_lease` (a SQLite row) fences crawls across processes — a second
+  `start_crawl` on a running scope never duplicates work, and a kill
+  mid-crawl lets the other install's daemon resume it.
+- `snapshot_epoch` is bumped inside every publish; each query re-reads it
+  — sibling installs see a new snapshot automatically.
+
+Rules of the road:
+
+- **Same package version everywhere.** Indexes are schema-versioned;
+  a version-skewed install refuses to open them (no silent misreads).
+  `pip install -U` one install ⇒ upgrade the rest, or `clean` + re-crawl.
+- **Same paths everywhere.** Do not set `CONF_KNOWLEDGE_WORKDIR` or
+  `KNOWLEDGE_SHARED_HOME` differently between IDEs — each value forks its
+  own index. `status()` reports every effective path under `paths` so two
+  IDEs can be diffed directly.
+- **Register each IDE once.** `confluence-knowledge register --ide all`
+  writes VS Code + JetBrains + Windsurf (`~/.codeium/windsurf/
+  mcp_config.json`) + Cursor (`~/.cursor/mcp.json`,
+  `<repo>/.cursor/mcp.json`) configs.
+- Each install's daemon holds its own model sessions (~0.2 GB idle —
+  the reaper unloads after inactivity). Prefer one shared install if RAM
+  is tight; `stop`/`clean` act per install.
+
 ## Resource usage
 
 The server is designed to stay out of the way on a developer laptop:

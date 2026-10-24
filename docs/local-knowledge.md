@@ -99,6 +99,27 @@ Running jobs surface live reporting fields (`status`, `crawl_step`,
   (staged/deleted/kept), `index_size_mb`, `pages_indexed`
 
 
+## Sharing across IDEs
+
+One index per (realpath, machine) lives in `~/.local-knowledge` — indexing
+a folder once in one IDE makes it queryable from every other IDE/chat on
+the machine on the **very next query**, no reload needed.
+
+- Each IDE window's MCP server is a thin read-only proxy; a detached
+  per-install daemon owns the index + crawl workers (#189/#206). Separate
+  installs share the same index files over WAL.
+- `job_lease` fences crawls across processes — a second `start_crawl` on a
+  running scope never duplicates work.
+- `snapshot_epoch` bumps inside every publish; each query re-reads it, so
+  a sibling install's crawl is visible automatically.
+
+Rules: keep every install on the same package version (indexes refuse a
+version-skewed open — no silent misreads); never set
+`LOCAL_KNOWLEDGE_WORKDIR`/`KNOWLEDGE_SHARED_HOME` differently between IDEs
+(`status().paths` shows every effective path for diffing); register once
+per IDE (`local-knowledge register --ide all` covers VS Code, JetBrains,
+Windsurf and Cursor). `stop`/`clean` act per install.
+
 ## Resource usage
 
 Models load lazily on first `connect` and unload after ~10 idle minutes —
