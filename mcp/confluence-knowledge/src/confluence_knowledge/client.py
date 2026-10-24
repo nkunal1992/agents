@@ -8,6 +8,7 @@ a per-adapter endpoint allowlist. No convenience method can bypass this.
 from __future__ import annotations
 
 import re
+import ssl
 import time
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
@@ -36,6 +37,26 @@ def _retry_after_seconds(value: str | None) -> float:
         return max(0.5, min(_RETRY_AFTER_CAP_S, delta))
     except (TypeError, ValueError):
         return 2.0
+
+
+def _os_trust_context() -> ssl.SSLContext:
+    """SSL context trusting the OS certificate store, not just certifi —
+    managed laptops behind TLS-inspecting proxies (Zscaler/Netskope)
+    install the corp root into the OS store; httpx's default pins
+    certifi.where() and every Confluence call dies with
+    CERTIFICATE_VERIFY_FAILED (#260). On Windows, create_default_context
+    loads the system store (load_default_certs → ROOT/CA stores); on
+    POSIX it honors SSL_CERT_FILE (what pip-system-certs exports for
+    requests/urllib/hf_hub anyway)."""
+    ctx = ssl.create_default_context()
+    try:
+        empty = not ctx.get_ca_certs()
+    except NotImplementedError:
+        empty = False    # truststore injected ctx (pip-system-certs.pth)
+    if empty:            # raises — already IS the OS store, no fallback
+        import certifi  # exotic env: empty store → certifi still works
+        ctx.load_verify_locations(certifi.where())
+    return ctx
 
 
 class SecurityException(RuntimeError):
@@ -74,6 +95,7 @@ class ConfluenceClient:
         self._http = session or httpx.Client(
             headers={"Accept": "application/json", **headers},
             timeout=timeout,
+            verify=_os_trust_context(),
             follow_redirects=False,  # never carry credentials through redirects
         )
         self._max_bytes = max_bytes

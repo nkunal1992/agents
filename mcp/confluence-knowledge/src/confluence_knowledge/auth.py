@@ -50,10 +50,10 @@ def store_credential(workdir: Path, home: Path, ref: str, token: str,
     # file fallback — gitignore BEFORE writing
     ensure_gitignore(workdir, [auth_file, index_dir + "/"])
     p = reject_unsafe_path(workdir / auth_file)
-    data = json.loads(p.read_text()) if p.exists() else {}
+    data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     data[ref] = token
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data))
+    tmp.write_text(json.dumps(data), encoding="utf-8")
     os.replace(tmp, p)
     if os.name != "nt":
         os.chmod(p, stat.S_IRUSR | stat.S_IWUSR)
@@ -72,11 +72,11 @@ def get_credential(workdir: Path, ref: str, env: str = ENV_TOKEN,
         return t
     p = workdir / auth_file
     if p.exists():
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         return data.get(ref)
     p2 = Path.home() / home_dir / auth_file
     if p2.exists():
-        return json.loads(p2.read_text()).get(ref)
+        return json.loads(p2.read_text(encoding="utf-8")).get(ref)
     return None
 
 
