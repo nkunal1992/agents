@@ -61,7 +61,8 @@ def test_embed_flush_overlaps_fetch(index):
     embed instead of sitting inside it."""
     fetch_starts: list[float] = []
     pages = {str(i) for i in range(1, 41)}     # 40 pages ≈ 3 flushes
-    body = " ".join(f"<p>para {i} text {' '.join(['w'] * 50)}</p>"
+    words = " ".join(["w"] * 50)
+    body = " ".join(f"<p>para {i} text {words}</p>"
                     for i in range(40))         # ~9 chunks/page
 
     class SlowCrawler(Crawler):
