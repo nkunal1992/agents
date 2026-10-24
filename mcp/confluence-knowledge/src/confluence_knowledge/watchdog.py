@@ -53,12 +53,27 @@ def watchdog_running(home: Path) -> bool:
     """True when a live watchdog holds its pid file in `home`. Pid-reuse
     makes a bare os.kill check lie — verify the cmdline too. On macOS a
     STALE pid file pointing at a live, unrelated process must not count
-    (no /proc — the old 'alive check stands' path suppressed spawns)."""
+    (no /proc — the old 'alive check stands' path suppressed spawns).
+    Windows note: os.kill(pid, 0) is CTRL_C_EVENT there — it can throw on
+    a detached sibling or TERMINATE it outright (verified on the QA VM),
+    either way the check lies and every kick spawns another watchdog.
+    psutil.pid_exists is the non-destructive cross-platform probe."""
     try:
         pid = int((home / _PID_FILE).read_text().strip())
-        os.kill(pid, 0)
     except Exception:                           # noqa: BLE001 —
-        return False                             # absent or dead
+        return False                             # absent/unreadable
+    try:
+        import psutil
+        if not psutil.pid_exists(pid):
+            return False
+    except ImportError:
+        if os.name == "nt":
+            pass                     # can't probe on Windows without psutil —
+        else:                        # trust the pid file + cmdline check
+            try:
+                os.kill(pid, 0)
+            except Exception:                    # noqa: BLE001 —
+                return False
     return _cmdline_is(pid, "confluence_knowledge.watchdog")
 
 
@@ -105,6 +120,15 @@ def run(home: Path) -> int:
     # stale marker (leftover teardown, crashed `stop`) must never idle
     # a supervisor while its daemon is alive and beating (#253)
     while home.exists():
+        # supersede check: the pid file names exactly ONE live watchdog —
+        # if a spawn race or a stale-check miss let a second one boot,
+        # whoever isn't named must exit rather than pile up forever
+        try:
+            if int((home / _PID_FILE).read_text().strip()) != os.getpid():
+                log.info("superseded by another watchdog — exiting")
+                break
+        except (OSError, ValueError):
+            pass            # transient partial write/missing — next poll
         if not rpc.daemon_alive():
             # a `stop` may have landed mid-iteration — re-check before
             # respawning so the shutdown is honoured, not resurrected
