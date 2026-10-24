@@ -186,7 +186,9 @@ class Daemon:
         self.rpc.heartbeat_daemon(self.owner)
         self._http = self._serve_http()
         self.rpc.heartbeat_daemon(self.owner)
-        self._reap_strays()
+        # _reap_strays() disabled for CI bisect (#253): it is the only
+        # new component that kills processes — if the respawn/reap
+        # spiral stops without it, it is the root cause
         self.rpc.heartbeat_daemon(self.owner)
         self._resume_orphans()
         self.rpc.heartbeat_daemon(self.owner)
