@@ -205,7 +205,12 @@ class Daemon:
             _t.Thread(target=spawn_watchdog, args=(self.workdir,),
                       daemon=True, name="watchdog-kicker").start()
 
-        _watchdog_kick()               # it revives us; we revive it
+        # the FIRST kick is synchronous — supervision must be guaranteed
+        # before the loop starts beating; a daemon killed between kick
+        # and spawn would leave nothing to respawn it (#253 same-url
+        # respawn regression). Periodic kicks go on the thread below so
+        # a hung probe can't freeze heartbeats.
+        spawn_watchdog(self.workdir)   # it revives us; we revive it
         try:
             while not self.stop.is_set():
                 alive = self.rpc.heartbeat_daemon(self.owner)
