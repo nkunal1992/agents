@@ -134,7 +134,8 @@ def test_watchdog_respawns_dead_daemon(tmp_path, monkeypatch):
         r.db.commit()
     import confluence_knowledge.rpc as rpc_mod
     monkeypatch.setattr(rpc_mod, "ensure_daemon",
-                        lambda r, env=None: (_claim(r), spawned.append(True)))
+                        lambda r, env=None, **kw:
+                        (_claim(r), spawned.append(True)))
 
     stop = tmp_path / ".watchdog.stop"
     def stop_soon():
