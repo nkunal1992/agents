@@ -54,21 +54,21 @@ _SERVER_MARKERS = ("confluence_knowledge.server",
 def _server_process_count() -> int:
     """How many knowledge MCP servers are running — every IDE window
     spawns its own copy of each installed service (~2 GB each once the
-    models load), so a count ≫ 3 explains memory pressure. -1 = unknown."""
-    import subprocess
+    models load), so a count ≫ 3 explains memory pressure. -1 = unknown.
+    psutil only — `wmic` is removed from modern Windows and AppLocker
+    blocks it on managed devices; `ps` isn't on Windows at all."""
     try:
-        if os.name == "nt":
-            out = subprocess.run(
-                ["wmic", "process", "get", "commandline"],
-                capture_output=True, text=True, timeout=15,
-                check=False).stdout
-        else:
-            out = subprocess.run(
-                ["ps", "-axo", "command"],
-                capture_output=True, text=True, timeout=15,
-                check=False).stdout
-        return sum(1 for line in out.splitlines()
-                   if any(m in line for m in _SERVER_MARKERS))
+        import psutil
+        n = 0
+        for p in psutil.process_iter(["cmdline"]):
+            try:
+                cmd = p.cmdline() or []
+            except (psutil.NoSuchProcess, psutil.AccessDenied,
+                    psutil.ZombieProcess):
+                continue
+            if any(m in " ".join(cmd) for m in _SERVER_MARKERS):
+                n += 1
+        return n
     except Exception:  # noqa: BLE001 — detection only, never fatal
         return -1
 
@@ -177,6 +177,238 @@ def _index_checks(index_root: Path) -> list[dict]:
     return out
 
 
+def _loopback_listener_check() -> dict:
+    """Bind + connect a 127.0.0.1 listener — the daemon serves MCP over
+    exactly this; an EDR/WFP callout (CrowdStrike, SentinelOne, AV
+    'encrypted web scan') that intercepts loopback turns daemon mode
+    into a crash-respawn loop. Cross-platform, one-time."""
+    import socket
+    srv = socket.socket()
+    try:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        c = socket.socket()
+        c.settimeout(3)
+        try:
+            c.connect(("127.0.0.1", port))
+            return {"flag": "loopback_listener", "ok": True,
+                    "detail": "loopback bind+connect works",
+                    "remediation": None}
+        except OSError as e:
+            return {"flag": "loopback_listener", "ok": False,
+                    "detail": (f"bound 127.0.0.1:{port} but connect "
+                               f"failed: {e} — an EDR/WFP filter is "
+                               "intercepting loopback"),
+                    "remediation": "ask IT for a loopback exclusion for "
+                                   "python (127.0.0.1 inbound+outbound)"}
+        finally:
+            c.close()
+    except OSError as e:
+        return {"flag": "loopback_listener", "ok": False,
+                "detail": f"cannot bind a loopback listener: {e}",
+                "remediation": "ask IT for a loopback exclusion for "
+                               "python; the daemon serves MCP over "
+                               "127.0.0.1"}
+    finally:
+        srv.close()
+
+
+def _managed_windows_checks(home: Path, workdir: Path) -> list[dict]:
+    """Managed-laptop detection surface (#260): restrictions a domain-
+    managed Windows machine imposes that our code can't fix — report
+    them so a red flag names the real cause. Informational `ok=True`
+    items only warn; hard blockers go `ok=False`."""
+    if sys.platform != "win32":     # sys.platform, not os.name — tests
+        return []                   # fake it; pathlib reads os.name
+    out = [_loopback_listener_check()]
+
+    try:
+        import winreg
+    except ImportError:
+        winreg = None              # tests fake sys.platform off-Windows
+
+    def _reg_or_none(root, path, name):
+        if winreg is None:
+            return None
+        try:
+            return winreg.QueryValueEx(
+                winreg.OpenKey(root, path), name)[0]
+        except Exception:                       # noqa: BLE001 — absent
+            return None                         # or unreadable
+
+    # D1: proxy set — loopback is bypassed by _local_urlopen regardless,
+    # but external calls NEED the proxy; flag when localhost isn't
+    # excluded so a corp-proxy failure reads correctly
+    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if proxy:
+        no_proxy = (os.environ.get("NO_PROXY")
+                    or os.environ.get("no_proxy") or "")
+        loopback_excluded = any(
+            h in no_proxy for h in ("127.0.0.1", "localhost", "<local>"))
+        out.append({"flag": "proxy_loopback", "ok": True,
+                    "detail": (
+                        f"corporate proxy set; NO_PROXY "
+                        f"{'covers' if loopback_excluded else 'does NOT cover'} "
+                        "127.0.0.1 — daemon loopback is bypassed "
+                        "internally, external calls keep the proxy"),
+                    "remediation": None})
+
+    # D2: UNC/network-drive workdir — SQLite WAL over SMB corrupts/stalls
+    unc = str(workdir).startswith(("\\\\", "//"))
+    try:
+        import ctypes
+        drive = workdir.drive
+        remote = bool(drive) and ctypes.windll.kernel32.GetDriveTypeW(
+            drive + "\\") == 4          # DRIVE_REMOTE
+    except Exception:                   # noqa: BLE001 — probe best-effort
+        remote = False
+    if unc or remote:
+        out.append({"flag": "workdir_network", "ok": False,
+                    "detail": (f"workdir is on a network path "
+                               f"({workdir}) — SQLite WAL over SMB "
+                               "corrupts/stalls the index"),
+                    "remediation": "point the workdir env var at a local "
+                                   "NTFS folder and re-crawl"})
+
+    # D3: LongPathsEnabled — deep trees throw OSError storms in the
+    # local crawler when the OS gate is off
+    try:
+        import winreg
+        v = winreg.QueryValueEx(winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem"),
+            "LongPathsEnabled")[0]
+        if not v:
+            out.append({"flag": "long_paths", "ok": True,
+                        "detail": "LongPathsEnabled=0 — files deeper "
+                                  "than 260 chars are skipped on errors",
+                        "remediation": None})
+    except Exception:                   # noqa: BLE001,S110 — winreg is
+        pass                            # nt-only; unreadable → skip
+
+    # D4: Microsoft Store python — packaged interpreter virtualizes
+    # writes under some profile dirs
+    try:
+        if "WindowsApps" in str(getattr(sys, "base_prefix", "")):
+            out.append({"flag": "store_python", "ok": True,
+                        "detail": "Microsoft Store python — profile-dir "
+                                  "writes may virtualize and packaged "
+                                  "apps run under AppContainer network "
+                                  "isolation (loopback needs an "
+                                  "exemption); prefer a python.org "
+                                  "install if paths/network misbehave",
+                        "remediation": None})
+    except Exception:                   # noqa: BLE001,S110 — probe
+        pass                            # only, nothing to log
+
+    # D5: Defender real-time scanning of the model/index dirs slows
+    # first-boot + crawls — suggest an exclusion (needs admin, so it's
+    # informational, never a flag)
+    out.append({"flag": "av_exclusion", "ok": True,
+                "detail": "real-time AV scanning the index/models dir "
+                          "slows crawls on managed devices",
+                "remediation": "ask IT to exclude "
+                               f"{home} from Defender real-time scans "
+                               "if crawls are slow"})
+
+    hklm = getattr(winreg, "HKEY_LOCAL_MACHINE", None)
+    hkcu = getattr(winreg, "HKEY_CURRENT_USER", None)
+
+    # D6: Controlled Folder Access — read the real enforcement state,
+    # then check whether our state dirs sit under a protected folder
+    cfa = _reg_or_none(hklm,
+        r"SOFTWARE\Microsoft\Windows Defender\Windows Defender "
+        r"Exploit Guard\Controlled Folder Access",
+        "EnableControlledFolderAccess")
+    prof = Path.home().resolve()
+    protected = {prof / d for d in ("Documents", "Desktop", "Pictures")}
+    try:
+        hit = next((d for d in protected if workdir.resolve()
+                    .is_relative_to(d) or home.resolve()
+                    .is_relative_to(d)), None)
+    except OSError:
+        hit = None
+    if cfa == 1 and hit:    # block mode + state under a protected dir
+        out.append({"flag": "controlled_folder_access", "ok": False,
+                    "detail": (f"Controlled Folder Access is ON and "
+                               f"state lives under {hit} — writes by "
+                               "unapproved apps are denied outright"),
+                    "remediation": "allowlist python in CFA or move "
+                                   "workdir/home outside "
+                                   "Documents/Desktop/Pictures"})
+    elif hit:
+        out.append({"flag": "protected_folder", "ok": True,
+                    "detail": (f"state under {hit} — if Controlled "
+                               "Folder Access is enabled it blocks "
+                               "writes by unapproved apps"),
+                    "remediation": "move the workdir/home outside "
+                                   "Documents/Desktop or allowlist python"})
+
+    # D7: PAC/WPAD-only proxy — the browser works but getproxies() is
+    # empty, so external calls (PyPI, HF, Confluence) fail while web
+    # browsing looks fine
+    inet = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    pac = _reg_or_none(hkcu, inet, "AutoConfigURL")
+    detect = _reg_or_none(hkcu, inet, "AutoDetect")
+    if pac or detect:
+        out.append({"flag": "pac_proxy", "ok": True,
+                    "detail": (f"proxy via PAC/WPAD "
+                               f"(AutoConfigURL={pac}, AutoDetect="
+                               f"{detect}) — python can't evaluate PAC; "
+                               "external calls need HTTP(S)_PROXY set"),
+                    "remediation": "set HTTPS_PROXY to the explicit "
+                                   "proxy host:port from IT"})
+
+    # D8: WDAC/AppLocker CI policy deployed — unsigned .pyd/.dll
+    # (onnxruntime, tokenizers, sqlite-vec) fail to load with WinError
+    # 4551; reinstall can't fix, only an IT allowlist can
+    if winreg is not None:
+        try:
+            k = winreg.OpenKey(hklm,
+                               r"SYSTEM\CurrentControlSet\Control\CI\Policy")
+            if winreg.QueryInfoKey(k)[0] > 0:
+                out.append({"flag": "app_control_policy", "ok": True,
+                            "detail": "CI policy blobs deployed — "
+                                      "unsigned native extensions may "
+                                      "be blocked (WinError 4551 on "
+                                      "model load)",
+                            "remediation": None})
+        except Exception:               # noqa: BLE001,S110 — probe
+            pass                        # best-effort, unreadable → skip
+
+    # D9: temporary/mandatory profile — state wiped on logout means a
+    # full re-crawl every login
+    if any(t in prof.name.upper() for t in ("TEMP", ".BAK", "MANDATORY")):
+        out.append({"flag": "temp_profile", "ok": False,
+                    "detail": (f"profile {prof} looks temporary — its "
+                               "contents are discarded on logout, taking "
+                               "the index with it"),
+                    "remediation": "point the workdir env var at a "
+                                   "persistent local dir"})
+
+    # D10: running inside a Job object — KILL_ON_JOB_CLOSE kills every
+    # child when the IDE closes; spawn already requests BREAKAWAY but a
+    # hardened job can deny it
+    try:
+        import ctypes
+        in_job = ctypes.c_int(0)
+        ctypes.windll.kernel32.IsProcessInJob(
+            ctypes.windll.kernel32.GetCurrentProcess(), None,
+            ctypes.byref(in_job))
+        if in_job.value:
+            out.append({"flag": "in_job_object", "ok": True,
+                        "detail": "running inside a Windows Job — if "
+                                  "it's KILL_ON_JOB_CLOSE without "
+                                  "breakaway, the daemon dies with the "
+                                  "IDE (spawns request BREAKAWAY)",
+                        "remediation": None})
+    except Exception:                   # noqa: BLE001,S110 — probe
+        pass                            # only, ctypes absent → skip
+
+    return out
+
+
 def health_checks(home: Path, workdir: Path, server_id: str, cli: str,
                   index_root: Path | None = None) -> list[dict]:
     """All non-network checks — the machine-readable half of `status()`."""
@@ -239,6 +471,8 @@ def health_checks(home: Path, workdir: Path, server_id: str, cli: str,
     checks.append({"flag": "proxy", "ok": True,
                    "detail": proxy or "none set",
                    "remediation": None})
+    checks.append(_loopback_listener_check())
+    checks += _managed_windows_checks(home, workdir)
 
     checks.append(_resources_check(cli))
     return checks

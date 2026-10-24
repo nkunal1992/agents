@@ -26,7 +26,7 @@ import numpy as np
 
 from .index import Index
 from .resources import limits, plan_batches
-from .settings import SetupError
+from .settings import SetupError, app_control_remediation, is_app_control_block
 
 SPARSE_MODEL = "Qdrant/bm25"                            # MIT — via fastembed
 RERANK_REPO = "mixedbread-ai/mxbai-rerank-xsmall-v1"  # Apache-2.0
@@ -204,11 +204,18 @@ def _ort_session(onnx_path: Path, cli: str):
     try:
         import onnxruntime as ort
     except ImportError as e:
+        if is_app_control_block(e):
+            raise SetupError(app_control_remediation("onnxruntime")) from e
         raise SetupError("onnxruntime isn't installed — reinstall the "
                          f"service ({cli} bootstrap reinstalls deps)") from e
-    return ort.InferenceSession(
-        str(onnx_path), providers=_pick_providers(ort),
-        sess_options=_ort_opts(ort))
+    try:
+        return ort.InferenceSession(
+            str(onnx_path), providers=_pick_providers(ort),
+            sess_options=_ort_opts(ort))
+    except (OSError, RuntimeError) as e:
+        if is_app_control_block(e):
+            raise SetupError(app_control_remediation("onnxruntime")) from e
+        raise
 
 
 def _ort_opts(ort):
@@ -391,6 +398,9 @@ class LocalSparseEmbedder:
         try:
             from fastembed import SparseTextEmbedding
         except ImportError as e:
+            if is_app_control_block(e):
+                raise SetupError(
+                    app_control_remediation("fastembed")) from e
             raise SetupError("fastembed isn't installed — reinstall the "
                              f"service ({cli} bootstrap reinstalls deps)") from e
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
