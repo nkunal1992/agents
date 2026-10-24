@@ -130,3 +130,86 @@ def test_running_live_job_dedup(tmp_path):
     idx.db.execute("UPDATE job_lease SET heartbeat=0 WHERE job_id='j1'")
     idx.db.commit()
     assert idx.running_live_job() is None
+
+
+def test_ann_backfill_and_topk(tmp_path):
+    """#251: vec_chunks mirrors vectors — _ensure_ann backfills in place,
+    ann_topk returns cosine-sorted neighbours."""
+    idx = Index(tmp_path / "s.db")
+    vecs = np.zeros((3, 4), np.float32)
+    vecs[0] = [1, 0, 0, 0]
+    vecs[1] = [0.9, 0.1, 0, 0]
+    vecs[2] = [0, 0, 1, 0]
+    for i, cid in enumerate(["c1", "c2", "c3"]):
+        idx.upsert_page(_page(f"p{i}", f"P{i}"),
+                        [Chunk(f"text {i}", "", "text", 0, cid)],
+                        vecs[i:i + 1])
+    idx.publish({"p0", "p1", "p2"})
+    assert idx.ann_available()
+    hits = idx.ann_topk(np.array([1, 0, 0, 0], np.float32), 2)
+    assert [h[0] for h in hits] == ["c1", "c2"]
+    assert hits[0][1] > hits[1][1]
+
+
+def test_ann_publish_delta(tmp_path):
+    """#251: a later publish mirrors deletes + new rows into vec_chunks —
+    no stale neighbours, no missing ones."""
+    idx = Index(tmp_path / "s.db")
+    idx.upsert_page(_page("1", "A"), [Chunk("a", "", "text", 0, "c1")],
+                    np.array([[1, 0, 0, 0]], np.float32))
+    idx.upsert_page(_page("2", "B"), [Chunk("b", "", "text", 0, "c2")],
+                    np.array([[0, 1, 0, 0]], np.float32))
+    idx.publish({"1", "2"})
+    assert idx.ann_available()
+    # second snapshot: page 2 gone, page 1 has a new vector
+    idx.upsert_page(_page("1", "A"), [Chunk("a2", "", "text", 0, "c3")],
+                    np.array([[0.99, 0.01, 0, 0]], np.float32))
+    idx.publish({"1"})
+    hits = idx.ann_topk(np.array([1, 0, 0, 0], np.float32), 5)
+    assert {h[0] for h in hits} == {"c3"}        # c1/c2 both evicted
+
+
+def test_ann_retrieve_over_cap(monkeypatch, tmp_path):
+    """#251: >cap whole-scope search answers via ANN instead of
+    refusing — the user's real 306k-chunk scope."""
+    from confluence_knowledge import retrieval as rt
+    monkeypatch.setattr(rt, "MAX_SEARCHABLE_CHUNKS", 3)
+    idx = Index(tmp_path / "s.db")
+    vecs = np.eye(4, dtype=np.float32)
+    for i, cid in enumerate(["c1", "c2", "c3", "c4", "c5"]):
+        idx.upsert_page(_page(f"p{i}", f"Topic {i}"),
+                        [Chunk(f"text about topic {i}", "", "text", 0, cid)],
+                        vecs[i:i + 1])
+    idx.publish({f"p{i}" for i in range(5)})
+
+    class E:                        # embeds the query as basis vector e0
+        def embed(self, ts, query=False):
+            return np.array([[1, 0, 0, 0]] * len(ts), np.float32)
+
+    ev = rt.retrieve(idx, "topic query", E())
+    assert ev                              # refused before #251
+    assert ev[0]["chunk_id"] == "c1"
+
+
+def test_ann_unavailable_still_raises(monkeypatch, tmp_path):
+    """#251: no extension → the old behaviour: refuse over-cap scopes
+    with the connect-narrower message."""
+    from confluence_knowledge import retrieval as rt
+    monkeypatch.setattr(rt, "MAX_SEARCHABLE_CHUNKS", 3)
+    monkeypatch.setattr(Index, "_ensure_ann", lambda self: False)
+    idx = Index(tmp_path / "s.db")
+    for i in range(5):
+        idx.upsert_page(_page(f"p{i}", f"T{i}"),
+                        [Chunk(f"t{i}", "", "text", 0, f"c{i}")],
+                        np.ones((1, 4), np.float32))
+    idx.publish({f"p{i}" for i in range(5)})
+
+    class E:
+        def embed(self, ts, query=False):
+            return np.ones((len(ts), 4), np.float32)
+
+    import pytest
+
+    from confluence_knowledge.settings import SetupError
+    with pytest.raises(SetupError, match="narrower scope"):
+        rt.retrieve(idx, "q", E())

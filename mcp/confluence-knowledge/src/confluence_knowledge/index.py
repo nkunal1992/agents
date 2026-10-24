@@ -21,6 +21,8 @@ SCHEMA_VERSION = 2
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+-- vec_chunks is created lazily by _ensure_ann() — it needs sqlite-vec
+-- (optional ext) AND the live vector dim (model-specific).
 CREATE TABLE IF NOT EXISTS pages (
   page_id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, url TEXT,
   level INTEGER, version TEXT, fetched_at REAL, content_hash TEXT,
@@ -59,6 +61,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_stage USING fts5(
 CREATE TABLE IF NOT EXISTS job_lease (
   job_id TEXT PRIMARY KEY, owner TEXT, pid INTEGER, heartbeat REAL);
 """
+
+_ANN_SCOPE_MIN = 100_000   # scopes above this use vec_chunks (ANN) —
+                            # the dense cache matrix would cost the RAM
+                            # the cap was guarding (#251)
 
 _STAGE_TABLES = ("pages_stage", "chunks_stage", "vectors_stage",
                  "sparse_vectors_stage", "chunks_fts_stage")
@@ -188,6 +194,7 @@ class Index:
                 "(or run `clean` to drop every index)") from e
         self.lock = threading.RLock()
         self._cache: _SearchCache | None = None
+        self._ann: bool | None = None   # None=untried, True=ready, False=no ext
         if readonly:
             self._rdb = self.db        # the main conn already is ro
             return
@@ -653,6 +660,36 @@ class Index:
             self.db.execute(
                 "INSERT INTO sparse_vectors SELECT chunk_id,payload "
                 "FROM sparse_vectors_stage WHERE job_id=?", (job_id,))
+            if self._ensure_ann():
+                # mirror the vec0 ANN table alongside `vectors` (#251):
+                # drop any row whose live vector no longer exists, then
+                # upsert this job's staged blobs — both cheap anti-join /
+                # upsert shapes, never a full rebuild.
+                dim = self.db.execute(
+                    "SELECT length(vec)/4 FROM vectors LIMIT 1"
+                ).fetchone()
+                if dim and dim[0]:
+                    try:
+                        self.db.execute(
+                            f"CREATE VIRTUAL TABLE IF NOT EXISTS "
+                            f"vec_chunks USING vec0(chunk_id TEXT "
+                            f"PRIMARY KEY, embedding float[{dim[0]}] "
+                            f"distance_metric=cosine)")
+                    except sqlite3.OperationalError:
+                        # dim changed under us (model swap) → rebuild
+                        self.db.execute("DROP TABLE IF EXISTS vec_chunks")
+                        self.db.execute(
+                            f"CREATE VIRTUAL TABLE vec_chunks USING "
+                            f"vec0(chunk_id TEXT PRIMARY KEY, embedding "
+                            f"float[{dim[0]}] distance_metric=cosine)")
+                    self.db.execute(
+                        "DELETE FROM vec_chunks WHERE chunk_id NOT IN "
+                        "(SELECT chunk_id FROM vectors)")
+                    self.db.execute(
+                        "INSERT INTO vec_chunks(chunk_id,embedding) "
+                        "SELECT chunk_id,vec FROM vectors WHERE "
+                        "chunk_id NOT IN (SELECT chunk_id FROM "
+                        "vec_chunks)")
             for t in _STAGE_TABLES:
                 self.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job_id,))  # nosec B608
             self._purge_dead_stage()
@@ -820,8 +857,12 @@ class Index:
         c.chunk_page = dict(rows)
         # dense: float16 halves RSS vs float32; search-time matmul runs
         # blocked in float32. Mismatched-dim blobs (model swap leftovers)
-        # stay zero → score 0, mirroring _cosine's skip.
-        vecs = self.vectors_for(c.ids)
+        # stay zero → score 0, mirroring _cosine's skip. Above the
+        # whole-scope cap the ANN leg (vec_chunks) serves dense instead —
+        # building a few-hundred-MB matrix for an index that can't be
+        # scanned is pure waste (#251).
+        vecs = ({} if len(c.ids) > _ANN_SCOPE_MIN
+                else self.vectors_for(c.ids))
         if vecs:
             dim = next(iter(vecs.values())).shape[0]
             dense = np.zeros((len(c.ids), dim), dtype=np.float32)
@@ -884,6 +925,106 @@ class Index:
                         f"SELECT chunk_id,vec FROM vectors "  # nosec B608
                         f"WHERE chunk_id IN ({q})", part):
                     out[cid] = np.frombuffer(b, dtype=np.float32)
+        return out
+
+    # ---- ANN (sqlite-vec) ------------------------------------------------
+    # vec0 `vec_chunks` mirrors `vectors` so dense top-k is an index scan,
+    # not a RAM-resident matmul — that's what lifts the whole-scope cap
+    # for >100k-chunk indexes (#251). Degrades silently: no extension →
+    # the O(n) scan path stays.
+
+    def _ann_load(self, conn: sqlite3.Connection) -> bool:
+        try:
+            import sqlite_vec
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            return True
+        except Exception:               # noqa: BLE001 — ext absent or
+            return False                # unloadable → scan fallback
+        finally:
+            # leave extension loading OFF — the crawl worker's conn must
+            # not stay wider than it needs to
+            try:
+                conn.enable_load_extension(False)
+            except Exception:           # noqa: BLE001,S110 — best-effort
+                pass
+
+    def _ensure_ann(self) -> bool:
+        """vec_chunks exists + backfilled. Runs once per Index; failure
+        latches False so no path keeps paying the probe."""
+        if self._ann is not None:
+            return self._ann
+        with self.lock:
+            if self._ann is not None:
+                return self._ann
+            # read conn first — a ready vec_chunks answers KNN on
+            # mode=ro (proxy/daemon) without any write
+            conn = self._read() if not self._readonly else self.db
+            if not self._ann_load(conn):
+                self._ann = False
+                return False
+            try:
+                exists = conn.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE "
+                    "name='vec_chunks'").fetchone()[0]
+                if exists:
+                    self._ann = True
+                    return True
+                if self._readonly:
+                    # table absent and we can't create — scan path
+                    self._ann = False
+                    return False
+                if not self._ann_load(self.db):
+                    self._ann = False
+                    return False
+                row = self.db.execute(
+                    "SELECT vec FROM vectors LIMIT 1").fetchone()
+                if row is None:
+                    self._ann = True          # empty — lazy at publish
+                    return True
+                dim = len(row[0]) // 4
+                self.db.execute(
+                    f"CREATE VIRTUAL TABLE vec_chunks USING vec0("
+                    f"chunk_id TEXT PRIMARY KEY, embedding float[{dim}] "
+                    f"distance_metric=cosine)")
+                self.db.execute(
+                    "INSERT INTO vec_chunks(chunk_id,embedding) "
+                    "SELECT chunk_id,vec FROM vectors")
+                self.db.commit()
+                self._ann = True
+            except Exception:           # noqa: BLE001 — any create/backfill
+                self._ann = False       # failure → scan fallback
+        return self._ann
+
+    def ann_available(self) -> bool:
+        return self._ensure_ann()
+
+    def ann_topk(self, qvec: np.ndarray, k: int,
+                 allowed: set[str] | None = None) -> list[tuple[str, float]]:
+        """K nearest live chunks by cosine → [(chunk_id, score)]. The
+        subtree case over-fetches then intersects — a vec0 KNN can't
+        take an arbitrary IN-list, so the filter lands in Python."""
+        if not self._ensure_ann():
+            return []
+        conn = self._read()
+        if not self._ann_load(conn):
+            self._ann = False
+            return []
+        fetch = k if allowed is None else min(len(allowed), k * 10)
+        try:
+            rows = conn.execute(
+                "SELECT chunk_id, distance FROM vec_chunks "
+                "WHERE embedding MATCH ? AND k = ?",
+                (qvec.astype(np.float32).tobytes(), fetch)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        out = []
+        for cid, dist in rows:
+            if allowed is not None and cid not in allowed:
+                continue
+            out.append((cid, 1.0 - float(dist)))
+            if len(out) >= k:
+                break
         return out
 
     def quick_integrity(self) -> bool:

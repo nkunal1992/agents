@@ -714,17 +714,26 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
                          dtype=np.int64)
     if not allowed:
         return []
-    if len(allowed) > MAX_SEARCHABLE_CHUNKS:
+    over_cap = len(allowed) > MAX_SEARCHABLE_CHUNKS
+    if over_cap and not index.ann_available():
         raise SetupError(
             f"index holds {len(allowed):,} chunks — searching the whole "
             "scope at once is unsupported. Connect a narrower scope (or "
             "re-index with a smaller root).")
+    ann = over_cap or cache.dense.shape[0] == 0
 
-    # dense leg — blocked float32 matmul over the float16 matrix, so a
-    # query touches ~61 MB instead of re-decoding every vector blob
+    # dense leg — at scope sizes the vec_chunks ANN table answers top-k
+    # directly; under it the blocked float32 matmul over the float16
+    # matrix stays (exact, and the matrix is already resident)
     dense_rank: list[str] = []
     qvec = embedder.embed([query], query=True)[0].astype(np.float32)
-    dense = cache.dense if pos is None else cache.dense[pos]
+    if ann:
+        allow_set = None if allow_chunks is None else set(allowed)
+        dense_rank = [cid for cid, _s in index.ann_topk(
+            qvec, TOP_K_RETRIEVE, allowed=allow_set)]
+        dense = np.zeros((0, 0), dtype=np.float16)
+    else:
+        dense = cache.dense if pos is None else cache.dense[pos]
     if dense.shape[0] and dense.shape[1] == qvec.shape[0]:
         q = qvec / (np.linalg.norm(qvec) + 1e-9)
         scores = np.empty(len(allowed), dtype=np.float32)

@@ -76,6 +76,7 @@ def test_oversized_index_refuses_silently_growing(tmp_path):
         ids=[f"c{i}" for i in range(retrieval.MAX_SEARCHABLE_CHUNKS + 1)])
     class FakeIdx:
         def search_cache(self): return cache
+        def ann_available(self): return False   # no ext → still refuses
     with pytest.raises(SetupError):
         retrieval.retrieve(FakeIdx(), "q", HashEmbedder())
 
