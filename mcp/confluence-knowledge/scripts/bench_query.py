@@ -27,20 +27,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
-import sqlite3
 import sys
 import tempfile
 import time
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-_WORDS = ("deploy release approval pipeline staging window rollback "
-          "sign-off freeze change advisory board runbook handover "
-          "escalation incident review owner audit checklist verify "
-          "integration endpoint cutover tracker notify downstream "
-          "breaking deadline production").split()
+_WORDS = ["deploy", "release", "approval", "pipeline", "staging", "window", "rollback", "sign-off", "freeze", "change", "advisory", "board", "runbook", "handover", "escalation", "incident", "review", "owner", "audit", "checklist", "verify", "integration", "endpoint", "cutover", "tracker", "notify", "downstream", "breaking", "deadline", "production"]
 # wider vocab for the sparse term pool — the BM25 tokenizer needs varied
 # input to emit a realistic term-id space (a 30-word corpus pools ~30 ids)
 _VOCAB = _WORDS + [f"svc-{i}" for i in range(800)] + \
@@ -53,7 +49,6 @@ def _term_pool(sp, n_texts: int = 200, seed: int = 11) -> np.ndarray:
     """Real BM25 term ids — sparse query terms must actually HIT the
     postings index or the sparse leg measures ~0. Run the real sparse
     model over synthetic texts once, pool the emitted ids."""
-    import numpy as np
 
     rng = np.random.default_rng(seed)
     texts = [" ".join(_VOCAB[t] for t in rng.integers(0, len(_VOCAB), 60))
@@ -68,7 +63,6 @@ def _build_index(path: Path, n_chunks: int, term_pool, chunks_per_page: int = 8,
                  seed: int = 7) -> None:
     """Insert a live snapshot directly — timing target is query cost,
     not crawl, so rows go straight into the live tables."""
-    import numpy as np
     from confluence_knowledge.index import Index
 
     rng = np.random.default_rng(seed)
@@ -128,11 +122,9 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
 
-    import numpy as np
     from confluence_knowledge import retrieval
     from confluence_knowledge.index import Index
-    from confluence_knowledge.retrieval import (
-        LocalEmbedder, LocalReranker, LocalSparseEmbedder, retrieve)
+    from confluence_knowledge.retrieval import LocalEmbedder, LocalReranker, LocalSparseEmbedder, retrieve
     from confluence_knowledge.settings import shared_home
 
     if args.ann:
@@ -173,7 +165,9 @@ def main() -> int:
         # attribute cache-build cost: rerun the build under cProfile —
         # which stage dominates (dense matrix, postings loop, pages)?
         if args.profile_build:
-            import cProfile, pstats, io as _io
+            import cProfile
+            import io as _io
+            import pstats
             idx.drop_search_cache()
             pr = cProfile.Profile()
             pr.enable()
