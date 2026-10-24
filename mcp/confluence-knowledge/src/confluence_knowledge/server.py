@@ -250,6 +250,14 @@ def _models_loaded(wait: float) -> bool:
     return _models_ready.wait(wait)
 
 
+def _daemon_url() -> str:
+    try:
+        from .registration import daemon_url
+        return daemon_url()
+    except Exception:                       # noqa: BLE001 — status
+        return ""                            # must never fail
+
+
 def _scope(scope_handle: str) -> dict:
     s = _scopes.get(scope_handle)
     if s is not None:
@@ -363,6 +371,17 @@ def status() -> dict:
                           else _models_ready.is_set()
                           and (_EMBEDDER is not None or _pool.is_loaded())),
         "index_root": str(idx_root),
+        # every path that participates in cross-IDE sharing (#257): two
+        # installs disagreeing on any of these silently forks the index —
+        # diff this block between IDEs when "the same root" answers
+        # differently
+        "paths": {
+            "index_root": str(idx_root),
+            "home": str(_home()),
+            "workdir": str(_workdir()),
+            "daemon_home": str(daemon_home()),
+            "daemon_url": _daemon_url(),
+        },
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
         "live_scopes": sorted(_scopes),
