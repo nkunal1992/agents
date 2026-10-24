@@ -176,7 +176,8 @@ def main() -> None:
                    "(tools, models, mini-RAG)")
     reg = sub.add_parser("register",
                          help="write the IDE MCP config automatically")
-    reg.add_argument("--ide", choices=["auto", "all", "jetbrains", "vscode"],
+    reg.add_argument("--ide", choices=["auto", "all", "jetbrains", "vscode",
+                                       "windsurf", "cursor"],
                      default="auto")
     reg.add_argument("--workspace", default=None,
                      help="repo dir for the workspace .vscode/mcp.json")

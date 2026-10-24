@@ -68,3 +68,48 @@ def test_no_targets_errors_cleanly(sandbox, monkeypatch):
     from confluence_knowledge.settings import SetupError
     with pytest.raises(SetupError, match="no IDE config locations"):
         reg.register("all")
+
+
+# ---- #257 — Windsurf + Cursor use the mcpServers root key ----
+
+def test_targets_windsurf_and_cursor(sandbox):
+    (sandbox / ".codeium" / "windsurf").mkdir(parents=True)
+    (sandbox / ".cursor").mkdir()
+    ws = sandbox / "repo"
+    ws.mkdir()
+    files = reg.targets("all", ws)
+    assert sandbox / ".codeium" / "windsurf" / "mcp_config.json" in files
+    assert sandbox / ".cursor" / "mcp.json" in files
+    assert ws / ".cursor" / "mcp.json" in files
+    # an absent Windsurf install drops out of auto targets
+    (sandbox / ".codeium" / "windsurf").rename(sandbox / ".codeium" / "ws2")
+    assert reg.targets("windsurf") == []
+
+
+def test_windsurf_writes_under_mcpservers_key(sandbox):
+    (sandbox / ".codeium" / "windsurf").mkdir(parents=True)
+    reg.register("windsurf")
+    data = json.loads((sandbox / ".codeium" / "windsurf"
+                       / "mcp_config.json").read_text())
+    assert "confluence-knowledge" in data["mcpServers"]
+    assert "servers" not in data
+
+
+def test_cursor_workspace_merges_mcpservers_and_gitignores(sandbox):
+    ws = sandbox / "repo"
+    (ws / ".cursor").mkdir(parents=True)
+    f = ws / ".cursor" / "mcp.json"
+    f.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}))
+    reg.register("cursor", ws)
+    data = json.loads(f.read_text())
+    assert data["mcpServers"]["other"] == {"command": "x"}
+    assert "confluence-knowledge" in data["mcpServers"]
+    assert ".cursor/mcp.json" in (ws / ".gitignore").read_text()
+
+
+def test_registered_paths_sees_both_root_keys(sandbox):
+    (sandbox / ".codeium" / "windsurf").mkdir(parents=True)
+    reg.register("windsurf")
+    assert reg.registered_paths() == [
+        sandbox / ".codeium" / "windsurf" / "mcp_config.json"]
+    assert reg.registered_transport() == "stdio"
