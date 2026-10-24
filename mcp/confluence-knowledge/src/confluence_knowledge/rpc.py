@@ -351,14 +351,52 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         from .settings import daemon_home
         workdir = daemon_home()
         workdir.mkdir(parents=True, exist_ok=True)
+        # The lock covers only the spawn DECISION — not the boot wait.
+        # Holding it through the ~30s cold boot serialised every queued
+        # caller behind it and blew their per-call MCP timeouts on CI.
+        # The .spawn.stamp marker instead: whoever sees a fresh stamp
+        # knows a spawn is in flight and simply waits for the lease.
+        stamp = workdir / ".spawn.stamp"
+        spawn = False
         with _spawn_lock(workdir):
-            if rpc.daemon_alive():        # a queued caller's spawn won
-                return
-            _spawn_daemon(rpc, workdir, env)
+            if not rpc.daemon_alive():
+                try:
+                    fresh = (stamp.exists() and
+                             time.time() - stamp.stat().st_mtime < 60)
+                except OSError:
+                    fresh = False
+                if not fresh:
+                    _spawn_daemon(rpc, workdir, env)
+                    stamp.write_text("1")
+                spawn = True
+        if spawn:                       # spawner and waiters share the
+            _await_daemon(rpc, workdir)  # same bounded boot wait
     except DaemonUnavailable:
         raise
     except Exception as e:
         raise DaemonUnavailable(f"daemon spawn failed: {e}") from e
+
+
+def _await_daemon(rpc: RpcDb, workdir) -> None:
+    """Wait for a spawned daemon to take the lease and accept http —
+    outside the spawn lock so waiters don't queue behind the boot."""
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and not rpc.daemon_alive():
+        time.sleep(0.1)
+    if not rpc.daemon_alive():
+        raise DaemonUnavailable("daemon spawned but never took lease")
+    import json as _json
+    import socket as _sock
+    http_deadline = time.monotonic() + 20
+    while time.monotonic() < http_deadline:
+        try:
+            meta = _json.loads((workdir / "http.json").read_text())
+            with _sock.socket() as sock:
+                sock.settimeout(0.5)
+                sock.connect(("127.0.0.1", meta["port"]))
+            return
+        except Exception:                   # noqa: BLE001 —
+            time.sleep(0.1)                  # file or bind pending
 
 
 def _spawn_daemon(rpc: RpcDb, workdir, env: dict | None = None) -> None:
@@ -390,32 +428,5 @@ def _spawn_daemon(rpc: RpcDb, workdir, env: dict | None = None) -> None:
             env=cli_env,
             **detached_spawn_kwargs())   # survives console/IDE exit
         pid_path.write_text(str(proc.pid))
-        # wait for the child to take the lease — sequential proxy calls
-        # would otherwise each spawn. Generous bound: a cold Windows boot
-        # (package import + AV scan) can exceed 10 s (#220).
-        deadline = time.monotonic() + 20
-        while (time.monotonic() < deadline
-               and not rpc.daemon_alive()):
-            time.sleep(0.1)
-        if not rpc.daemon_alive():
-            raise DaemonUnavailable("daemon spawned but never took lease")
-        # the http endpoint binds right after the lease — and the meta
-        # file is written BEFORE uvicorn accepts, so probe the socket,
-        # not the file: a caller reading a stale/unbound port once is a
-        # failed first connection (#206 cold-boot race)
-        import json as _json
-        import socket as _sock
-        http_deadline = time.monotonic() + 20
-        while time.monotonic() < http_deadline:
-            try:
-                meta = _json.loads((workdir / "http.json").read_text())
-                with _sock.socket() as sock:
-                    sock.settimeout(0.5)
-                    sock.connect(("127.0.0.1", meta["port"]))
-                break
-            except Exception:                   # noqa: BLE001 —
-                time.sleep(0.1)                  # file or bind pending
-    except DaemonUnavailable:
-        raise
     except Exception as e:
         raise DaemonUnavailable(f"daemon spawn failed: {e}") from e

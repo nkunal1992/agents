@@ -30,6 +30,8 @@ def test_concurrent_ensure_daemon_spawns_once(tmp_path, monkeypatch):
         state["alive"] = True
 
     monkeypatch.setattr(rpc_mod, "_spawn_daemon", fake_spawn)
+    monkeypatch.setattr(rpc_mod, "_await_daemon",
+                        lambda rpc, workdir: None)
     threads = [threading.Thread(target=rpc_mod.ensure_daemon,
                                 args=(FakeRpc(),)) for _ in range(8)]
     for t in threads:
@@ -57,6 +59,8 @@ def test_fresh_stop_file_still_spawns(tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_mod, "_spawn_daemon",
                         lambda rpc, workdir, env=None:
                         state.__setitem__("spawns", state["spawns"] + 1))
+    monkeypatch.setattr(rpc_mod, "_await_daemon",
+                        lambda rpc, workdir: None)
     (tmp_path / ".watchdog.stop").write_text("1")
     rpc_mod.ensure_daemon(DeadRpc())
     assert state["spawns"] == 1

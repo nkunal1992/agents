@@ -176,6 +176,9 @@ def test_ensure_daemon_respects_fresh_stop_file(tmp_path, monkeypatch):
 
     import os
     os.utime(fresh, (0, 0))                     # ancient mtime → stale
+    stamp = tmp_path / ".spawn.stamp"           # first spawn's stamp is
+    if stamp.exists():                          # still fresh — age it so
+        os.utime(stamp, (0, 0))                 # the second call spawns
     spawned.clear()                            # daemon "dead" again
     rpc_mod.ensure_daemon(RpcDb(tmp_path / "rpc.db"))
     assert not fresh.exists(), "stale stop-file should clear"
