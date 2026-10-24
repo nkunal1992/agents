@@ -80,6 +80,23 @@ async def _await_done(sess, handle: str, job: str, timeout=120) -> dict:
     raise AssertionError(f"job {job} never left running")
 
 
+def _daemon_log_tail(*homes: Path) -> str:
+    """The daemons' own logs hold the worker traceback that job['errors']
+    only summarizes — fold the tails into the assert message so CI's
+    failure report carries the root cause (artifact upload only covers
+    ~/.knowledge/daemon, not pytest tmp homes)."""
+    out = []
+    for home in homes:
+        log = Path(home) / "daemon.log"
+        try:
+            out.append(f"--- {log} ---\n" + "\n".join(
+                log.read_text(encoding="utf-8",
+                              errors="replace").splitlines()[-40:]))
+        except OSError as e:
+            out.append(f"--- {log} unreadable: {e}")
+    return "\n".join(out)
+
+
 def test_stdio_two_installs_share_index(tmp_path):
     """IDE B (daemon slot B, session held open) → IDE A (slot B) crawls →
     B's next query sees it; A's refresh publish is next-query visible."""
@@ -123,8 +140,10 @@ def test_stdio_two_installs_share_index(tmp_path):
                 assert hA == hB            # same root → same scope handle
                 job = (await _call(A, "start_crawl",
                                    {"scope_handle": hA}))["job_id"]
-                assert (await _await_done(
-                    A, hA, job))["state"] == "done"
+                p1 = await _await_done(A, hA, job)
+                logs1 = _daemon_log_tail(tmp_path / "daemonA",
+                                         tmp_path / "daemonB")
+                assert p1["state"] == "done", f"{p1}\n{logs1}"
 
             # B's next query on the still-open session — no reconnect
             hits = await _call(B, "search",
@@ -141,8 +160,10 @@ def test_stdio_two_installs_share_index(tmp_path):
                 job2 = (await _call(A, "start_crawl",
                                     {"scope_handle": hA,
                                      "refresh": True}))["job_id"]
-                assert (await _await_done(
-                    A, hA, job2))["state"] == "done"
+                p2 = await _await_done(A, hA, job2)
+                logs2 = _daemon_log_tail(tmp_path / "daemonA",
+                                         tmp_path / "daemonB")
+                assert p2["state"] == "done", f"{p2}\n{logs2}"
             hits2 = await _call(B, "search",
                                 {"scope_handle": hB, "question": canary})
             assert canary in json.dumps(hits2), hits2
