@@ -259,4 +259,7 @@ async def call(session, name, args=None, timeout=20):
     if r.isError:
         raise SystemExit(f"FAIL {name} returned an error after {dt:.1f}s: {text}")
     print(f"  {name:<17} {dt:5.1f}s")
-    return _json.loads(text)
+    out = _json.loads(text)
+    if isinstance(out, dict) and (out.get("_error") or out.get("error")):
+        print(f"  ! {name} returned error payload: {out}", flush=True)
+    return out
