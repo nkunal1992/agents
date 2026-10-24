@@ -460,7 +460,12 @@ class Index:
                 dead = False
                 if not stale and psutil is not None:
                     try:
-                        owner_host = row[0].rsplit(":", 2)[0]
+                        # daemon owners are 'daemon:host:pid:nonce' — the
+                        # prefix must come off or the host compare never
+                        # matches and a killed daemon's lease blocks
+                        # takeover until the heartbeat goes stale (#257)
+                        owner_host = row[0].rsplit(":", 2)[0] \
+                            .removeprefix("daemon:")
                         dead = owner_host == host and \
                             not psutil.pid_exists(int(row[1]))
                     except Exception:    # noqa: BLE001 — can't verify → only

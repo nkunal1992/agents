@@ -654,10 +654,10 @@ def _resume_job(scope_key: str, job_id: str) -> None:
         return          # profile moved to another site — not ours
     s = {"key": scope_key, "root": root,
          "client": None, "profile": profile}   # _crawler rebuilds lazily
-    t = threading.Thread(target=_worker_loop, args=(s, job_id),
-                         daemon=True, name=f"crawl-{job_id}")
-    _workers[job_id] = t
-    t.start()
+    # _ensure_worker, not a bare spawn — it keys _workers scope:job and
+    # acquires the job lease; a raw thread here raced a later crawl_step
+    # into spawning a second worker on the same job (StaleJobError)
+    _ensure_worker(s, job_id)
 
 
 def _owner_label(idx, job_id: str) -> str:

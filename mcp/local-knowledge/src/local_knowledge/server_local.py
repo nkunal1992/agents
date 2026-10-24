@@ -302,10 +302,11 @@ def _resume_job(scope_key: str, job_id: str) -> None:
     if not root_s:
         return
     s["root"] = Path(root_s)
-    t = threading.Thread(target=_worker_loop, args=(s, job_id),
-                         daemon=True, name=f"crawl-{job_id}")
-    _workers[job_id] = t
-    t.start()
+    # go through _ensure_worker — a bare spawn keyed _workers[job_id]
+    # while _ensure_worker keys scope:job meant a later crawl_step could
+    # not see this thread, acquired the (unheld) lease and drove a second
+    # worker on the same job → StaleJobError → job error (#257 CI)
+    _ensure_worker(s, job_id)
 
 
 @tool(mcp)

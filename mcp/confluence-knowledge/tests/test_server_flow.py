@@ -239,7 +239,9 @@ def test_orphan_reclaim_needs_no_network(wired, monkeypatch):
         raise AssertionError("reclaim touched the network")
     monkeypatch.setattr(server, "_client_for", _no_network)
     server._resume_job(key, job["job_id"])
-    assert job["job_id"] in server._workers or wait_done(
+    # _resume_job delegates to _ensure_worker — the registry key is
+    # scope:job (the consistent scheme every spawn path shares)
+    assert f"{key}:{job['job_id']}" in server._workers or wait_done(
         c["scope_handle"], job["job_id"])["state"] == "done"
 
 
