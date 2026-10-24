@@ -11,18 +11,17 @@
   battery saver falls back to sequential
 """
 
-import threading
 import time
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+import confluence_knowledge.models as models_mod
 from confluence_knowledge.crawl import Crawler
 from confluence_knowledge.extract import Chunk
 from confluence_knowledge.index import Index
 from confluence_knowledge.models import ModelPool
-import confluence_knowledge.models as models_mod
 
 
 @pytest.fixture

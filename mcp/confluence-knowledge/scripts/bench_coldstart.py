@@ -130,7 +130,7 @@ def main() -> int:
                 if _tcp_ok(meta["port"]):
                     t_http = time.monotonic() - t0
                     break
-            except Exception:       # noqa: BLE001 — file pending
+            except Exception:       # noqa: BLE001,S110 — file pending
                 pass
             time.sleep(0.05)
         # http → first search answer (cold models + cold cache)
@@ -167,7 +167,7 @@ def main() -> int:
         try:
             from confluence_knowledge.watchdog import stop_daemon
             stop_daemon(dhome, timeout=5)
-        except Exception:           # noqa: BLE001
+        except Exception:           # noqa: BLE001,S110
             pass
         try:
             proc.kill()

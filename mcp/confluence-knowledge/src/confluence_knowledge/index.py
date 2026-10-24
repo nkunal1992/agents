@@ -733,7 +733,7 @@ class Index:
         def _run() -> None:
             try:
                 self.search_cache()
-            except Exception:      # noqa: BLE001 — opportunistic warm only
+            except Exception:      # noqa: BLE001,S110 — opportunistic warm only
                 pass
         threading.Thread(target=_run, name="cache-warm",
                          daemon=True).start()

@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 def _synth(pages: int, chunks: int, seed: int = 7):
     """Shape-real synthetic rows → (page_dicts, chunk_lists, vecs, sparse)."""
     import numpy as np
+
     from confluence_knowledge.extract import Chunk
 
     rng = np.random.default_rng(seed)
@@ -70,6 +71,7 @@ def _bulk_upsert(idx, job_id: str, page_dicts, chunk_lists, vec_rows,
     """What a batched upsert_pages() would do — identical statements,
     one transaction for the whole buffer instead of one per page."""
     import numpy as np
+
     from confluence_knowledge.index import _LockedRetry
 
     with idx.lock, _LockedRetry(idx.db):
@@ -207,7 +209,7 @@ def main() -> int:
             ts.append(time.monotonic() - t0)
             for t in ("pages_stage", "chunks_stage", "vectors_stage",
                       "sparse_vectors_stage", "chunks_fts_stage"):
-                idx.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job2,))  # noqa: E501
+                idx.db.execute(f"DELETE FROM {t} WHERE job_id=?", (job2,))
             idx.db.commit()
         out[f"{variant}_s"] = [round(t, 3) for t in ts]
         out[f"{variant}_best_s"] = round(min(ts), 3)
