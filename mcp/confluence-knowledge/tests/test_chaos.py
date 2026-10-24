@@ -59,7 +59,7 @@ def test_watchdog_stands_down_after_three_spawn_failures(tmp_path,
     monkeypatch.setattr(RpcDb, "daemon_alive", lambda self: False)
     fails = []
 
-    def _boom(r, env=None):
+    def _boom(r, env=None, **kw):
         fails.append(1)
         raise RuntimeError("spawn impossible")
 
