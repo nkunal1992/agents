@@ -174,27 +174,46 @@ class RpcDb:
     # ---- daemon lease (job_lease pattern, service level) ----
     def acquire_daemon(self, owner: str, pid: int) -> bool:
         """Take the daemon lease — stale heartbeat or dead pid hands it
-        over, mirroring Index.acquire_lease semantics."""
+        over, mirroring Index.acquire_lease semantics. The steal is
+        conditional on the observed state so two racing daemons can't
+        BOTH win: whoever writes first changes the heartbeat, and the
+        loser's UPDATE matches nothing (#253 mutual-kill spiral)."""
         now = time.time()
         with self.lock, self.db:
             row = self.db.execute(
                 "SELECT owner,pid,heartbeat FROM daemon_lease "
                 "WHERE job_id='__daemon__'").fetchone()
-            if row is not None and row[0] != owner:
-                stale = (row[2] or 0) < now - _LEASE_STALE_S
-                dead = False
-                if not stale:
-                    try:
-                        import psutil
-                        dead = not psutil.pid_exists(int(row[1]))
-                    except Exception:    # noqa: BLE001 — can't verify
-                        dead = False
-                if not (stale or dead):
+            if row is None:
+                try:
+                    self.db.execute(
+                        "INSERT INTO daemon_lease VALUES ('__daemon__',?,?,?)",
+                        (owner, pid, now))
+                    return True
+                except Exception:       # noqa: BLE001 — another racer
+                    return False         # won the insert
+            if row[0] == owner:
+                self.db.execute(
+                    "UPDATE daemon_lease SET pid=?,heartbeat=? "
+                    "WHERE job_id='__daemon__'", (pid, now))
+                return True
+            beat = row[2] or 0
+            stale = beat < now - _LEASE_STALE_S
+            if not stale:
+                try:
+                    import psutil
+                    dead = not psutil.pid_exists(int(row[1]))
+                except Exception:    # noqa: BLE001 — can't verify
+                    dead = False
+                if not dead:
                     return False
-            self.db.execute(
-                "INSERT OR REPLACE INTO daemon_lease VALUES ('__daemon__',?,?,?)",
-                (owner, pid, now))
-            return True
+            # steal only if the holder's heartbeat hasn't moved since we
+            # read it — a live holder refreshes it, a fellow stealer's
+            # write changes it; either way our UPDATE no-ops
+            cur = self.db.execute(
+                "UPDATE daemon_lease SET owner=?,pid=?,heartbeat=? "
+                "WHERE job_id='__daemon__' AND heartbeat=?",
+                (owner, pid, now, beat))
+            return cur.rowcount > 0
 
     def heartbeat_daemon(self, owner: str) -> bool:
         with self.lock, self.db:
