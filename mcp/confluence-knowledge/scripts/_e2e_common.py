@@ -250,9 +250,10 @@ def stop_shared_daemon(cli: Path, env: dict) -> None:
         # sandboxed KNOWLEDGE_SHARED_HOME, so this is the only place
         # the logs ever surface
         import glob as _g
+        shared = env.get("KNOWLEDGE_SHARED_HOME") or \
+            str(Path(env.get("HOME", "")) / ".knowledge")
         for pat in ("**/daemon.log", "**/watchdog.log"):
-            for f in _g.glob(str(Path(env.get(
-                    "KNOWLEDGE_SHARED_HOME", "")) / pat), recursive=True):
+            for f in _g.glob(str(Path(shared) / pat), recursive=True):
                 try:
                     lines = Path(f).read_text(
                         errors="replace").splitlines()
