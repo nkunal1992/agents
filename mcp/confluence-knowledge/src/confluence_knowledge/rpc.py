@@ -299,6 +299,45 @@ def _popen_detached(argv: list, **kw) -> subprocess.Popen:
         raise
 
 
+def _spawn_lock(workdir) -> os.PathLike | None:
+    """Serialize daemon spawns across proxy callers (#253): at wake a
+    queue of tool calls each sees daemon_alive()==False inside the
+    child's cold-boot window (imports + model open — seconds) and every
+    one used to spawn a full interpreter that exits on acquire_daemon
+    only AFTER paying ~300-500 MB of model load. N callers → N-process
+    RAM burst → laptop freeze. The lock makes them queue: the first
+    spawns, the rest acquire the lock AFTER the heartbeat is live and
+    return without spawning."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _locked():
+        fd = None
+        try:
+            fd = os.open(workdir / ".spawn.lock",
+                         os.O_CREAT | os.O_RDWR, 0o600)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            if fd is not None:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                os.close(fd)
+    return _locked()
+
+
 def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
     """Spawn the shared daemon lazily if no live owner holds the lease.
     Racing proxies may double-spawn — self-correcting: the loser's
@@ -312,6 +351,29 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         from .settings import daemon_home
         workdir = daemon_home()
         workdir.mkdir(parents=True, exist_ok=True)
+        with _spawn_lock(workdir):
+            if rpc.daemon_alive():        # a queued caller's spawn won
+                return
+            stop = workdir / ".watchdog.stop"
+            try:
+                if (stop.exists() and
+                        time.time() - stop.stat().st_mtime < 4):
+                    # shutdown mid-flight — spawning now would land a
+                    # watchdog-less daemon right behind the user's stop
+                    return
+            except OSError:
+                pass
+            _spawn_daemon(rpc, workdir, env)
+    except DaemonUnavailable:
+        raise
+    except Exception as e:
+        raise DaemonUnavailable(f"daemon spawn failed: {e}") from e
+
+
+def _spawn_daemon(rpc: RpcDb, workdir, env: dict | None = None) -> None:
+    """The actual spawn — runs under _spawn_lock so concurrent callers
+    serialize (#253)."""
+    try:
         pid_path = workdir / ".daemon.pid"
         # a deliberate respawn means someone wants the daemon up — a
         # STALE stop-file from an earlier `X stop` must not leave this
@@ -341,7 +403,8 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         # would otherwise each spawn. Generous bound: a cold Windows boot
         # (package import + AV scan) can exceed 10 s (#220).
         deadline = time.monotonic() + 20
-        while time.monotonic() < deadline and not rpc.daemon_alive():
+        while (time.monotonic() < deadline
+               and not rpc.daemon_alive()):
             time.sleep(0.1)
         if not rpc.daemon_alive():
             raise DaemonUnavailable("daemon spawned but never took lease")

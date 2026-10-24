@@ -64,19 +64,27 @@ def watchdog_running(home: Path) -> bool:
 
 def spawn_watchdog(home: Path) -> None:
     """Detached watchdog process — survives the spawning daemon/CLI."""
+    if os.environ.get("KNOWLEDGE_WATCHDOG_ROLE"):
+        return                       # a watchdog never spawns a sibling
     if watchdog_running(home):
         return
     env = dict(os.environ)
     env["KNOWLEDGE_WATCHDOG_ROLE"] = "1"
     try:
-        from .rpc import _popen_detached, detached_spawn_kwargs
-        proc = _popen_detached(
-            [sys.executable, "-m", "confluence_knowledge.watchdog",
-             str(home)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=open(home / "watchdog.log", "ab"),   # noqa: SIM115
-            env=env, **detached_spawn_kwargs())
-        (home / _PID_FILE).write_text(str(proc.pid))
+        from .rpc import _popen_detached, _spawn_lock, detached_spawn_kwargs
+        # the same file mutex that serializes daemon spawns (#253) —
+        # a daemon-revive and a restart_daemon racing here must not both
+        # pass watchdog_running and land duplicate watchdogs
+        with _spawn_lock(home):
+            if watchdog_running(home):     # re-check under the lock
+                return
+            proc = _popen_detached(
+                [sys.executable, "-m", "confluence_knowledge.watchdog",
+                 str(home)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=open(home / "watchdog.log", "ab"),  # noqa: SIM115
+                env=env, **detached_spawn_kwargs())
+            (home / _PID_FILE).write_text(str(proc.pid))
     except Exception:
         log.warning("watchdog spawn failed", exc_info=True)
 
@@ -160,6 +168,19 @@ def stop_daemon(home: Path, timeout: float = 8) -> dict:
     while rpc.daemon_alive() and time.monotonic() < deadline:
         time.sleep(0.2)
     out["daemon_down"] = not rpc.daemon_alive()
+    if not out["daemon_down"] and daemon_pid is not None:
+        # still breathing after SIGTERM + the full wait — wedge or a
+        # suspended loop; SIGKILL is the last word (#253)
+        try:
+            os.kill(daemon_pid, signal.SIGKILL
+                    if hasattr(signal, "SIGKILL") else _TERM)
+            out["daemon_killed"] = True
+            deadline = time.monotonic() + 3
+            while rpc.daemon_alive() and time.monotonic() < deadline:
+                time.sleep(0.2)
+            out["daemon_down"] = not rpc.daemon_alive()
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
     return out
 
 

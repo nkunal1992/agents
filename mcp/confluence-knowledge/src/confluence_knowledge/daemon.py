@@ -175,6 +175,7 @@ class Daemon:
             return 2
         log.info("daemon up: owner=%s workdir=%s services=%s",
                  self.owner, self.workdir, sorted(self.services))
+        self._reap_strays()
         self._http = self._serve_http()
         self._resume_orphans()
         last_gc = 0.0
@@ -379,6 +380,35 @@ class Daemon:
                         srv._resume_job(db.stem, job_id)
                     except Exception:           # noqa: BLE001
                         log.warning("orphan resume failed for %s", job_id)
+
+    def _reap_strays(self) -> None:
+        """Boot sweep for leaked siblings (#253): pre-fix races could
+        leave extra `confluence_knowledge.daemon`/`watchdog` processes
+        alive on this SAME workdir — each holds model RAM. We just won
+        the lease, so anything else on our home is by definition a
+        stray: SIGTERM it (own pid excluded). Different-home siblings
+        are legitimate — untouched."""
+        try:
+            import psutil
+        except ImportError:
+            return
+        me = os.getpid()
+        home = str(self.workdir)
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == me:
+                    continue
+                argv = proc.cmdline()
+                joined = " ".join(argv)
+                if (("confluence_knowledge.daemon" in joined
+                        or "confluence_knowledge.watchdog" in joined)
+                        and home in argv):
+                    log.info("reaping stray %s pid=%s",
+                             joined.split()[-1], proc.pid)
+                    proc.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied,
+                    psutil.ZombieProcess):
+                continue
 
     def _gc_leases(self) -> None:
         """Periodic housekeeping — nothing yet; hook for sweeps."""

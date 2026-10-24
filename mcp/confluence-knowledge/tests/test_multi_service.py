@@ -172,7 +172,8 @@ def test_ensure_daemon_respects_fresh_stop_file(tmp_path, monkeypatch):
     fresh.write_text("1")
     rpc_mod.ensure_daemon(RpcDb(tmp_path / "rpc.db"))
     assert fresh.exists(), "fresh stop-file was unlinked — mid-stop resurrect"
-    assert spawned, "daemon itself should still spawn — tools stay up"
+    assert not spawned, ("#253: fresh stop also suppresses the spawn — "
+                         "a daemon born mid-shutdown is watchdog-less")
 
     import os
     os.utime(fresh, (0, 0))                     # ancient mtime → stale
