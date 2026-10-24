@@ -208,14 +208,26 @@ class Index:
         # strict schema gate (#257): separate IDE installs share the index
         # files — a version-skewed second install must refuse cleanly, not
         # misread a newer layout. Pre-production: no migrations, one rule.
-        has_meta = self.db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='meta'").fetchone() is not None
-        if has_meta:
+        # A concurrent first-open can observe the file mid-creation (DDL
+        # commits before the meta row lands) — wait briefly before the
+        # strict checks so that peer isn't refused as a legacy index.
+        deadline = time.monotonic() + 2.0
+        while True:
+            has_meta = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='meta'").fetchone() is not None
             row = self.db.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
-                ).fetchone()
+                ).fetchone() if has_meta else None
             stored = row[0] if row is not None else None
+            has_tables = has_meta or self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "LIMIT 1").fetchone() is not None
+            if stored is not None or not has_tables or \
+                    time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+        if has_meta:
             if stored != str(SCHEMA_VERSION):
                 self.db.close()
                 from .settings import SetupError
@@ -226,9 +238,7 @@ class Index:
                     + f" — this build expects v{SCHEMA_VERSION}. Run every "
                     "install on the same package version, or `clean` and "
                     "re-crawl")
-        elif self.db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' "
-                "LIMIT 1").fetchone() is not None:
+        elif has_tables:
             # tables but no meta — a pre-versioning index; refuse rather
             # than silently adopt a layout this build can't trust
             self.db.close()
