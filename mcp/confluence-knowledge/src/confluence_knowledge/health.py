@@ -52,12 +52,24 @@ _SERVER_MARKERS = ("confluence_knowledge.server",
                    "sharepoint_knowledge.server_sp")
 
 
+_PROC_COUNT_TTL_S = 60.0   # pile-up detector, not a live count — the
+_proc_count_cache: tuple[float, int] | None = None  # scan costs ~sec on
+# Windows (one OpenProcess+cmdline read per process under AV) and status()
+# calls it every time — a minute of staleness is fine
+
+
 def _server_process_count() -> int:
     """How many knowledge MCP servers are running — every IDE window
     spawns its own copy of each installed service (~2 GB each once the
     models load), so a count ≫ 3 explains memory pressure. -1 = unknown.
     psutil only — `wmic` is removed from modern Windows and AppLocker
-    blocks it on managed devices; `ps` isn't on Windows at all."""
+    blocks it on managed devices; `ps` isn't on Windows at all. Cached:
+    per-process cmdline reads are slow under AV on Windows."""
+    global _proc_count_cache
+    if (_proc_count_cache
+            and time.monotonic() - _proc_count_cache[0]
+            < _PROC_COUNT_TTL_S):
+        return _proc_count_cache[1]
     try:
         import psutil
         n = 0
@@ -69,9 +81,11 @@ def _server_process_count() -> int:
                 continue
             if any(m in " ".join(cmd) for m in _SERVER_MARKERS):
                 n += 1
-        return n
+        result = n
     except Exception:  # noqa: BLE001 — detection only, never fatal
-        return -1
+        result = -1
+    _proc_count_cache = (time.monotonic(), result)
+    return result
 
 
 def _resources_check(cli: str) -> dict:
