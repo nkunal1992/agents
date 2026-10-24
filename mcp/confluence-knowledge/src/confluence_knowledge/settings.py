@@ -219,7 +219,12 @@ def shared_home() -> Path:
 def daemon_home() -> Path:
     """Per-venv daemon slot — same-venv services share ONE daemon process
     (the multi-mount http endpoint); a foreign-venv install can't import
-    this venv's modules anyway, so it gets its own slot and port."""
+    this venv's modules anyway, so it gets its own slot and port.
+    KNOWLEDGE_DAEMON_HOME overrides the slot for tests and power users
+    simulating multiple installs from one interpreter (#257)."""
+    env = os.environ.get("KNOWLEDGE_DAEMON_HOME")
+    if env:
+        return Path(env).expanduser()
     import hashlib
     import sys
     key = hashlib.sha256(sys.prefix.encode()).hexdigest()[:10]
