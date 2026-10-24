@@ -12,6 +12,10 @@ def sandbox(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "win"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.home() consults USERPROFILE on Windows, not HOME — mock it so
+    # the windsurf/cursor probes don't read the runner's real profile
+    from pathlib import Path
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     yield tmp_path
 
 
