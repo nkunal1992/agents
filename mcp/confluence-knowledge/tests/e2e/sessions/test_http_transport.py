@@ -132,10 +132,10 @@ def test_daemon_restart_same_url(daemon, workdir):
     # field needs is recovery-on-same-URL, so assert exactly that.
     daemon.kill()
     daemon.wait(timeout=8)
-    # 60s on CI: watchdog detect (~2s) + cold spawn + fastmcp/uvicorn
-    # import + mount can stretch past 30 on a congested macos runner —
-    # the contract is 'respawn happens on the same URL', not 'in 30s'
-    deadline = time.monotonic() + 60
+    # 90s on CI: watchdog detect + cold spawn + fastmcp/uvicorn import +
+    # mount can stretch past 60 on an AV-scanned Windows runner — the
+    # contract is 'respawn happens on the same URL', not 'in 60s'
+    deadline = time.monotonic() + 90
     while True:
         try:
             out = asyncio.run(asyncio.wait_for(
