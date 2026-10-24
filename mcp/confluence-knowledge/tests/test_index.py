@@ -237,3 +237,24 @@ def test_ann_unavailable_still_raises(monkeypatch, tmp_path):
     from confluence_knowledge.settings import SetupError
     with pytest.raises(SetupError, match="narrower scope"):
         rt.retrieve(idx, "q", E())
+
+
+@_ANN
+def test_ann_write_conn_loads_module_after_exists(tmp_path):
+    """#260: daemon A's publish created vec_chunks; daemon B's fresh
+    Index conn took the `exists` short-circuit and never loaded vec0 on
+    its write conn → publish died 'no such module: vec0'. The exists
+    path must load the extension on self.db too (per-conn loading)."""
+    idx_a = Index(tmp_path / "s.db")
+    idx_a.upsert_page(_page("1", "A"), [Chunk("a", "", "text", 0, "c1")],
+                      np.array([[1, 0, 0, 0]], np.float32))
+    idx_a.publish({"1"})
+    idx_a.close()
+
+    idx_b = Index(tmp_path / "s.db")      # the cross-install daemon —
+    assert idx_b.ann_available()          # exists → must ALSO load self.db
+    idx_b.upsert_page(_page("2", "B"), [Chunk("b", "", "text", 0, "c2")],
+                      np.array([[0, 1, 0, 0]], np.float32))
+    idx_b.publish({"1", "2"})             # vec_chunks DELETE/INSERT live
+    hits = idx_b.ann_topk(np.array([0, 1, 0, 0], np.float32), 5)
+    assert {h[0] for h in hits} == {"c1", "c2"}

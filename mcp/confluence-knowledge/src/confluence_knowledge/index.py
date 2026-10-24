@@ -1114,6 +1114,15 @@ class Index:
                     "SELECT count(*) FROM sqlite_master WHERE "
                     "name='vec_chunks'").fetchone()[0]
                 if exists:
+                    # vtable ops need vec0 on EACH connection — the read
+                    # conn proved it's loadable, but a writer touching
+                    # vec_chunks on an unextended self.db dies with
+                    # 'no such module: vec0' (#260 — cross-install:
+                    # daemon A created the table, daemon B's fresh conn
+                    # took the exists short-circuit and crashed publish)
+                    if not self._readonly and not self._ann_load(self.db):
+                        self._ann = False
+                        return False
                     self._ann = True
                     return True
                 if self._readonly:
