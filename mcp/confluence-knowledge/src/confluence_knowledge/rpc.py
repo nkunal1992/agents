@@ -354,15 +354,6 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None) -> None:
         with _spawn_lock(workdir):
             if rpc.daemon_alive():        # a queued caller's spawn won
                 return
-            stop = workdir / ".watchdog.stop"
-            try:
-                if (stop.exists() and
-                        time.time() - stop.stat().st_mtime < 4):
-                    # shutdown mid-flight — spawning now would land a
-                    # watchdog-less daemon right behind the user's stop
-                    return
-            except OSError:
-                pass
             _spawn_daemon(rpc, workdir, env)
     except DaemonUnavailable:
         raise

@@ -39,9 +39,11 @@ def test_concurrent_ensure_daemon_spawns_once(tmp_path, monkeypatch):
     assert state["spawns"] == 1
 
 
-def test_fresh_stop_file_skips_spawn(tmp_path, monkeypatch):
-    """A `.watchdog.stop` written <4 s ago means shutdown is mid-flight —
-    no daemon spawn; a stale one still allows respawn."""
+def test_fresh_stop_file_still_spawns(tmp_path, monkeypatch):
+    """The lazy-start contract: a NEW tool call is intent to run — the
+    watchdog's own re-check before respawn already covers the shutdown
+    race, so ensure_daemon must NOT read the stop file (a stop→tool-call
+    sequence under 4s used to hang e2e for the full 20s timeout)."""
     _home(tmp_path, monkeypatch)
     from confluence_knowledge import rpc as rpc_mod
     monkeypatch.setattr("confluence_knowledge.settings.daemon_home",
@@ -56,12 +58,6 @@ def test_fresh_stop_file_skips_spawn(tmp_path, monkeypatch):
                         lambda rpc, workdir, env=None:
                         state.__setitem__("spawns", state["spawns"] + 1))
     (tmp_path / ".watchdog.stop").write_text("1")
-    rpc_mod.ensure_daemon(DeadRpc())
-    assert state["spawns"] == 0
-
-    # stale stop file → spawn proceeds (respawn intent wins)
-    old = time.time() - 10
-    os.utime(tmp_path / ".watchdog.stop", (old, old))
     rpc_mod.ensure_daemon(DeadRpc())
     assert state["spawns"] == 1
 
