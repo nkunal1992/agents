@@ -132,6 +132,28 @@ def test_running_live_job_dedup(tmp_path):
     assert idx.running_live_job() is None
 
 
+import sqlite3
+
+import pytest
+
+
+def _ann_ext_ok() -> bool:
+    """sqlite-vec loads on this platform/sqlite — ANN tests need it."""
+    try:
+        conn = sqlite3.connect(":memory:")
+        conn.enable_load_extension(True)
+        import sqlite_vec
+        sqlite_vec.load(conn)
+        return True
+    except Exception:       # noqa: BLE001 — probing, not asserting
+        return False
+
+
+_ANN = pytest.mark.skipif(
+    not _ann_ext_ok(), reason="sqlite-vec extension unavailable")
+
+
+@_ANN
 def test_ann_backfill_and_topk(tmp_path):
     """#251: vec_chunks mirrors vectors — _ensure_ann backfills in place,
     ann_topk returns cosine-sorted neighbours."""
@@ -151,6 +173,7 @@ def test_ann_backfill_and_topk(tmp_path):
     assert hits[0][1] > hits[1][1]
 
 
+@_ANN
 def test_ann_publish_delta(tmp_path):
     """#251: a later publish mirrors deletes + new rows into vec_chunks —
     no stale neighbours, no missing ones."""
@@ -169,6 +192,7 @@ def test_ann_publish_delta(tmp_path):
     assert {h[0] for h in hits} == {"c3"}        # c1/c2 both evicted
 
 
+@_ANN
 def test_ann_retrieve_over_cap(monkeypatch, tmp_path):
     """#251: >cap whole-scope search answers via ANN instead of
     refusing — the user's real 306k-chunk scope."""
