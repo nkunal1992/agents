@@ -106,7 +106,8 @@ def main() -> None:
         "register",
         help="write this server into the IDE's MCP config (no manual paste)")
     reg.add_argument("--ide", default="auto",
-                     choices=["auto", "all", "vscode", "jetbrains"])
+                     choices=["auto", "all", "vscode", "jetbrains",
+                              "windsurf", "cursor"])
     reg.add_argument("--workspace", type=Path, default=None)
     reg.add_argument("--transport", choices=["stdio", "http"],
                      default="stdio",

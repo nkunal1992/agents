@@ -139,6 +139,14 @@ def _http_meta(workdir: Path | None = None) -> dict | None:
     return None
 
 
+def daemon_url() -> str:
+    """This venv's daemon loopback base URL ('' when no endpoint is up) —
+    surfaced in status() so two IDE installs that fork their daemon slots
+    show visibly different values (#257)."""
+    meta = _http_meta()
+    return f"http://127.0.0.1:{meta['port']}/" if meta else ""
+
+
 def _platform_appdata() -> Path | None:
     """Where per-app support data lives, per OS."""
     if os.name == "nt":
@@ -168,6 +176,30 @@ def _workspace_mcp(workspace: Path | None) -> Path | None:
     return (workspace / ".vscode" / "mcp.json") if workspace else None
 
 
+def _windsurf_mcp() -> Path | None:
+    """Windsurf's user-level MCP config — only when the app is installed."""
+    d = Path.home() / ".codeium" / "windsurf"
+    return d / "mcp_config.json" if d.is_dir() else None
+
+
+def _cursor_user_mcp() -> Path | None:
+    """Cursor's user-level MCP config — only when ~/.cursor exists."""
+    d = Path.home() / ".cursor"
+    return d / "mcp.json" if d.is_dir() else None
+
+
+def _cursor_workspace_mcp(workspace: Path | None) -> Path | None:
+    return (workspace / ".cursor" / "mcp.json") if workspace else None
+
+
+def _root_key(path: Path) -> str:
+    """The JSON root an IDE reads its server table under — VS Code and
+    JetBrains use `servers`; Windsurf and Cursor use `mcpServers` (#257)."""
+    if path.name == "mcp_config.json" or ".cursor" in path.parts:
+        return "mcpServers"
+    return "servers"
+
+
 def targets(ide: str = "auto", workspace: Path | None = None) -> list[Path]:
     """Every config file the chosen IDEs read. `auto` = all that apply."""
     out = []
@@ -178,6 +210,17 @@ def targets(ide: str = "auto", workspace: Path | None = None) -> list[Path]:
         if v:
             out.append(v)
         w = _workspace_mcp(workspace)
+        if w:
+            out.append(w)
+    if ide in ("auto", "all", "windsurf"):
+        w = _windsurf_mcp()
+        if w:
+            out.append(w)
+    if ide in ("auto", "all", "cursor"):
+        u = _cursor_user_mcp()
+        if u:
+            out.append(u)
+        w = _cursor_workspace_mcp(workspace)
         if w:
             out.append(w)
     # de-dupe (user + workspace can resolve to the same file in tests)
@@ -206,7 +249,7 @@ def _merge(path: Path, entry: dict | None, server_id: str = SERVER_ID) -> str:
             data = {}
             replaced = True  # unparseable (JSONC etc.) — back up and rewrite
         shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
-    servers = data.setdefault("servers", {})
+    servers = data.setdefault(_root_key(path), {})
     if entry is None:
         servers.pop(server_id, None)
         action = "removed"
@@ -288,8 +331,10 @@ def register(ide: str = "auto", workspace: Path | None = None,
              env_var: str = WORKDIR_ENV,
              transport: str = "stdio") -> list[tuple[Path, str]]:
     """Write/remove our server entry in each target. Returns (path, action)."""
-    if ide not in ("auto", "all", "vscode", "jetbrains"):
-        raise SetupError(f"unknown --ide '{ide}' (auto|all|vscode|jetbrains)")
+    if ide not in ("auto", "all", "vscode", "jetbrains", "windsurf",
+                   "cursor"):
+        raise SetupError(f"unknown --ide '{ide}' "
+                         "(auto|all|vscode|jetbrains|windsurf|cursor)")
     files = targets(ide, workspace)
     if not files:
         raise SetupError("no IDE config locations found — no Copilot/JetBrains "
@@ -312,10 +357,11 @@ def register(ide: str = "auto", workspace: Path | None = None,
         # config or secrets) from `git add .` via .gitignore +
         # .git/info/exclude (#192). Applies on remove too — _merge still
         # writes a .bak of the previous file.
-        if f.name == "mcp.json" and f.parent.name == ".vscode":
+        if f.name == "mcp.json" and f.parent.name in (".vscode", ".cursor"):
+            d = f.parent.name
             ensure_gitignore(f.parent.parent,
-                             [".vscode/mcp.json", ".vscode/mcp.json.bak",
-                              ".vscode/mcp.json.tmp"],
+                             [f"{d}/mcp.json", f"{d}/mcp.json.bak",
+                              f"{d}/mcp.json.tmp"],
                              protected=())
         out.append((f, _merge(f, entry, server_id)))
     return out
@@ -329,7 +375,7 @@ def registered_transport(server_id: str = SERVER_ID) -> str | None:
     for p in targets("all"):
         try:
             entry = (json.loads(p.read_text())
-                     .get("servers", {}).get(server_id))
+                     .get(_root_key(p), {}).get(server_id))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
         if isinstance(entry, dict):
@@ -350,7 +396,7 @@ def registered_paths(server_id: str = SERVER_ID,
                      else workspace.parent}]
     for p in dict.fromkeys(q for q in probes if q):
         try:
-            servers = json.loads(p.read_text()).get("servers", {})
+            servers = json.loads(p.read_text()).get(_root_key(p), {})
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
         if p.exists() and server_id in servers:

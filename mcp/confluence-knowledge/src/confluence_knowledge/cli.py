@@ -316,10 +316,12 @@ def main() -> None:
         "register",
         help="write this server into the IDE's MCP config (no manual paste)")
     reg.add_argument("--ide", default="auto",
-                     choices=["auto", "all", "vscode", "jetbrains"],
+                     choices=["auto", "all", "vscode", "jetbrains",
+                              "windsurf", "cursor"],
                      help="which config files to write (default: all that apply)")
     reg.add_argument("--workspace", type=Path, default=None,
-                     help="also write <workspace>/.vscode/mcp.json")
+                     help="also write <workspace>/.vscode/mcp.json and "
+                          "<workspace>/.cursor/mcp.json")
     reg.add_argument("--transport", choices=["stdio", "http"],
                      default="stdio",
                      help="server entry type — stdio (default): a per-window "
