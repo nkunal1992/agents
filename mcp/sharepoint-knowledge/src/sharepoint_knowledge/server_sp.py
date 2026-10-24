@@ -515,10 +515,9 @@ def _resume_job(scope_key: str, job_id: str) -> None:
     s = {"key": scope_key, "root_entry": root_entry,
          "site_web": profile.site_url,
          "client": _client_for(profile.site_url)}
-    t = threading.Thread(target=_worker_loop, args=(s, job_id),
-                         daemon=True, name=f"crawl-{job_id}")
-    _workers[job_id] = t
-    t.start()
+    # _ensure_worker, not a bare spawn — consistent _workers key +
+    # acquired lease; otherwise a crawl_step could double-drive the job
+    _ensure_worker(s, job_id)
 
 
 def _owner_label(idx, job_id: str) -> str:
