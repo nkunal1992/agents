@@ -179,12 +179,17 @@ class Daemon:
             pass   # lease taken — a fresh stamp now means in-flight only
         log.info("daemon up: owner=%s workdir=%s services=%s",
                  self.owner, self.workdir, sorted(self.services))
-        # reap AFTER the http endpoint binds — the sweep is janitorial,
-        # never worth delaying (or hanging, on Windows psutil cmdline)
-        # the surface callers are waiting on
+        # heartbeat at every boot milestone — acquire wrote the lease
+        # once, but bind + reaper + orphan-resume can exceed the 5s
+        # staleness window; a daemon that LOOKS dead gets respawned
+        # then reaped by its replacement (#253 death spiral)
+        self.rpc.heartbeat_daemon(self.owner)
         self._http = self._serve_http()
+        self.rpc.heartbeat_daemon(self.owner)
         self._reap_strays()
+        self.rpc.heartbeat_daemon(self.owner)
         self._resume_orphans()
+        self.rpc.heartbeat_daemon(self.owner)
         last_gc = 0.0
         last_probe = 0.0
         probe_fails = 0
