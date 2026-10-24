@@ -99,7 +99,10 @@ def run(home: Path) -> int:
     rpc = RpcDb(home / "rpc.db")
     log.info("watchdog up: home=%s", home)
     fails = 0
-    while home.exists() and not (home / _STOP_FILE).exists():
+    # the stop file stands a watchdog down only for a DEAD daemon — a
+    # stale marker (leftover teardown, crashed `stop`) must never idle
+    # a supervisor while its daemon is alive and beating (#253)
+    while home.exists():
         if not rpc.daemon_alive():
             # a `stop` may have landed mid-iteration — re-check before
             # respawning so the shutdown is honoured, not resurrected
