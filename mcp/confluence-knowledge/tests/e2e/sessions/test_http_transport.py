@@ -93,6 +93,13 @@ def daemon(workdir):
                 p.terminate()
     except Exception:               # noqa: BLE001,S110 — teardown is
         pass                         # best-effort
+    # sandbox diagnostics — the sandbox home dies with tmp_path so dump
+    # the supervision tails while we still can
+    for name in ("daemon.log", "watchdog.log"):
+        f = workdir / name
+        if f.exists():
+            tail = f.read_text(errors="replace").splitlines()[-40:]
+            print(f"\n---- {f} (last {len(tail)}) ----\n" + "\n".join(tail))
 
 
 @pytest.fixture
