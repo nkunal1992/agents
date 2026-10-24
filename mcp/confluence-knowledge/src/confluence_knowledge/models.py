@@ -14,6 +14,7 @@ import gc
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .resources import limits
@@ -48,19 +49,29 @@ class ModelPool:
             "reranker": LocalReranker,
             "sparse": LocalSparseEmbedder,
         }
+        # per-kind creation locks — different models may load in parallel
+        # while the same kind still single-loads (#255)
+        self._load_locks = {k: threading.Lock() for k in self._loaders}
 
     def _touch(self) -> None:
         self._last_use = self._clock()
 
     def _get(self, kind: str):
-        with self._lock:
-            attr = f"_{kind}"
+        attr = f"_{kind}"
+        obj = getattr(self, attr)
+        if obj is not None:
+            self._touch()
+            return obj
+        # the loader runs under a per-kind lock, not the pool lock —
+        # session init used to serialize all three models (~0.6s) even
+        # though they build independent ONNX graphs (#255)
+        with self._load_locks.setdefault(kind, threading.Lock()):
             obj = getattr(self, attr)
             if obj is None:
                 obj = self._loaders[kind](self._home_fn(), self._cli)
                 setattr(self, attr, obj)
-            self._touch()
-            return obj
+        self._touch()
+        return obj
 
     def embedder(self) -> LocalEmbedder:
         return self._get("embedder")
@@ -82,9 +93,19 @@ class ModelPool:
 
     def _warm(self) -> None:
         try:
-            self.embedder()
-            self.reranker()
-            self.sparse()
+            if limits().battery_saver and limits().on_battery():
+                # battery saver: sequential keeps the session-init spike
+                # small on a throttled CPU
+                for k in ("embedder", "reranker", "sparse"):
+                    self._get(k)
+            else:
+                with ThreadPoolExecutor(
+                        max_workers=3,
+                        thread_name_prefix="model-load") as pool:
+                    futs = [pool.submit(self._get, k)
+                            for k in ("embedder", "reranker", "sparse")]
+                    for f in futs:
+                        f.result()
         except SetupError:
             pass  # reported by the tool that needs the model
         finally:
