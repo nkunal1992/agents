@@ -354,23 +354,20 @@ class Crawler:
         inflight: dict = {}             # future -> entry string
         pending: list = []              # (pid, page, chunks, warns, hash)
         visited_submit: set[str] = set()  # dedupe at submit time
+        # single embed/stage worker: dense embedding is the dominant serial
+        # phase (~half the crawl wall) — running it beside the fetch/extract
+        # loop overlaps model time with network time. One worker means at
+        # most one flush in flight, so text+vector buffers stay bounded to
+        # ~2×FLUSH_MAX_CHUNKS (#255)
+        flush_fut = None
+        flush_pids: set[str] = set()    # pages inside the in-flight flush —
+                                        # checkpoints re-queue them so a
+                                        # crash mid-flush re-crawls them
 
-        def _flush_pending() -> bool:
-            """Stage all buffered pages; False on StaleJobError. `seen` is
-            updated only after the rows land — a checkpoint taken while
-            pages sit in the buffer must re-crawl them on resume."""
-            nonlocal pending
-            if not pending:
-                return True
-            # cap each flush at ~FLUSH_MAX_CHUNKS: pages are popped from the
-            # head until the cap is hit, the rest stay pending — bounds a
-            # single flush's embed time and the fetch buffer's growth even
-            # when a page itself carries 200+ chunks (gap audit #2)
-            buf, n_chunks = [], 0
-            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
-                pid, pg, chunks, warns, h = pending.pop(0)
-                buf.append((pid, pg, chunks, warns, h))
-                n_chunks += len(chunks)
+        def _do_flush(buf: list) -> None:
+            """Embed + stage a page buffer on the embed worker; marks `seen`
+            only after the rows land. Raises where the inline version
+            returned False — `_join_flush` restores the bool contract."""
             vecs = sp = None
             if self.embedder is not None:
                 if self.control is not None:
@@ -439,8 +436,6 @@ class Crawler:
                         vecs[off:off + n] if vecs is not None else None,
                         sp[off:off + n] if sp is not None else None,
                         job_id=job_id)
-                except StaleJobError:
-                    return False
                 finally:
                     stats["store_ms"] += \
                         (time.monotonic() - t0) * 1000
@@ -451,13 +446,50 @@ class Crawler:
                 self.control.page_done(len(buf))
                 self.control.phase("fetching")
             _save_stats()
+
+        def _join_flush() -> bool:
+            """False when the in-flight flush hit StaleJobError; other
+            failures (cancel, embed) propagate like the inline version."""
+            nonlocal flush_fut, flush_pids
+            if flush_fut is None:
+                return True
+            try:
+                flush_fut.result()
+            except StaleJobError:
+                return False
+            finally:
+                flush_fut = None
+                flush_pids = set()
+            return True
+
+        def _flush_pending() -> bool:
+            """Join the previous flush (back-pressure: ≤1 in flight), then
+            hand the next ≤FLUSH_MAX_CHUNKS buffer to the embed worker."""
+            nonlocal pending, flush_fut, flush_pids
+            if not _join_flush():
+                return False
+            if not pending:
+                return True
+            # cap each flush at ~FLUSH_MAX_CHUNKS: pages are popped from the
+            # head until the cap is hit, the rest stay pending — bounds a
+            # single flush's embed time and the fetch buffer's growth even
+            # when a page itself carries 200+ chunks (gap audit #2)
+            buf, n_chunks = [], 0
+            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
+                pid, pg, chunks, warns, h = pending.pop(0)
+                buf.append((pid, pg, chunks, warns, h))
+                n_chunks += len(chunks)
+            flush_pids = {pid for pid, *_ in buf}
+            flush_fut = epool.submit(_do_flush, buf)
             return True
 
         def _pending_chunks() -> int:
             return sum(len(chunks) for _, _, chunks, _, _ in pending)
 
         with ThreadPoolExecutor(max_workers=pool_n,
-                                thread_name_prefix="crawl-fetch") as pool:
+                                thread_name_prefix="crawl-fetch") as pool, \
+                ThreadPoolExecutor(max_workers=1,
+                                   thread_name_prefix="crawl-embed") as epool:
             while (queue or inflight) and (
                     batch is None or processed < batch) and (
                     deadline is None or processed == 0
@@ -471,7 +503,8 @@ class Crawler:
                 if processed and (time.monotonic() - last_ckpt >= 5.0
                                   or processed - last_ckpt_n >= 50):
                     self._checkpoint(
-                        job_id, list(queue) + sorted(inflight.values()),
+                        job_id, list(queue) + sorted(inflight.values())
+                        + [f"page:{p}" for p in flush_pids],
                         errors, seen, levels, keep_failed)
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
                 # keep the window full — never submit beyond the batch
@@ -619,14 +652,24 @@ class Crawler:
                     errors.append(
                         f"prefetch {entry}: "
                         f"{type(e).__name__} (refetches on resume)")
-        if not _flush_pending():
-            _save_stats()
-            return {"job_id": job_id, "state": "abandoned",
-                    "remaining": len(queue), "pages_seen": len(seen),
-                    "errors": errors}
+            # drain the buffer the fetch loop left behind, then join the
+            # last in-flight flush — publish must not run over half-staged
+            # pages (inside the `with`: the embed pool is still open)
+            while pending:
+                if not _flush_pending():
+                    _save_stats()
+                    return {"job_id": job_id, "state": "abandoned",
+                            "remaining": len(queue), "pages_seen": len(seen),
+                            "errors": errors}
+            if not _join_flush():
+                _save_stats()
+                return {"job_id": job_id, "state": "abandoned",
+                        "remaining": len(queue), "pages_seen": len(seen),
+                        "errors": errors}
 
         _save_stats()
-        self._checkpoint(job_id, list(queue) + sorted(inflight.values()),
+        self._checkpoint(job_id, list(queue) + sorted(inflight.values())
+                         + [f"page:{p}" for p in flush_pids],
                          errors, seen, levels, keep_failed)
 
         # fence: a newer crawl may have superseded this job while a fetch was
@@ -638,7 +681,10 @@ class Crawler:
                     "remaining": len(queue), "pages_seen": len(seen),
                     "errors": errors}
         if queue:
-            self.index.save_job(job_id, "running", list(queue), errors)
+            self.index.save_job(job_id, "running",
+                                list(queue)
+                                + [f"page:{p}" for p in flush_pids],
+                                errors)
             state = "running"
         else:
             if self.control is not None:
@@ -646,7 +692,11 @@ class Crawler:
                 self.control.progress.remaining = 0
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
+            t_pub = time.monotonic()
             pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            stats["publish_ms"] = stats.get("publish_ms", 0.0) + \
+                (time.monotonic() - t_pub) * 1000
+            _save_stats()
             # auditable outcome: what the refresh added vs tombstoned vs
             # carried forward — stored so status/last_crawl can report it
             self.index.meta_set(f"publish:{job_id}", json.dumps(pub))

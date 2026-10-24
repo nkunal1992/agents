@@ -261,25 +261,22 @@ class LocalCrawler:
         pool_n = (self.control.fetch_ceiling(conc)
                   if self.control is not None else conc)
         inflight: dict = {}             # future -> entry string
-        pending: list = []              # (rel, meta, chunks, hash, lvl)
+        pending: list = []              # (rel, meta, chunks, hash, lvl, entry)
         visited_submit: set[str] = set()
+        # single embed/stage worker: dense embedding is the dominant serial
+        # phase (~87% of a docx-corpus wall) — running it beside the
+        # fetch/extract loop overlaps model time with I/O. One worker means
+        # at most one flush in flight, so text+vector buffers stay bounded
+        # to ~2×FLUSH_MAX_CHUNKS (#255, parity with confluence crawl)
+        flush_fut = None
+        flush_entries: set[str] = set()  # queue entries inside the in-flight
+                                         # flush — checkpoints re-queue them
+                                         # so a crash mid-flush re-crawls
 
-        def _flush_pending() -> bool:
-            """Stage buffered pages; False on StaleJobError. `seen` updates
-            only after rows land — buffered-but-unstaged files must be
-            re-crawled on resume."""
-            nonlocal pending
-            if not pending:
-                return True
-            # cap each flush at ~FLUSH_MAX_CHUNKS: pages are popped from
-            # the head until the cap is hit, the rest stay pending —
-            # bounds a single flush's embed time and heartbeats the job
-            # through a big docx (#244, parity with confluence crawl)
-            buf, n_chunks = [], 0
-            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
-                rel, meta, chunks, h, lvl = pending.pop(0)
-                buf.append((rel, meta, chunks, h, lvl))
-                n_chunks += len(chunks)
+        def _do_flush(buf: list, n_chunks: int) -> None:
+            """Embed + stage a page buffer on the embed worker; marks `seen`
+            only after rows land. Raises where the inline version returned
+            False — `_join_flush` restores the bool contract."""
             vecs = sp = None
             if self.embedder is not None:
                 if self.control is not None:
@@ -331,20 +328,17 @@ class LocalCrawler:
                             (time.monotonic() - t0) * 1000
             off = 0
             t0 = time.monotonic()
-            for rel, meta, chunks, h, lvl in buf:
+            for rel, meta, chunks, h, lvl, _e in buf:
                 n = len(chunks)
-                try:
-                    self.index.upsert_page({
-                        "page_id": rel, "parent_id": None,
-                        "title": meta["title"], "url": meta["url"],
-                        "level": lvl,
-                        "version": meta["version"], "content_hash": h,
-                        "warnings": meta["warnings"]}, chunks,
-                        vecs[off:off + n] if vecs is not None else None,
-                        sp[off:off + n] if sp is not None else None,
-                        job_id=job_id)
-                except StaleJobError:
-                    return False
+                self.index.upsert_page({
+                    "page_id": rel, "parent_id": None,
+                    "title": meta["title"], "url": meta["url"],
+                    "level": lvl,
+                    "version": meta["version"], "content_hash": h,
+                    "warnings": meta["warnings"]}, chunks,
+                    vecs[off:off + n] if vecs is not None else None,
+                    sp[off:off + n] if sp is not None else None,
+                    job_id=job_id)
                 off += n
             stats["store_ms"] += (time.monotonic() - t0) * 1000
             stats["pages"] += len(buf)
@@ -353,10 +347,47 @@ class LocalCrawler:
             if self.control is not None:
                 self.control.page_done(len(buf))
                 self.control.phase("fetching")
+
+        def _join_flush() -> bool:
+            """False when the in-flight flush hit StaleJobError; other
+            failures (cancel, embed) propagate like the inline version."""
+            nonlocal flush_fut, flush_entries
+            if flush_fut is None:
+                return True
+            try:
+                flush_fut.result()
+            except StaleJobError:
+                return False
+            finally:
+                flush_fut = None
+                flush_entries = set()
+            return True
+
+        def _flush_pending() -> bool:
+            """Join the previous flush (back-pressure: ≤1 in flight), then
+            hand the next ≤FLUSH_MAX_CHUNKS buffer to the embed worker."""
+            nonlocal pending, flush_fut, flush_entries
+            if not _join_flush():
+                return False
+            if not pending:
+                return True
+            # cap each flush at ~FLUSH_MAX_CHUNKS: pages are popped from
+            # the head until the cap is hit, the rest stay pending —
+            # bounds a single flush's embed time and heartbeats the job
+            # through a big docx (#244, parity with confluence crawl)
+            buf, n_chunks = [], 0
+            while pending and (n_chunks < FLUSH_MAX_CHUNKS or not buf):
+                pending_item = pending.pop(0)
+                buf.append(pending_item)
+                n_chunks += len(pending_item[2])
+            flush_entries = {e for *_, e in buf}
+            flush_fut = epool.submit(_do_flush, buf, n_chunks)
             return True
 
         with ThreadPoolExecutor(max_workers=pool_n,
-                                thread_name_prefix="crawl-fetch") as pool:
+                                thread_name_prefix="crawl-fetch") as pool, \
+                ThreadPoolExecutor(max_workers=1,
+                                   thread_name_prefix="crawl-embed") as epool:
             while queue or inflight:
                 if self.control is not None:
                     self.control.check()
@@ -377,7 +408,8 @@ class LocalCrawler:
                 if processed and (time.monotonic() - last_ckpt >= 5.0
                                   or processed - last_ckpt_n >= 50):
                     self._checkpoint(
-                        job_id, list(queue) + sorted(inflight.values()),
+                        job_id, list(queue) + sorted(inflight.values())
+                        + sorted(flush_entries),
                         errors, seen, levels, warns, keep_failed)
                     _save_stats()
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
@@ -460,8 +492,9 @@ class LocalCrawler:
                             c.chunk_id = (f"{rel}:{content_hash[:8]}:"
                                           f"{c.ordinal}")
                     pending.append((rel, meta, chunks, content_hash,
-                                    levels.get(rel, path_s.count("/"))))
-                    if (sum(len(c) for _, _, c, _, _ in pending) >= 64
+                                    levels.get(rel, path_s.count("/")),
+                                    entry))
+                    if (sum(len(c) for _, _, c, *_ in pending) >= 64
                             and not _flush_pending()):
                         return {"job_id": job_id, "state": "abandoned",
                                 "remaining": len(queue),
@@ -474,15 +507,24 @@ class LocalCrawler:
                     errors.append(
                         f"prefetch {entry}: "
                         f"{type(e).__name__} (refetches on resume)")
-        if not _flush_pending():
-            return {"job_id": job_id, "state": "abandoned",
-                    "remaining": len(queue), "pages_seen": len(seen),
-                    "errors": errors, "warnings": warns}
+            # drain the buffer the fetch loop left behind, then join the
+            # last in-flight flush — publish must not run over half-staged
+            # pages (inside the `with`: the embed pool is still open)
+            while pending:
+                if not _flush_pending():
+                    return {"job_id": job_id, "state": "abandoned",
+                            "remaining": len(queue), "pages_seen": len(seen),
+                            "errors": errors, "warnings": warns}
+            if not _join_flush():
+                return {"job_id": job_id, "state": "abandoned",
+                        "remaining": len(queue), "pages_seen": len(seen),
+                        "errors": errors, "warnings": warns}
 
         # persist final seen/levels/warns — the throttled in-loop
         # checkpoint may be several items behind the last processed one
         self._checkpoint(job_id,
-                         list(queue) + sorted(inflight.values()),
+                         list(queue) + sorted(inflight.values())
+                         + sorted(flush_entries),
                          errors, seen, levels, warns, keep_failed)
         # fence: an abandoned/superseded job must never publish or resurrect
         current = self.index.job(job_id)
@@ -497,14 +539,17 @@ class LocalCrawler:
                 self.control.progress.remaining = 0
                 self.control.progress.pages_seen = len(seen)
                 self.control.progress.errors_n = len(errors)
+            t_pub = time.monotonic()
             pub = self.index.publish(seen | keep_failed, job_id=job_id)
+            stats["publish_ms"] = stats.get("publish_ms", 0.0) + \
+                (time.monotonic() - t_pub) * 1000
             # auditable outcome: what the refresh added vs tombstoned vs
             # carried forward — stored so status/last_crawl can report it
             self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
             _save_stats()
         self.index.save_job(job_id, "done" if not queue else "running",
-                            list(queue), errors)
+                            list(queue) + sorted(flush_entries), errors)
         return {"job_id": job_id,
                 "state": "done" if not queue else "running",
                 "remaining": len(queue), "pages_seen": len(seen),
