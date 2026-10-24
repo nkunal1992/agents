@@ -194,7 +194,18 @@ class Daemon:
         last_probe = 0.0
         probe_fails = 0
         from .watchdog import spawn_watchdog
-        spawn_watchdog(self.workdir)   # it revives us; we revive it
+
+        def _watchdog_kick() -> None:
+            """spawn_watchdog's pid/cmdline probes can hang on Windows
+            psutil — on the heartbeat loop that stall LOOKS like death
+            (>5s stale -> respawned -> reaped by the replacement #253).
+            Fire-and-forget on a daemon thread: heartbeats must never
+            pause on a sibling's health check."""
+            import threading as _t
+            _t.Thread(target=spawn_watchdog, args=(self.workdir,),
+                      daemon=True, name="watchdog-kicker").start()
+
+        _watchdog_kick()               # it revives us; we revive it
         try:
             while not self.stop.is_set():
                 alive = self.rpc.heartbeat_daemon(self.owner)
@@ -207,7 +218,7 @@ class Daemon:
                 if time.time() - last_gc > 60:
                     last_gc = time.time()
                     self._gc_leases()
-                    spawn_watchdog(self.workdir)  # revive a dead sibling
+                    _watchdog_kick()   # revive a dead sibling
                 if time.time() - last_probe > 10:
                     last_probe = time.time()
                     if self._probe_http():
