@@ -190,4 +190,6 @@ def test_model_warm_sequential_on_battery(monkeypatch):
     pool._warm()
     el = time.monotonic() - t0
     assert order == ["embedder", "reranker", "sparse"]
-    assert el >= 0.3, f"warm took {el:.2f}s — ran parallel on battery"
+    # coarse bound — Windows timers run at ~15ms granularity; 0.15 still
+    # separates sequential (~0.3s) from a parallel slip (~0.1s)
+    assert el >= 0.15, f"warm took {el:.2f}s — ran parallel on battery"
