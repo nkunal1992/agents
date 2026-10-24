@@ -957,13 +957,16 @@ class Index:
         with self.lock:
             if self._ann is not None:
                 return self._ann
-            # read conn first — a ready vec_chunks answers KNN on
-            # mode=ro (proxy/daemon) without any write
-            conn = self._read() if not self._readonly else self.db
-            if not self._ann_load(conn):
-                self._ann = False
-                return False
             try:
+                # read conn first — a ready vec_chunks answers KNN on
+                # mode=ro (proxy/daemon) without any write. _read() can
+                # raise transient SetupError (WAL pragma mid-checkpoint):
+                # ANY failure here latches False — ANN must never be
+                # able to break a crawl or a query.
+                conn = self._read() if not self._readonly else self.db
+                if not self._ann_load(conn):
+                    self._ann = False
+                    return False
                 exists = conn.execute(
                     "SELECT count(*) FROM sqlite_master WHERE "
                     "name='vec_chunks'").fetchone()[0]
@@ -1006,8 +1009,11 @@ class Index:
         take an arbitrary IN-list, so the filter lands in Python."""
         if not self._ensure_ann():
             return []
-        conn = self._read()
-        if not self._ann_load(conn):
+        try:
+            conn = self._read()
+        except Exception:               # noqa: BLE001 — transient WAL
+            return []                   # pragma race → caller's legs
+        if not self._ann_load(conn):    # still answer via sparse/fts
             self._ann = False
             return []
         fetch = k if allowed is None else min(len(allowed), k * 10)
