@@ -197,6 +197,8 @@ class Index:
                 "(or run `clean` to drop every index)") from e
         self.lock = threading.RLock()
         self._cache: _SearchCache | None = None
+        self._cache_cv = threading.Condition(self.lock)
+        self._building_cache = False
         self._ann: bool | None = None   # None=untried, True=ready, False=no ext
         if readonly:
             # proxy mode (#189): the main conn already is ro — every
@@ -869,15 +871,31 @@ class Index:
         connection OFF the writer lock (#188) — at 10k+ pages the scan
         is seconds-scale and must not stall status/crawl_step. A publish
         landing mid-build bumps the epoch; the swap keeps the fresher
-        cache and the next call rebuilds."""
+        cache and the next call rebuilds. Concurrent callers share one
+        build — the first becomes the builder and the rest wait for its
+        install, so a racing equal-epoch build can never displace the
+        snapshot another caller already received (#255)."""
         epoch = self.snapshot_epoch()
         with self.lock:
-            if self._cache is not None and self._cache.epoch == epoch:
-                return self._cache
-        c = self._build_search_cache(epoch)
+            while True:
+                if self._cache is not None and self._cache.epoch == epoch:
+                    return self._cache
+                if not self._building_cache:
+                    self._building_cache = True
+                    break
+                self._cache_cv.wait()
+        try:
+            c = self._build_search_cache(epoch)
+        except Exception:
+            with self.lock:
+                self._building_cache = False
+                self._cache_cv.notify_all()
+            raise
         with self.lock:
-            if self._cache is None or self._cache.epoch <= epoch:
+            if self._cache is None or self._cache.epoch < epoch:
                 self._cache = c
+            self._building_cache = False
+            self._cache_cv.notify_all()
             return self._cache
 
     def drop_search_cache(self) -> None:
