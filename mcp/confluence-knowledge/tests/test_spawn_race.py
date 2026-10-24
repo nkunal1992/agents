@@ -166,6 +166,50 @@ def test_stop_escalates_sigkill(tmp_path, monkeypatch):
                          if hasattr(signal, "SIGKILL") else wd._TERM)
 
 
+def test_watchdog_running_survives_denied_probe(tmp_path, monkeypatch):
+    """Windows watchdog pile-up: on managed/AppContainer Windows the
+    process probe can be denied — os.kill(pid,0) threw for a LIVE
+    watchdog → watchdog_running lied False → every daemon kick spawned
+    a sibling (observed 25-30 python procs on ONE install). The
+    psutil.pid_exists probe must hold the line even when os.kill lies."""
+    from confluence_knowledge import watchdog as wd
+    (tmp_path / ".watchdog.pid").write_text(str(os.getpid()))
+
+    def denied(*a, **k):
+        raise PermissionError("OpenProcess denied")
+
+    monkeypatch.setattr(os, "kill", denied)
+    monkeypatch.setattr(wd, "_cmdline_is", lambda p, n: True)
+    assert wd.watchdog_running(tmp_path) is True
+
+
+def test_watchdog_spawn_dedup_denied_probe(tmp_path, monkeypatch):
+    """The laptop bug at the spawn seam: denied probe + a live watchdog
+    in the pid file → spawn_watchdog must still make zero Popens."""
+    from confluence_knowledge import watchdog as wd
+    (tmp_path / ".watchdog.pid").write_text(str(os.getpid()))
+
+    def denied(*a, **k):
+        raise PermissionError("OpenProcess denied")
+
+    monkeypatch.setattr(os, "kill", denied)
+    monkeypatch.setattr(wd, "_cmdline_is", lambda p, n: True)
+    called = []
+    monkeypatch.setattr(
+        "confluence_knowledge.rpc._popen_detached",
+        lambda *a, **k: called.append(a))
+    wd.spawn_watchdog(tmp_path)
+    assert not called
+
+
+def test_watchdog_running_dead_pid_still_false(tmp_path, monkeypatch):
+    """And a genuinely dead watchdog must still read False."""
+    from confluence_knowledge import watchdog as wd
+    (tmp_path / ".watchdog.pid").write_text("424242")
+    monkeypatch.setattr("psutil.pid_exists", lambda p: False)
+    assert wd.watchdog_running(tmp_path) is False
+
+
 def test_watchdog_role_blocks_spawn(tmp_path, monkeypatch):
     """KNOWLEDGE_WATCHDOG_ROLE is now a real guard — a watchdog must
     never spawn a sibling."""
