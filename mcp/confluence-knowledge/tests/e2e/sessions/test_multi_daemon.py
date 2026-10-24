@@ -113,11 +113,11 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
             assert "connect" in t2
 
         # hard kill — the watchdog (not the IDE) must bring it back.
-        # 30s: a congested macos runner's cold daemon spawn + uvicorn
-        # bind can exceed 20 (matches the http_transport sibling test).
+        # 90s: cold spawn + import + bind on an AV-scanned runner can
+        # stretch past 60 (matches the http_transport sibling test).
         daemon.kill()
         daemon.wait(timeout=5)
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
                 meta = _meta(home, timeout=3)
