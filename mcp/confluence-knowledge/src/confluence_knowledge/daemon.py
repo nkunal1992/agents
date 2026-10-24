@@ -184,6 +184,32 @@ class Daemon:
         # staleness window; a daemon that LOOKS dead gets respawned
         # then reaped by its replacement (#253 death spiral)
         self.rpc.heartbeat_daemon(self.owner)
+        from .watchdog import spawn_watchdog
+
+        def _watchdog_kick(wait: float = 0.0) -> None:
+            """spawn_watchdog's pid/cmdline probes can hang on Windows
+            psutil — on the heartbeat loop that stall LOOKS like death
+            (>5s stale -> respawned -> reaped by the replacement #253).
+            Run on a daemon thread; `wait` bounds the join when the
+            caller needs the supervisor guaranteed before continuing."""
+            import threading as _t
+
+            def kick() -> None:
+                if self.stop.is_set():   # mid-shutdown — a kick now
+                    return               # would resurrect the pair
+                spawn_watchdog(self.workdir, live_daemon=True)
+            t = _t.Thread(target=kick, daemon=True,
+                          name="watchdog-kicker")
+            t.start()
+            if wait:
+                t.join(wait)
+
+        # supervision FIRST — the slow boot steps below (_serve_http,
+        # _reap_strays, _resume_orphans) can take 10s+ on a congested
+        # Windows host; a kill landing inside that window left the home
+        # with no watchdog at all (#253 CI: daemon killed mid-boot,
+        # 90s poll, no respawn). Kick now, bounded-join, then proceed.
+        _watchdog_kick(wait=10)
         self._http = self._serve_http()
         self.rpc.heartbeat_daemon(self.owner)
         self._reap_strays()
@@ -193,30 +219,6 @@ class Daemon:
         last_gc = 0.0
         last_probe = 0.0
         probe_fails = 0
-        from .watchdog import spawn_watchdog
-
-        def _watchdog_kick() -> None:
-            """spawn_watchdog's pid/cmdline probes can hang on Windows
-            psutil — on the heartbeat loop that stall LOOKS like death
-            (>5s stale -> respawned -> reaped by the replacement #253).
-            Fire-and-forget on a daemon thread: heartbeats must never
-            pause on a sibling's health check."""
-            import threading as _t
-
-            def kick() -> None:
-                if self.stop.is_set():   # mid-shutdown — a kick now
-                    return               # would resurrect the pair
-                spawn_watchdog(self.workdir, live_daemon=True)
-            _t.Thread(target=kick, daemon=True,
-                      name="watchdog-kicker").start()
-
-        # the FIRST kick is synchronous — supervision must be guaranteed
-        # before the loop starts beating; a daemon killed between kick
-        # and spawn would leave nothing to respawn it (#253 same-url
-        # respawn regression). Periodic kicks go on the thread below so
-        # a hung probe can't freeze heartbeats.
-        spawn_watchdog(self.workdir, live_daemon=True)
-                                       # it revives us; we revive it
         try:
             while not self.stop.is_set():
                 alive = self.rpc.heartbeat_daemon(self.owner)
