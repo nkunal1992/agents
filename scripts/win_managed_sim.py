@@ -12,6 +12,7 @@ a local socket, not a real proxy connection).
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import socket
 import subprocess
@@ -79,6 +80,11 @@ def loopback():
         return "connectable (unexpected)"
     except ConnectionRefusedError:
         return "reachable (refused as expected) — loopback works"
+    except (TimeoutError, socket.timeout):
+        # Windows retries SYN to dead loopback ports instead of RST —
+        # a timeout is the NORMAL refusal there, not a block. The
+        # listener probe below is the definitive test.
+        return "connect to dead port timed out — normal on Windows; see listener probe"
     except Exception as e:                              # noqa: BLE001
         return f"BLOCKED: {e} — an EDR/firewall may deny loopback"
 
@@ -217,19 +223,25 @@ def pac_proxy():
         return "n/a (not Windows)"
     try:
         import winreg
+
+        def _v(k, n):
+            try:
+                return winreg.QueryValueEx(k, n)[0]
+            except OSError:
+                return None          # value absent = not configured
+
         k = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
-        pac = winreg.QueryValueEx(k, "AutoConfigURL")[0]
-        detect = winreg.QueryValueEx(k, "AutoDetect")[0]
-        enabled = winreg.QueryValueEx(k, "ProxyEnable")[0]
+        pac, detect = _v(k, "AutoConfigURL"), _v(k, "AutoDetect")
+        enabled = _v(k, "ProxyEnable")
         if pac or detect:
             return (f"PAC/WPAD in use (AutoConfigURL={pac!r}, "
                     f"AutoDetect={detect}) — python can't evaluate it; "
                     "external calls need an explicit HTTP(S)_PROXY")
         return f"no PAC (ProxyEnable={enabled})"
     except OSError as e:
-        return f"unreadable ({e})"
+        return f"key unreadable ({e})"
 
 
 @check("loopback listener (EDR/WFP interception)")
@@ -272,8 +284,8 @@ def cfa():
         return {0: "off", 1: "BLOCK MODE — unapproved apps can't write "
                             "to Documents/Desktop/Pictures",
                 2: "audit mode"}.get(v, f"unknown ({v})")
-    except OSError as e:
-        return f"unreadable/off ({e})"
+    except OSError:
+        return "off/absent — key or value not configured"
 
 
 @check("DNS filtering probe (huggingface/pypi)")
@@ -301,6 +313,11 @@ def temp_profile():
 
 
 def main():
+    # cp1252 consoles can't print the report's unicode — reconfigure to
+    # utf-8 (this exact default is finding F8)
+    if sys.platform == "win32":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
+                                      errors="replace")
     print("managed-laptop restriction profile\n" + "=" * 40)
     for fn in (kill_zero_detached, proxy_env, loopback, loopback_listener,
                wmic, git, long_paths, store_python, locality, writable,
