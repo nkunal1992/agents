@@ -243,20 +243,22 @@ Rules of the road:
   the reaper unloads after inactivity). Prefer one shared install if RAM
   is tight; `stop`/`clean` act per install.
 
-### One registration for every service — `--unified`
+### One registration for every service — the default
 
 Per-service entries (`confluence-knowledge`, `local-knowledge`, …) each
 cost an IDE reload when first added because IDEs read `mcp.json` only at
-startup. `confluence-knowledge register --unified` instead writes a
-single `knowledge` entry whose `tools/list` is the live union of every
-installed service, namespaced `<service>__<tool>` —
-`confluence__search`, `local__connect`, `sharepoint__status`. Install a
-new service later and its tools appear on the next `tools/list` — no
-re-registration, no reload (clients that honour `tools/list_changed`
-see it sooner). Calls route to the named service unchanged, so scoping
-and security checks are identical to per-service entries. Served over
-stdio (`python -m confluence_knowledge.unified`) and mounted by the
-daemon at `/knowledge/mcp` for `--transport http`.
+startup. `register` therefore writes a single `knowledge` entry **by
+default** — its `tools/list` is the live union of every installed
+service, namespaced `<service>__<tool>` — `confluence__search`,
+`local__connect`, `sharepoint__status`. Install a new service later and
+its tools appear on the next `tools/list` — no re-registration, no
+reload (clients that honour `tools/list_changed` see it sooner). Calls
+route to the named service unchanged, so scoping and security checks
+are identical to per-service entries. Served over stdio
+(`python -m confluence_knowledge.unified`) and mounted by the daemon at
+`/knowledge/mcp` for `--transport http`. `register --per-service` writes
+an individual service entry instead, and existing per-service
+registrations keep working — the two can coexist harmlessly.
 
 ## Resource usage
 

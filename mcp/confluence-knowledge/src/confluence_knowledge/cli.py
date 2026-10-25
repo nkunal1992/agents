@@ -255,10 +255,21 @@ def _doctor() -> int:
                 from .watchdog import restart_daemon
                 wdir = daemon_home()
                 restart_daemon(wdir)   # restarts alive-but-stale too
-                # rewrite the entry with the SAME transport the user
-                # registered — http URLs can drift, stdio needs no repair
-                t = registered_transport() or "http"
-                results = register(transport=t, workdir=wdir)
+                # rewrite the entry with the SAME id + transport the
+                # user registered — http URLs can drift, stdio needs no
+                # repair; default to the unified entry when nothing
+                # registered yet (#269)
+                sid = ("confluence-knowledge"
+                       if registered_transport("confluence-knowledge")
+                       else "knowledge")
+                t = registered_transport(sid) or "http"
+                results = register(transport=t,
+                                   workdir=(wdir if sid != "knowledge"
+                                            else None),
+                                   server_id=sid,
+                                   module=("confluence_knowledge.server"
+                                           if sid != "knowledge" else
+                                           "confluence_knowledge.unified"))
                 print("self-heal: daemon restarted, server entry "
                       f"refreshed ({t}) in {len(results)} config(s)")
             except Exception as e:              # noqa: BLE001
@@ -330,11 +341,12 @@ def main() -> None:
                           "http: the daemon's shared localhost endpoint — "
                           "one URL for every window, but a daemon restart "
                           "stales the session until a reload")
-    reg.add_argument("--unified", action="store_true",
-                     help="write the single 'knowledge' entry instead — "
-                          "it unions every installed service's tools as "
-                          "<service>__<tool> and picks up future installs "
-                          "on the next tools/list (#265)")
+    reg.add_argument("--per-service", action="store_true",
+                     help="write only this service's own entry instead — "
+                          "the default 'knowledge' entry unions every "
+                          "installed service's tools as <service>__<tool> "
+                          "and picks up future installs on the next "
+                          "tools/list with no reload (#265)")
     reg.add_argument("--remove", action="store_true",
                      help="remove our entry instead of adding it")
     sub.add_parser("serve", help="run the stdio MCP server")
@@ -383,12 +395,15 @@ def main() -> None:
                       if os.environ.get("CONF_KNOWLEDGE_WORKDIR") else None)
             results = register(ide=args.ide, workspace=args.workspace,
                        transport=args.transport,
-                               workdir=wd, remove=args.remove,
-                               server_id=("knowledge" if args.unified
-                                          else "confluence-knowledge"),
-                               module=("confluence_knowledge.unified"
-                                       if args.unified
-                                       else "confluence_knowledge.server"))
+                               workdir=(wd if args.per_service else None),
+                               remove=args.remove,
+                               server_id=("confluence-knowledge"
+                                          if args.per_service
+                                          else "knowledge"),
+                               module=("confluence_knowledge.server"
+                                       if args.per_service
+                                       else
+                                       "confluence_knowledge.unified"))
         except SetupError as e:
             print(f"error: {e}", file=sys.stderr)
             sys.exit(2)

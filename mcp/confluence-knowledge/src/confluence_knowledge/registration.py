@@ -18,6 +18,10 @@ from .settings import SetupError, ensure_gitignore
 SERVER_ID = "confluence-knowledge"
 SERVER_MODULE = "confluence_knowledge.server"
 WORKDIR_ENV = "CONF_KNOWLEDGE_WORKDIR"
+# the unified entry (#269) — one registration unions every installed
+# service; `X register` writes it by default, `--per-service` opts out
+KNOWLEDGE_ID = "knowledge"
+UNIFIED_MODULE = "confluence_knowledge.unified"
 
 
 def _server_entry(workdir: Path | None, module: str, env_var: str,
@@ -86,7 +90,7 @@ def daemon_http_status(cli: str = "confluence-knowledge") -> dict:
              "remediation": f"{cli} doctor (self-heals the daemon)"}
     meta = _http_meta()
     if not meta:
-        if registered_transport(cli) == "stdio":
+        if _stdio_registered(cli):
             check.update(ok=True, remediation=None,
                          detail=("no http endpoint — stdio entry: the "
                                  "daemon starts on the first call"))
@@ -97,7 +101,7 @@ def daemon_http_status(cli: str = "confluence-knowledge") -> dict:
             probe.settimeout(2)
             probe.connect(("127.0.0.1", meta["port"]))
     except OSError:
-        if registered_transport(cli) == "stdio":
+        if _stdio_registered(cli):
             check.update(ok=True, remediation=None,
                          detail=(f"endpoint at 127.0.0.1:{meta['port']} "
                                  "down — stdio entry: the proxy respawns "
@@ -123,6 +127,14 @@ def daemon_http_status(cli: str = "confluence-knowledge") -> dict:
         else:
             check["detail"] += f" (v{dver})"
     return check
+
+
+def _stdio_registered(cli: str) -> bool:
+    """True when the service's own entry OR the unified `knowledge`
+    entry is registered as stdio — either one gives the proxy-respawn
+    behaviour the check describes (#269)."""
+    return "stdio" in {registered_transport(cli),
+                       registered_transport(KNOWLEDGE_ID)}
 
 
 def _http_meta(workdir: Path | None = None) -> dict | None:
@@ -344,7 +356,7 @@ def ensure_mounted(service_name: str) -> bool:
 
 def register(ide: str = "auto", workspace: Path | None = None,
              workdir: Path | None = None, remove: bool = False,
-             server_id: str = SERVER_ID, module: str = SERVER_MODULE,
+             server_id: str = KNOWLEDGE_ID, module: str = UNIFIED_MODULE,
              env_var: str = WORKDIR_ENV,
              transport: str = "stdio") -> list[tuple[Path, str]]:
     """Write/remove our server entry in each target. Returns (path, action)."""

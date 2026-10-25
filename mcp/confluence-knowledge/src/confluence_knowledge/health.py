@@ -467,8 +467,10 @@ def health_checks(home: Path, workdir: Path, server_id: str, cli: str,
     checks += _models_checks(home, cli)
 
     try:
-        from .registration import registered_paths
-        regs = registered_paths(server_id=server_id, workspace=workdir)
+        from .registration import KNOWLEDGE_ID, registered_paths
+        regs = (registered_paths(server_id=server_id, workspace=workdir)
+                or registered_paths(server_id=KNOWLEDGE_ID,
+                                    workspace=workdir))
         ok = bool(regs)
         checks.append({"flag": "registration", "ok": ok,
                        "detail": (", ".join(str(p) for p in regs) if regs

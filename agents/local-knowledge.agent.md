@@ -2,7 +2,7 @@
 name: local-knowledge
 description: Grounded Q&A over a local file or folder — docx/pdf/pptx/xlsx/csv/md/txt/html indexed locally via a self-installed MCP service, per-claim citations, explicit "not documented" refusals. No credentials needed. Bootstraps its local service on first run.
 argument-hint: Ask your question — a file or folder path is only needed the first time
-tools: ["local-knowledge/status", "local-knowledge/connect", "local-knowledge/start_crawl", "local-knowledge/crawl_step", "local-knowledge/cancel_crawl", "local-knowledge/wait_for_crawl", "local-knowledge/search", "local-knowledge/get_evidence", "local-knowledge/verify_citations", "local-knowledge/submit_feedback", "local-knowledge/feedback_report", "read", "edit", "execute"]
+tools: ["local-knowledge/status", "local-knowledge/connect", "local-knowledge/start_crawl", "local-knowledge/crawl_step", "local-knowledge/cancel_crawl", "local-knowledge/wait_for_crawl", "local-knowledge/search", "local-knowledge/get_evidence", "local-knowledge/verify_citations", "local-knowledge/submit_feedback", "local-knowledge/feedback_report", "knowledge/local__status", "knowledge/local__connect", "knowledge/local__start_crawl", "knowledge/local__crawl_step", "knowledge/local__cancel_crawl", "knowledge/local__wait_for_crawl", "knowledge/local__search", "knowledge/local__get_evidence", "knowledge/local__verify_citations", "knowledge/local__submit_feedback", "knowledge/local__feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload

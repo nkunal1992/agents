@@ -50,6 +50,14 @@ def test_agent_frontmatter_tools_exist():
     real = set(re.findall(r"@tool\(mcp[^)]*\)\s*\ndef\s+(\w+)", srv))
     missing = declared - real
     assert not missing, f"agent frontmatter names tools not in server: {missing}"
+    # the unified `knowledge` entry exposes the same tools namespaced
+    # <stem>__<tool> — frontmatter dual-lists both forms (#269)
+    unified = {t.strip().strip('"').split("/")[1]
+               for t in tools_line.split(",")
+               if t.strip().strip('"').startswith("knowledge/")}
+    bad = {u for u in unified if not u.startswith("confluence__")
+           or u.removeprefix("confluence__") not in real}
+    assert not bad, f"agent frontmatter names bad unified tools: {bad}"
 
 
 def test_agent_covers_crawl_terminal_states():
