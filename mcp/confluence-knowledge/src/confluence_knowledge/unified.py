@@ -58,6 +58,7 @@ class UnifiedMCP(FastMCP):
     def __init__(self, poll_s: float | None = None):
         super().__init__("knowledge")
         self._session = None
+        self._last_services: dict[str, object] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._poll_s = _poll_interval() if poll_s is None else poll_s
         self._watch_started = False
@@ -71,10 +72,21 @@ class UnifiedMCP(FastMCP):
         native extensions (numpy's OpenBLAS inits inside DllMain) and two
         threads importing concurrently can wedge in the Windows loader
         lock — the watcher therefore compares entry-point names, never
-        imports."""
+        imports.
+
+        A scan hiccup (e.g. a sys.path entry whose finder raises on
+        invalidate) must never error a tools/list — fall back to the
+        last-known set so the union stays up."""
         from .daemon import discover_services  # lazy — daemon imports us
-        importlib.invalidate_caches()
-        return discover_services()
+        try:
+            importlib.invalidate_caches()
+            found = discover_services()
+        except Exception:
+            log.warning("service scan failed — serving last-known set",
+                        exc_info=True)        # must never blank the union
+            return self._last_services
+        self._last_services = found
+        return found
 
     def _installed_names(self) -> set[str]:
         """Entry-point names only — metadata scan, zero imports. Safe for
