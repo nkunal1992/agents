@@ -114,3 +114,18 @@ Structured record of every failure hit during the RC runs and how each was resol
 - **Unrelated flake**: test-artifact windows `test_parallel_is_much_faster`
   (parallel 1.64s vs seq 3.02s) — congested-runner timing assert, rerun
   passed.
+
+## ISSUE-008 — published-service e2e asserted the new `knowledge` registration id
+
+- **Run**: confluence-knowledge-v0.13.1rc1 (40182640903), downstream
+  (ubuntu-latest, local-knowledge) — "Published service e2e" step.
+- **Root cause**: the step installs the *published* package
+  (`local-knowledge[models]==0.10.0`) against the new engine wheel but
+  runs the tag's bootstrap script — which #269 updated to assert the
+  unified `knowledge` entry id. Published 0.10.0's `register` still
+  writes the per-service `local-knowledge` id, so the merge check
+  failed on a shape that is correct for that version.
+- **Fix**: all three bootstrap scripts now accept whichever server id
+  the installed `register` writes — `knowledge` (unified default) or
+  `<svc>-knowledge` (older published) — and validate `/{id}/mcp`
+  against the resolved id. First rc run cancelled before tagging rc2.
