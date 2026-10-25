@@ -1,7 +1,7 @@
 ---
 name: sharepoint-knowledge
 description: Grounded Q&A over a SharePoint site, library, or folder — Site Pages + docx/pdf/pptx/xlsx/csv/md/txt crawled and indexed locally via a self-installed MCP service, Entra device-code sign-in, per-claim citations, explicit "not documented" refusals.
-argument-hint: Give a SharePoint site, library, or folder URL and your question
+argument-hint: Ask your question — a SharePoint URL is only needed the first time
 tools: ["sharepoint-knowledge/status", "sharepoint-knowledge/connect", "sharepoint-knowledge/start_crawl", "sharepoint-knowledge/crawl_step", "sharepoint-knowledge/cancel_crawl", "sharepoint-knowledge/wait_for_crawl", "sharepoint-knowledge/search", "sharepoint-knowledge/get_evidence", "sharepoint-knowledge/verify_citations", "sharepoint-knowledge/submit_feedback", "sharepoint-knowledge/feedback_report", "read", "edit", "execute"]
 ---
 <!--
@@ -216,7 +216,7 @@ Recover in order:
   token), `rpc.db` (tool-call queue + lease), `daemon.log`,
   `watchdog.log`. One daemon per Python env serves every installed
   knowledge service — this service's path is `/sharepoint-knowledge/mcp`.
-- `register` writes a **stdio** entry by default (#226): each IDE
+- `register` writes a **stdio** entry by default: each IDE
   window spawns a `python -m sharepoint_knowledge.server_sp` proxy that owns the MCP session —
   daemon restarts are invisible to the IDE. `register --transport
   http` writes the shared `http://127.0.0.1:<port>/sharepoint-knowledge/mcp?token=…`
@@ -238,13 +238,22 @@ Recover in order:
 
 1. **Status.** `sharepoint-knowledge/status` — not callable → bootstrap.
    Callable but sign-in expired → user re-runs `setup` (device code, once).
-2. **Connect.** Ask for the URL — a site (`https://tenant.sharepoint.com/
-   sites/name` → pages + all libraries) or a library/folder path inside it.
-   Call `connect`; report the cache status. If `stale_model` is true,
-   the service re-indexes itself when `auto_reindex: started` comes back —
-   relay "your index was built with an older model, so I started a
-   rebuild" and keep waiting. If `auto_reindex` is absent, run
-   `start_crawl` once — search refuses on stale indexes.
+2. **Reuse or connect.** If the user supplied a site or library URL, call
+   `connect` and skip to step 3. If they only asked a question — even
+   naming a site informally — **search first**: call `search` with an
+   empty scope_handle. It uses the single existing index automatically;
+   `status.indexed_scopes` shows what's already on disk.
+   - `coverage: ambiguous` + `candidates` → several indexes exist — name
+     them, ask which scope, then re-`search` with that `scope_handle`.
+   - `coverage: unconfigured` → nothing indexed yet — only then ask for
+     the URL — a site (`https://tenant.sharepoint.com/sites/name` →
+     pages + all libraries) or a library/folder path inside it — and
+     `connect` it.
+   - Report the cache status `connect` returns. If `stale_model` is true,
+     the service re-indexes itself when `auto_reindex: started` comes
+     back — relay "your index was built with an older model, so I started
+     a rebuild" and keep waiting. If `auto_reindex` is absent, run
+     `start_crawl` once — search refuses on stale indexes.
    The scope is bound to the signed-in **Entra account + tenant + site** —
    a security boundary, not a cache bug: a different sign-in sees
    `cached: false` and re-crawls, because per-account indexes prevent one
@@ -258,7 +267,7 @@ Recover in order:
      ancestor scope — answers come from that index filtered to this
      subtree. Say so: "This is inside `<covered_by>` which I indexed on
      `<cached_as_of>` — I'll answer from that index. Say 're-index' for
-     a dedicated index." `start_crawl` then materializes it.
+     a dedicated index." `start_crawl` then materialises it.
 4. **Crawl.** `start_crawl` → **background crawl** — the server indexes
    on its own and posts a desktop notification when it finishes. Say what
    started: "Crawling in the background — I'll keep you posted." Then
