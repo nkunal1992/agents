@@ -105,7 +105,7 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
                 time.sleep(0.3)
         # /_services also lists the unified `knowledge` mount (#265) —
         # the union endpoint every installed service is reachable through
-        assert sorted(svcs) == sorted(expected | {"knowledge"}), \
+        assert sorted(svcs) == sorted(set(expected) | {"knowledge"}), \
             (svcs, expected)
         assert "confluence-knowledge" in svcs   # this leg always has it
         # the union mount must really serve: tools/list carries the
