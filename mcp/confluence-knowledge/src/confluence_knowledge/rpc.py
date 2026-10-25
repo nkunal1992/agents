@@ -414,8 +414,13 @@ def ensure_daemon(rpc: RpcDb, env: dict | None = None,
         # the daemon home is where the rpc.db lives — re-deriving
         # daemon_home() from env would send a watchdog bound to an
         # explicit home (KNOWLEDGE_DAEMON_HOME unset in ITS env) to a
-        # different slot, spawning an orphan nobody watches
-        workdir = rpc.path.parent
+        # different slot, spawning an orphan nobody watches. A fake rpc
+        # without .path (unit-test doubles) falls back to the env slot.
+        if getattr(rpc, "path", None) is not None:
+            workdir = rpc.path.parent
+        else:
+            from .settings import daemon_home
+            workdir = daemon_home()
         workdir.mkdir(parents=True, exist_ok=True)
         # The lock covers only the spawn DECISION — not the boot wait.
         # Holding it through the ~30s cold boot serialised every queued
