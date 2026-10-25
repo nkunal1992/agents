@@ -92,21 +92,43 @@ def test_list_tools_live_after_post_start_install(monkeypatch):
 
 
 def test_tools_list_changed_fires_on_install_set_change(monkeypatch):
-    """The notification hook fires only on a post-baseline change — the
-    first population of _known must not spam it."""
-    mounts = {"confluence-knowledge": _svc("confluence-knowledge")}
-    _install(monkeypatch, mounts)
+    """The watcher notifies only on a post-baseline change — the first
+    scan must not spam it."""
+    names = {"confluence-knowledge"}
+    monkeypatch.setattr(UnifiedMCP, "_installed_names",
+                        lambda self: set(names))
     u = UnifiedMCP(poll_s=0)
     fired = []
     monkeypatch.setattr(u, "_notify_tools_changed",
                         lambda: fired.append(True))
-    u._services()                                   # baseline — silent
+    seen = u._installed_names()                     # baseline
+    seen = u._watch_once(seen)                      # no change — silent
     assert not fired
-    mounts["local-knowledge"] = _svc("local-knowledge")
-    u._services()                                   # install → notify
+    names.add("local-knowledge")
+    seen = u._watch_once(seen)                      # install → notify
     assert fired == [True]
-    u._services()                                   # steady — silent
+    u._watch_once(seen)                             # steady — silent
     assert fired == [True]
+
+
+def test_watcher_never_imports(monkeypatch):
+    """Windows loader-lock deadlock guard: two threads importing
+    native-extension modules concurrently can wedge (numpy's DllMain vs
+    an anyio worker's DLL load — CI e2e hang). The watcher must detect
+    install-set changes from entry-point NAMES only — imports belong to
+    the request path."""
+    def boom(only=None):
+        raise AssertionError("watcher imported a service module")
+    monkeypatch.setattr(dm, "discover_services", boom)
+    monkeypatch.setattr(UnifiedMCP, "_installed_names",
+                        lambda self: {"confluence-knowledge",
+                                      "local-knowledge"})
+    u = UnifiedMCP(poll_s=0)
+    fired = []
+    monkeypatch.setattr(u, "_notify_tools_changed",
+                        lambda: fired.append(True))
+    u._watch_once({"confluence-knowledge"})         # change → notify,
+    assert fired == [True]                          # zero imports
 
 
 def test_broken_service_does_not_hide_others(monkeypatch):

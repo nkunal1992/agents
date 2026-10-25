@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.metadata
 import logging
 import os
 import threading
@@ -56,7 +57,6 @@ class UnifiedMCP(FastMCP):
 
     def __init__(self, poll_s: float | None = None):
         super().__init__("knowledge")
-        self._known: set[str] = set()
         self._session = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._poll_s = _poll_interval() if poll_s is None else poll_s
@@ -65,20 +65,26 @@ class UnifiedMCP(FastMCP):
     # ------------------------------------------------------------------
     def _services(self) -> dict[str, object]:
         """Live discovery — a post-start pip install must be importable,
-        so path-importer caches are invalidated before each scan."""
+        so path-importer caches are invalidated before each scan.
+
+        Only the request path may call this: service modules pull heavy
+        native extensions (numpy's OpenBLAS inits inside DllMain) and two
+        threads importing concurrently can wedge in the Windows loader
+        lock — the watcher therefore compares entry-point names, never
+        imports."""
         from .daemon import discover_services  # lazy — daemon imports us
         importlib.invalidate_caches()
-        found = discover_services()
-        now = set(found)
-        if now != self._known:
-            had_baseline = bool(self._known)   # first list isn't a change
-            added, removed = now - self._known, self._known - now
-            self._known = now
-            if had_baseline:
-                log.info("knowledge: services changed +%s -%s",
-                         sorted(added), sorted(removed))
-                self._notify_tools_changed()
-        return found
+        return discover_services()
+
+    def _installed_names(self) -> set[str]:
+        """Entry-point names only — metadata scan, zero imports. Safe for
+        the watcher thread to run while a request is mid-import."""
+        importlib.invalidate_caches()
+        try:
+            return {ep.name for ep in importlib.metadata.entry_points(
+                group="knowledge.services")}
+        except Exception:                      # noqa: BLE001 — a scan
+            return set()                        # miss means no change
 
     def _capture_session(self) -> None:
         """Stash the serving session+loop — the watcher thread needs both
@@ -99,15 +105,25 @@ class UnifiedMCP(FastMCP):
         except Exception:                   # noqa: BLE001 — a dead SSE
             self._session = None            # session just resets the hint
 
+    def _watch_once(self, seen: set[str]) -> set[str]:
+        """One watcher poll — notify on change, return the new set."""
+        now = self._installed_names()
+        if now != seen:
+            log.info("knowledge: services changed +%s -%s",
+                     sorted(now - seen), sorted(seen - now))
+            self._notify_tools_changed()
+        return now
+
     def _watcher(self) -> None:
         """Poll the installed-service set — tools/list_changed lets a
         client pick up a new service without an IDE reload. Best-effort:
         clients that ignore the notification still see the union on the
         next tools/list (new chat, reconnect)."""
+        seen = self._installed_names()
         while True:
             time.sleep(self._poll_s)
             try:
-                self._services()
+                seen = self._watch_once(seen)
             except Exception:               # noqa: BLE001,S112 —
                 continue                    # watcher must never die
 
@@ -166,6 +182,11 @@ mcp = UnifiedMCP()
 def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s knowledge %(message)s")
+    # Warm discovery BEFORE the event loop starts: service modules pull
+    # native extensions whose DllMain can deadlock when a load races an
+    # anyio worker's own DLL load (Windows loader lock vs GIL). The
+    # daemon imports services the same way — one thread, at boot.
+    mcp._services()
     mcp.run()                               # stdio — one entry, all services
 
 
