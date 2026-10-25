@@ -276,8 +276,8 @@ class Daemon:
             try:
                 from .unified import mcp as unified_mcp
                 apps["knowledge"] = unified_mcp.streamable_http_app()
-            except Exception:               # noqa: BLE001 — unified is
-                log.exception("knowledge mount failed")   # additive only
+            except Exception:               # unified is additive only —
+                log.exception("knowledge mount failed")   # never fatal
 
             @asynccontextmanager
             async def lifespan(_app):
