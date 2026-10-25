@@ -293,6 +293,12 @@ Recover in order:
 - `X doctor` self-heals: restarts the daemon — dead OR running
   older code than the installed package (`status` flags it) — and
   refreshes the registered entry.
+- `register --unified` writes ONE `knowledge` entry instead — its tools
+  are every installed service's tools namespaced `<service>__<tool>`
+  (e.g. `confluence__search`), and services installed later appear on
+  the next `tools/list` with no re-registration or reload. When this
+  entry is what the IDE registered, call the tools by their prefixed
+  names — the routing and behaviour are identical.
 - The JetBrains IDE entry carries the token in the URL query
   (`?token=…`) on purpose — the Copilot plugin drops `headers` there
   (upstream bug). VS Code uses the header.

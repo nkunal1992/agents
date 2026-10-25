@@ -271,6 +271,13 @@ class Daemon:
             meta = self._http_meta()
             apps = {name: srv.mcp.streamable_http_app()
                     for name, srv in self.services.items()}
+            # unified entry (#265): /knowledge/mcp unions every installed
+            # service live — one registration for all time
+            try:
+                from .unified import mcp as unified_mcp
+                apps["knowledge"] = unified_mcp.streamable_http_app()
+            except Exception:               # noqa: BLE001 — unified is
+                log.exception("knowledge mount failed")   # additive only
 
             @asynccontextmanager
             async def lifespan(_app):
