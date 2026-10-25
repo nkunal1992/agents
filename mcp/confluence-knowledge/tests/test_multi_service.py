@@ -254,6 +254,28 @@ def test_ensure_daemon_respects_fresh_stop_file(tmp_path, monkeypatch):
     assert spawned, "daemon never spawned after stale stop cleared"
 
 
+def test_ensure_daemon_uses_bound_home_not_env(tmp_path, monkeypatch):
+    """#273: the spawn workdir is where the RpcDb lives, not env
+    daemon_home() — a watchdog spawned by an explicit-home daemon (its
+    env lacks KNOWLEDGE_DAEMON_HOME) must respawn into the watched home,
+    not the venv-default slot."""
+    import confluence_knowledge.rpc as rpc_mod
+    from confluence_knowledge import settings
+
+    bound = tmp_path / "watched-home"
+    elsewhere = tmp_path / "env-home"
+    monkeypatch.setattr(settings, "daemon_home", lambda: elsewhere)
+    spawned = []
+    monkeypatch.setattr(rpc_mod, "_spawn_daemon",
+                        lambda rpc, workdir, env=None:
+                            spawned.append(workdir))
+    monkeypatch.setattr(rpc_mod.RpcDb, "daemon_alive",
+                        lambda self: bool(spawned))  # dead → alive post
+    monkeypatch.setattr(rpc_mod, "_await_daemon", lambda *a, **k: None)
+    rpc_mod.ensure_daemon(rpc_mod.RpcDb(bound / "rpc.db"))
+    assert spawned == [bound], spawned
+
+
 def test_detached_spawn_kwargs_windows(monkeypatch):
     """#220: on Windows the daemon/watchdog must fully detach from the
     spawning console — `start_new_session` only maps to
