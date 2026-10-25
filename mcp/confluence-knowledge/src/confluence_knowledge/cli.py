@@ -330,6 +330,11 @@ def main() -> None:
                           "http: the daemon's shared localhost endpoint — "
                           "one URL for every window, but a daemon restart "
                           "stales the session until a reload")
+    reg.add_argument("--unified", action="store_true",
+                     help="write the single 'knowledge' entry instead — "
+                          "it unions every installed service's tools as "
+                          "<service>__<tool> and picks up future installs "
+                          "on the next tools/list (#265)")
     reg.add_argument("--remove", action="store_true",
                      help="remove our entry instead of adding it")
     sub.add_parser("serve", help="run the stdio MCP server")
@@ -378,7 +383,12 @@ def main() -> None:
                       if os.environ.get("CONF_KNOWLEDGE_WORKDIR") else None)
             results = register(ide=args.ide, workspace=args.workspace,
                        transport=args.transport,
-                               workdir=wd, remove=args.remove)
+                               workdir=wd, remove=args.remove,
+                               server_id=("knowledge" if args.unified
+                                          else "confluence-knowledge"),
+                               module=("confluence_knowledge.unified"
+                                       if args.unified
+                                       else "confluence_knowledge.server"))
         except SetupError as e:
             print(f"error: {e}", file=sys.stderr)
             sys.exit(2)
