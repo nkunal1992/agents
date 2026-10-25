@@ -306,6 +306,33 @@ def _scope(scope_handle: str) -> dict:
     raise SetupError("unknown scope — call connect first")
 
 
+def _indexed_scopes() -> list[dict]:
+    """Persisted scopes on disk — a new chat (or restarted daemon) has an
+    empty _scopes, but index_root/*.db proves what was connected. Handles
+    are reconstructed as scope:{key}:{root} — re-bindable through
+    _scope()'s disk-proof path without a live connect (#263)."""
+    out = []
+    try:
+        dbs = sorted((x for x in workspace_index_root(_workdir())
+                       .glob("*.db") if x.name != "rpc.db"),
+                     key=lambda p: -p.stat().st_mtime)
+    except OSError:
+        return out
+    for db in dbs:
+        try:
+            idx = _index_for(db.stem)
+            root = idx.meta_get("root_page")
+            if not root:
+                continue                    # feedback.db etc — not a scope
+            st = idx.stats()
+            out.append({"scope_handle": f"scope:{db.stem}:{root}",
+                        "root_page_id": root, "pages": st["pages"],
+                        "as_of": st["as_of"], "last_crawl": _last_crawl(idx)})
+        except Exception:                    # noqa: BLE001,S112 — corrupt or
+            continue                         # mid-write db must not break status
+    return out
+
+
 @tool(mcp)
 def status() -> dict:
     """Report setup readiness — never returns secrets."""
@@ -385,6 +412,10 @@ def status() -> dict:
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
         "live_scopes": sorted(_scopes),
+        # persisted scopes — visible even when _scopes is empty (new
+        # chat, stdio process, restarted daemon) so the agent can reuse
+        # an existing index instead of asking for a link (#263)
+        "indexed_scopes": _indexed_scopes(),
         "last_crawl": last,
         # the zero-terminal path (#191): one absolute copy-pasteable
         # string for the privacy-first route; chat path is clipboard-based
@@ -975,9 +1006,43 @@ def _coverage(idx: Index) -> str:
     return "partial" if job["errors"] else "complete"
 
 
+def _pick_scope(scope_handle: str) -> tuple[str | None, dict | None]:
+    """Empty handle → resolve to a persisted scope: the single usable
+    index wins outright, several → the caller asks which (#263).
+    Returns (handle, error) — exactly one is set."""
+    if scope_handle:
+        return scope_handle, None
+    cands = _indexed_scopes()
+    usable = [c for c in cands if c["pages"]]
+    if len(usable) == 1:
+        return usable[0]["scope_handle"], None
+    if len(usable) > 1:
+        return None, {"evidence": [], "coverage": "ambiguous",
+                      "note": "multiple indexes on this machine — which "
+                              "subtree should I use? pass the chosen "
+                              "scope_handle on the next call",
+                      "candidates": [{k: c[k] for k in
+                                      ("scope_handle", "root_page_id",
+                                       "pages", "as_of")}
+                                     for c in usable]}
+    if cands:                       # every scope empty — the freshest is
+        return cands[0]["scope_handle"], None   # the best honest report
+    return None, {"evidence": [], "coverage": "unconfigured",
+                  "note": "no index on this machine yet — connect a root "
+                          "page first"}
+
+
 @tool(mcp, heavy=True)
-def search(scope_handle: str, question: str) -> dict:
-    """Hybrid retrieve + local rerank; returns bounded, cited evidence."""
+def search(scope_handle: str = "", question: str = "") -> dict:
+    """Hybrid retrieve + local rerank; returns bounded, cited evidence.
+
+    scope_handle is optional: leave it empty and the search uses the
+    single existing index (an explicit choice is required only when
+    several scopes are indexed).
+    """
+    scope_handle, err = _pick_scope(scope_handle)
+    if err is not None:
+        return err
     out = _daemon_call("search", {"scope_handle": scope_handle,
                                   "question": question}, 90)
     if out is not None:
@@ -1020,6 +1085,9 @@ def search(scope_handle: str, question: str) -> dict:
                       _evidence_sets[set_id]["epoch"])
     return {
         "evidence_set": set_id,
+        # echo the resolved handle — auto-picked scopes (#263) still need
+        # it for the get_evidence/verify_citations chain
+        "scope_handle": scope_handle,
         "coverage": _coverage(idx),
         "as_of": st["as_of"],
         "user_corrections": corrections,

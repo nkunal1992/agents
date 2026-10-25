@@ -264,6 +264,66 @@ def test_flush_cap_and_embed_note(tmp_path, monkeypatch):
     assert r["state"] == "done" and calls == []  # unchanged → zero embeds
 
 
+def test_status_lists_persisted_scope_after_restart(tmp_path):
+    """#263: a new chat (empty _scopes) must see the persisted index —
+    indexed_scopes carries the handle the disk re-bind path accepts."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "a.md").write_text("content")
+    c, _ = _crawl(root)
+    server_local._scopes.clear()                 # simulate new chat/respawn
+    st = server_local.status()
+    scopes = st["indexed_scopes"]
+    assert len(scopes) == 1
+    assert scopes[0]["scope_handle"] == c["scope_handle"]
+    assert scopes[0]["root_path"] == c["root"]
+    assert scopes[0]["pages"] == 1
+    assert scopes[0]["last_crawl"]["state"] == "done"
+
+
+def test_search_without_handle_uses_single_index(tmp_path):
+    """#263: 'ask a question in a new chat' — no path, one index on disk →
+    search uses it without the agent needing the handle."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "guide.md").write_text("restart the gateway before the deploy")
+    (root / "data.csv").write_text("service,owner\ngateway,ops\n")
+    _crawl(root)
+    server_local._scopes.clear()
+    res = server_local.search("", "gateway")
+    assert res["evidence"] and res["coverage"] in ("complete", "partial")
+
+
+def test_search_without_handle_no_index():
+    """Nothing indexed → 'unconfigured' so the agent runs connect, not a
+    fabricated search."""
+    server_local._scopes.clear()
+    res = server_local.search("", "anything")
+    assert res["evidence"] == [] and res["coverage"] == "unconfigured"
+    assert "connect" in res["note"]
+
+
+def test_search_without_handle_ambiguous(tmp_path):
+    """Two usable indexes → 'ambiguous' naming candidates — never a
+    silent guess across subtrees."""
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    for d in (a, b):
+        d.mkdir()
+        (d / "x.md").write_text("text")
+        (d / "y.md").write_text("more text")
+    ca, _ = _crawl(a)
+    cb, _ = _crawl(b)
+    server_local._scopes.clear()
+    res = server_local.search("", "text")
+    assert res["coverage"] == "ambiguous"
+    assert {c["root_path"] for c in res["candidates"]} == \
+        {ca["root"], cb["root"]}
+    # an explicit handle still works unchanged
+    res2 = server_local.search(cb["scope_handle"], "text")
+    assert res2["evidence"]
+
+
 def test_extract_file_chunks_doc_cap():
     """#244: a pathological doc is truncated at the cap with a warning —
     it can't stall a crawl on a single file."""
