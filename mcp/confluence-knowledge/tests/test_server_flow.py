@@ -353,6 +353,59 @@ def test_descendent_materializes_on_start_crawl(wired, monkeypatch):
     assert {e["page_id"] for e in res["evidence"]} == {"2"}
 
 
+def test_status_lists_persisted_scope_after_restart(wired, monkeypatch):
+    """#263: a new chat (empty _scopes, stdio respawn, daemon restart)
+    must see the persisted index — indexed_scopes carries the handle the
+    disk re-bind path accepts."""
+    c = _tree_crawl(wired, monkeypatch)
+    server._scopes.clear()                    # simulate new chat / respawn
+    st = server.status()
+    scopes = st["indexed_scopes"]
+    assert len(scopes) == 1
+    assert scopes[0]["scope_handle"] == c["scope_handle"]
+    assert scopes[0]["root_page_id"] == "1"
+    assert scopes[0]["pages"] == 3
+    assert scopes[0]["last_crawl"]["state"] == "done"
+
+
+def test_search_without_handle_uses_single_index(wired, monkeypatch):
+    """#263: 'ask a question in a new chat' — no URL, one index on disk →
+    search uses it without the agent needing the handle."""
+    _tree_crawl(wired, monkeypatch)
+    server._scopes.clear()
+    res = server.search("", "text")
+    assert res["evidence"] and res["coverage"] in ("complete", "partial")
+
+
+def test_search_without_handle_no_index(wired):
+    """Nothing indexed → 'unconfigured' so the agent runs connect, not a
+    fabricated search."""
+    server._scopes.clear()
+    res = server.search("", "anything")
+    assert res["evidence"] == [] and res["coverage"] == "unconfigured"
+    assert "connect" in res["note"]
+
+
+def test_search_without_handle_ambiguous(wired, monkeypatch):
+    """Two usable indexes → 'ambiguous' naming candidates — never a
+    silent guess across subtrees."""
+    _tree_crawl(wired, monkeypatch)
+
+    class _SecondTree(_TreeClient):
+        _PAGES: ClassVar = {"9": ("Nine", "nine body", [])}
+        _KIDS: ClassVar = {"9": []}
+    monkeypatch.setattr(server, "_client_for", lambda p: _SecondTree())
+    c2 = server.connect("9")
+    wait_done(c2["scope_handle"], server.start_crawl(c2["scope_handle"])["job_id"])
+    server._scopes.clear()
+    res = server.search("", "text")
+    assert res["coverage"] == "ambiguous"
+    assert {c["root_page_id"] for c in res["candidates"]} == {"1", "9"}
+    # an explicit handle still works unchanged
+    res2 = server.search(c2["scope_handle"], "nine")
+    assert res2["evidence"]
+
+
 def test_descendent_alias_needs_same_principal(wired, monkeypatch):
     """#240 security: an ancestor index built under a different account
     must never serve this connection — alias is refused, scope stays

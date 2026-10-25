@@ -93,6 +93,63 @@ def test_status_unconfigured(tmp_path, monkeypatch):
     assert st["configured"] is False and "error" in st["profile"]
 
 
+def test_status_lists_persisted_scope_after_restart(sp_env, monkeypatch):
+    """#263: a new chat (empty _scopes) must see the persisted index —
+    indexed_scopes carries the handle the disk re-bind path accepts."""
+    _sp_crawl(sp_env, monkeypatch)
+    sp_env._scopes.clear()                   # simulate new chat/respawn
+    st = sp_env.status()
+    scopes = st["indexed_scopes"]
+    assert len(scopes) == 1
+    assert scopes[0]["scope_handle"].startswith("scope:")
+    assert scopes[0]["root"] == f"site:{SITE_ID}"
+    assert scopes[0]["pages"] > 0
+    assert scopes[0]["last_crawl"]["state"] == "done"
+
+
+def test_search_without_handle_uses_single_index(sp_env, monkeypatch):
+    """#263: no URL, one index on disk → search uses it without the agent
+    needing the handle — and echoes it back for the evidence chain."""
+    c = _sp_crawl(sp_env, monkeypatch)
+    sp_env._scopes.clear()
+    res = sp_env.search("", "deploys")
+    assert res["evidence"] and res["coverage"] in ("complete", "partial")
+    assert res["scope_handle"] == c["scope_handle"]
+
+
+def test_search_without_handle_no_index(tmp_path, monkeypatch):
+    """Nothing indexed → 'unconfigured' so the agent runs connect, not a
+    fabricated search."""
+    monkeypatch.setenv("SP_KNOWLEDGE_HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("SP_KNOWLEDGE_WORKDIR", str(tmp_path / "w"))
+    from sharepoint_knowledge import server_sp
+    res = server_sp.search("", "anything")
+    assert res["evidence"] == [] and res["coverage"] == "unconfigured"
+    assert "connect" in res["note"]
+
+
+def test_search_without_handle_ambiguous(sp_env, monkeypatch):
+    """Two usable indexes → 'ambiguous' naming candidates — never a
+    silent guess across subtrees."""
+    _sp_crawl(sp_env, monkeypatch)
+    # stamp a second usable scope index directly — enough for
+    # stats().pages > 0 without a second fake-graph site
+    from confluence_knowledge.index import Index
+    from sharepoint_knowledge.settings_sp import index_root
+    idx2 = Index(index_root() / "otherscope.db")
+    idx2.meta_set("root", "site:other-guid")
+    idx2.meta_set("root_entry", "site:other-guid")
+    idx2.db.execute(
+        "INSERT INTO pages (page_id, title, url, fetched_at, active) "
+        "VALUES ('p9', 'Other', 'https://t/o', 1, 1)")
+    idx2.db.commit()
+    sp_env._scopes.clear()
+    res = sp_env.search("", "deploys")
+    assert res["coverage"] == "ambiguous"
+    assert {c["root"] for c in res["candidates"]} == \
+        {f"site:{SITE_ID}", "site:other-guid"}
+
+
 def test_scope_rebind_from_meta(sp_env):
     """#229: after a restart (_scopes empty) a cached scope re-binds from
     the persisted `root`/`root_entry` meta — no Graph calls, no KeyError
