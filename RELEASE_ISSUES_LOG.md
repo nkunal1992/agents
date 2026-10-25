@@ -129,3 +129,9 @@ Structured record of every failure hit during the RC runs and how each was resol
   the installed `register` writes — `knowledge` (unified default) or
   `<svc>-knowledge` (older published) — and validate `/{id}/mcp`
   against the resolved id. First rc run cancelled before tagging rc2.
+- **Also**: rc2's verify-published (windows-latest) failed on PyPI CDN
+  propagation lag — the simple-index poll saw 0.13.1rc2 but the venv's
+  pip fetched a stale edge (version list ended at 0.13.0). Same class
+  as ISSUE-007, one layer deeper: the poll passing doesn't guarantee
+  pip's fetch edge has converged. Remedy was a failed-job rerun a few
+  minutes later; a pip-level retry would harden it if it recurs.
