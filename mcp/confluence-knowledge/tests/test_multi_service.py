@@ -85,9 +85,10 @@ def test_dispatch_routes_by_service(tmp_path, monkeypatch):
     assert _json.loads(row[0])["svc"] == "local-knowledge"
 
 
-def test_dispatch_unknown_service_errors(tmp_path):
+def test_dispatch_unknown_service_errors(tmp_path, monkeypatch):
     """A request for a service that isn't mounted must error, never
     silently run on the wrong module."""
+    _fake_eps(monkeypatch, ["confluence-knowledge"])
     d = Daemon(tmp_path)
     d.services = {"a": object()}
     rpc = RpcDb(tmp_path / "rpc.db")
@@ -96,7 +97,74 @@ def test_dispatch_unknown_service_errors(tmp_path):
         d._dispatch(rid2, tool, args, service)
     row = rpc.db.execute(
         "SELECT error FROM rpc_responses").fetchone()
-    assert "unknown daemon tool" in row[0]
+    assert "not mounted" in row[0]
+
+
+def test_tagged_miss_never_runs_wrong_service(tmp_path, monkeypatch):
+    """#264: a tagged miss must error even when the only mounted service
+    HAS a tool of that name — the legacy single-mount fallback once ran
+    a local-knowledge connect on confluence's handler and returned a
+    nonsense 'numeric page ID' error to the user."""
+    _fake_eps(monkeypatch, ["confluence-knowledge"])
+    d = Daemon(tmp_path)
+    d.services = discover_services()
+    srv = next(iter(d.services.values()))
+    calls = []
+    monkeypatch.setattr(srv, "connect",
+                        lambda **kw: calls.append(kw) or {"ok": True},
+                        raising=False)
+    rpc = RpcDb(tmp_path / "rpc.db")
+    rpc.submit("connect", {"root": "C:\\docs"}, 30,
+               service="local-knowledge")
+    for rid2, tool, args, service in rpc.poll_requests(d.owner):
+        d._dispatch(rid2, tool, args, service)
+    row = rpc.db.execute("SELECT error FROM rpc_responses").fetchone()
+    assert "not mounted" in row[0]
+    assert not calls, "tagged miss ran on the wrong service"
+
+
+def test_remount_hot_mounts_post_boot_install(tmp_path, monkeypatch):
+    """#264: a service installed after daemon boot works on its first
+    tagged call — _remount rescans entry points and hot-mounts instead
+    of requiring a daemon restart."""
+    import json as _json
+    import types
+
+    import confluence_knowledge.daemon as dm
+    loc = types.ModuleType("loc")
+    loc.probe_tool = lambda **kw: {"svc": "local-knowledge"}
+    monkeypatch.setattr(dm, "discover_services",
+                        lambda only=None: {"local-knowledge": loc})
+    d = Daemon(tmp_path)
+    d.services = {"confluence-knowledge": object()}   # boot predates it
+    rpc = RpcDb(tmp_path / "rpc.db")
+    rpc.submit("probe_tool", {}, 30, service="local-knowledge")
+    for rid2, tool, args, service in rpc.poll_requests(d.owner):
+        d._dispatch(rid2, tool, args, service)
+    time.sleep(0.3)
+    row = rpc.db.execute("SELECT result FROM rpc_responses").fetchone()
+    assert _json.loads(row[0])["svc"] == "local-knowledge"
+    assert "local-knowledge" in d.services
+
+
+def test_untagged_legacy_request_single_mount(tmp_path, monkeypatch):
+    """Rows submitted by pre-#206 proxies carry no service tag — with
+    exactly one mount the fallback still routes them. Only tagged
+    misses are hard errors."""
+    import json as _json
+    _fake_eps(monkeypatch, ["confluence-knowledge"])
+    d = Daemon(tmp_path)
+    d.services = discover_services()
+    srv = next(iter(d.services.values()))
+    monkeypatch.setattr(srv, "probe_tool", lambda **kw: {"svc": "conf"},
+                        raising=False)
+    rpc = RpcDb(tmp_path / "rpc.db")
+    rpc.submit("probe_tool", {}, 30)                # service="" legacy
+    for rid2, tool, args, service in rpc.poll_requests(d.owner):
+        d._dispatch(rid2, tool, args, service)
+    time.sleep(0.3)
+    row = rpc.db.execute("SELECT result FROM rpc_responses").fetchone()
+    assert _json.loads(row[0])["svc"] == "conf"
 
 
 def test_daemon_home_is_venv_keyed(monkeypatch, tmp_path):

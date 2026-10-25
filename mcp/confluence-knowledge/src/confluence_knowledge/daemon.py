@@ -14,7 +14,9 @@ discovery finds its single service and the code path is identical.
   one level up) — a dead pid or stale heartbeat hands it over.
 - Polls `rpc_requests` every ~150 ms, dispatches to the request's
   `service` column → mounted module (stdio-proxy path; http calls run
-  natively inside the mounted app, no rpc hop).
+  natively inside the mounted app, no rpc hop). A tagged miss triggers
+  a one-shot re-scan — a service pip-installed post-boot hot-mounts for
+  rpc/stdio without a restart (#264).
 - Resumes orphaned running jobs on boot per mounted module.
 - Serves `/_services` — registered mounts — so `register` can detect a
   daemon that predates a later install and restart it.
@@ -366,15 +368,27 @@ class Daemon:
     def _dispatch(self, rid: str, tool: str, args: dict,
                   service: str = "") -> None:
         srv = self.services.get(service)
-        if srv is None:
+        if srv is None and service:
+            # a tagged miss — the package may have been pip-installed
+            # after this daemon booted: rescan and hot-mount once
+            srv = self._remount(service)
+        if srv is None and not service:
             # legacy requests carry no service — dispatch to the only
-            # mount when unambiguous, else a named miss
+            # mount when unambiguous, else a named miss. NEVER for a
+            # tagged miss: falling through to another service ran a
+            # local-knowledge connect on the confluence handler (#264).
             srv = (next(iter(self.services.values()))
                    if len(self.services) == 1 else None)
         fn = getattr(srv, tool, None) if srv is not None else None
         if fn is None or not callable(fn):
-            self.rpc.respond(rid, error=f"unknown daemon tool {tool!r} "
-                                        f"(service {service!r})")
+            if service and srv is None:
+                self.rpc.respond(
+                    rid, error=f"service {service!r} is not mounted on "
+                               "this daemon — is it installed in this "
+                               "environment? run the service's doctor")
+            else:
+                self.rpc.respond(rid, error=f"unknown daemon tool {tool!r} "
+                                            f"(service {service!r})")
             return
 
         def work() -> None:
@@ -389,6 +403,37 @@ class Daemon:
         t.start()
         self._inflight.append(t)
         self._inflight = [x for x in self._inflight if x.is_alive()]
+
+    def _remount(self, service: str):
+        """A tagged miss usually means the package was pip-installed
+        AFTER this daemon booted — invalidate import caches, re-scan
+        entry points and hot-mount whatever is new (pool reaper too,
+        as at boot). Returns the requested module or None.
+
+        Hot-mount covers the rpc/stdio path only: the http app was
+        built once in _serve_http and a Starlette Mount needs its
+        lifespan entered, which can't be retrofitted here. A later
+        `register --transport http` misses the service in /_services
+        and restarts us via ensure_mounted — self-healing."""
+        importlib.invalidate_caches()
+        try:
+            found = discover_services(self.only_module)
+        except Exception:
+            log.exception("service re-discovery failed")
+            return None
+        for name, mod in found.items():
+            if name in self.services:
+                continue
+            self.services[name] = mod
+            try:
+                if hasattr(mod, "_pool") and \
+                        hasattr(mod._pool, "start_reaper"):
+                    mod._pool.start_reaper()
+            except Exception:               # noqa: BLE001,S112 — tuning
+                continue                    # is best-effort per module
+            log.info("hot-mounted %r — installed post-boot (rpc/stdio "
+                     "only; an http route needs a daemon restart)", name)
+        return self.services.get(service)
 
     def _resume_orphans(self) -> None:
         """Jobs left 'running' by a dead daemon get their workers back —
