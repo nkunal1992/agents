@@ -177,12 +177,15 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     check(jb and "local-knowledge" in jb[0].read_text(),
           "register: JetBrains user config written", written)
     merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
-    check("colleague-server" in merged["servers"]
-          and "knowledge" in merged["servers"],   # unified default (#269)
+    # unified default is `knowledge` (0.10.1+); an older published
+    # service still writes its per-service id — accept either shape
+    kid = next((k for k in ("knowledge", "local-knowledge")
+                if k in merged["servers"]), None)
+    check("colleague-server" in merged["servers"] and kid,
           "register: merged existing .vscode/mcp.json without clobbering")
-    entry = merged["servers"]["knowledge"]
+    entry = merged["servers"][kid]
     if entry.get("type") == "http":
-        check("/knowledge/mcp" in entry["url"]
+        check(f"/{kid}/mcp" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
               "register: http entry points at the daemon's unified path",

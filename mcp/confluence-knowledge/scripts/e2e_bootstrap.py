@@ -152,13 +152,16 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     check(jb and "confluence-knowledge" in jb[0].read_text(),
           "register: JetBrains user config written", written)
     merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
-    check("colleague-server" in merged["servers"]
-          and "knowledge" in merged["servers"],   # unified default (#269)
+    # unified default is `knowledge` (0.13.1+); an older published
+    # service still writes its per-service id — accept either shape
+    kid = next((k for k in ("knowledge", "confluence-knowledge")
+                if k in merged["servers"]), None)
+    check("colleague-server" in merged["servers"] and kid,
           "register: merged existing .vscode/mcp.json without clobbering")
-    entry = merged["servers"]["knowledge"]
+    entry = merged["servers"][kid]
     if entry.get("type") == "http":
         # #206 — daemon-hosted endpoint: url + bearer, no command
-        check("/knowledge/mcp" in entry["url"]
+        check(f"/{kid}/mcp" in entry["url"]
               and "127.0.0.1" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
