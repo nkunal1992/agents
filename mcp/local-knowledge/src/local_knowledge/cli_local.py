@@ -71,9 +71,17 @@ def _doctor() -> int:
             from confluence_knowledge.watchdog import restart_daemon
             root = daemon_home()
             restart_daemon(root)       # restarts alive-but-stale too
-            t = (registered_transport(APP_NAME) or "http")
-            results = register(transport=t, workdir=root,
-                               server_id=APP_NAME, module=MODULE,
+            # refresh whichever entry exists — the service's own or the
+            # unified `knowledge` one (#269); default unified when neither
+            sid = (APP_NAME if registered_transport(APP_NAME)
+                   else "knowledge")
+            t = registered_transport(sid) or "http"
+            results = register(transport=t,
+                               workdir=(root if sid != "knowledge"
+                                        else None),
+                               server_id=sid,
+                               module=(MODULE if sid != "knowledge" else
+                                       "confluence_knowledge.unified"),
                                env_var=ENV_VAR)
             print(f"self-heal: daemon restarted, server entry "
                   f"refreshed ({t}) in {len(results)} config(s)")
@@ -117,6 +125,11 @@ def main() -> None:
                           "http: the daemon's shared localhost endpoint — "
                           "one URL for every window, but a restart stales "
                           "the session until a reload")
+    reg.add_argument("--per-service", action="store_true",
+                     help="write only this service's own entry instead — "
+                          "the default 'knowledge' entry unions every "
+                          "installed service's tools as <service>__<tool> "
+                          "and picks up future installs with no reload")
     reg.add_argument("--remove", action="store_true")
     sub.add_parser("serve", help="run the stdio MCP server")
     sub.add_parser("stop", help="stop the shared background daemon + watchdog")
@@ -154,9 +167,13 @@ def main() -> None:
                 ensure_daemon(RpcDb(wd / "rpc.db"))
             results = register(ide=args.ide, workspace=args.workspace,
                                transport=args.transport,
-                               workdir=wd, remove=args.remove,
-                               server_id=APP_NAME,
-                               module="local_knowledge.server_local",
+                               workdir=(wd if args.per_service else None),
+                               remove=args.remove,
+                               server_id=(APP_NAME if args.per_service
+                                          else "knowledge"),
+                               module=("local_knowledge.server_local"
+                                       if args.per_service else
+                                       "confluence_knowledge.unified"),
                                env_var=WORKDIR_ENV)
         except SetupError as e:
             print(f"error: {e}", file=sys.stderr)

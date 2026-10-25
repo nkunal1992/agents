@@ -38,15 +38,15 @@ def test_register_writes_venv_command_and_merges(sandbox):
     files = [f for f, _ in results]
     jb = files[0]
     data = json.loads(jb.read_text())
-    entry = data["servers"]["confluence-knowledge"]
+    entry = data["servers"]["knowledge"]
     assert entry["command"].endswith(
         ("python", "python.exe", "pythonw.exe"))
-    assert entry["args"] == ["-m", "confluence_knowledge.server"]
+    assert entry["args"] == ["-m", "confluence_knowledge.unified"]
 
     merged = json.loads(existing.read_text())
     assert merged["servers"]["other"] == {"command": "x"}
     assert merged["settings"] == {"a": 1}
-    assert "confluence-knowledge" in merged["servers"]
+    assert "knowledge" in merged["servers"]
 
 
 def test_register_backs_up_unparseable_config(sandbox):
@@ -56,15 +56,15 @@ def test_register_backs_up_unparseable_config(sandbox):
     f.write_text('// comment\n{"servers": {}}')  # JSONC — plain json can't parse
     reg.register("vscode", ws)
     data = json.loads(f.read_text())
-    assert "confluence-knowledge" in data["servers"]
+    assert "knowledge" in data["servers"]
     assert (f.with_suffix(".json.bak")).exists()
 
 
 def test_remove_and_registered_paths(sandbox):
     reg.register("jetbrains")
-    assert reg.registered_paths()
+    assert reg.registered_paths("knowledge")
     reg.register("jetbrains", remove=True)
-    assert not reg.registered_paths()
+    assert not reg.registered_paths("knowledge")
 
 
 def test_no_targets_errors_cleanly(sandbox, monkeypatch):
@@ -95,7 +95,7 @@ def test_windsurf_writes_under_mcpservers_key(sandbox):
     reg.register("windsurf")
     data = json.loads((sandbox / ".codeium" / "windsurf"
                        / "mcp_config.json").read_text())
-    assert "confluence-knowledge" in data["mcpServers"]
+    assert "knowledge" in data["mcpServers"]
     assert "servers" not in data
 
 
@@ -107,13 +107,13 @@ def test_cursor_workspace_merges_mcpservers_and_gitignores(sandbox):
     reg.register("cursor", ws)
     data = json.loads(f.read_text())
     assert data["mcpServers"]["other"] == {"command": "x"}
-    assert "confluence-knowledge" in data["mcpServers"]
+    assert "knowledge" in data["mcpServers"]
     assert ".cursor/mcp.json" in (ws / ".gitignore").read_text()
 
 
 def test_registered_paths_sees_both_root_keys(sandbox):
     (sandbox / ".codeium" / "windsurf").mkdir(parents=True)
     reg.register("windsurf")
-    assert reg.registered_paths() == [
+    assert reg.registered_paths("knowledge") == [
         sandbox / ".codeium" / "windsurf" / "mcp_config.json"]
-    assert reg.registered_transport() == "stdio"
+    assert reg.registered_transport("knowledge") == "stdio"

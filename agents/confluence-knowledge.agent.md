@@ -2,7 +2,7 @@
 name: confluence-knowledge
 description: Grounded Q&A over a selected Confluence page and all its descendant pages — local crawl/index/embeddings via a self-installed MCP service, per-claim citations, explicit "not documented" refusals. Bootstraps its local service on first run.
 argument-hint: Ask your question — a root page URL is only needed the first time
-tools: ["confluence-knowledge/status", "confluence-knowledge/register_token", "confluence-knowledge/connect", "confluence-knowledge/start_crawl", "confluence-knowledge/crawl_step", "confluence-knowledge/cancel_crawl", "confluence-knowledge/wait_for_crawl", "confluence-knowledge/search", "confluence-knowledge/get_evidence", "confluence-knowledge/verify_citations", "confluence-knowledge/submit_feedback", "confluence-knowledge/feedback_report", "read", "edit", "execute"]
+tools: ["confluence-knowledge/status", "confluence-knowledge/register_token", "confluence-knowledge/connect", "confluence-knowledge/start_crawl", "confluence-knowledge/crawl_step", "confluence-knowledge/cancel_crawl", "confluence-knowledge/wait_for_crawl", "confluence-knowledge/search", "confluence-knowledge/get_evidence", "confluence-knowledge/verify_citations", "confluence-knowledge/submit_feedback", "confluence-knowledge/feedback_report", "knowledge/confluence__status", "knowledge/confluence__register_token", "knowledge/confluence__connect", "knowledge/confluence__start_crawl", "knowledge/confluence__crawl_step", "knowledge/confluence__cancel_crawl", "knowledge/confluence__wait_for_crawl", "knowledge/confluence__search", "knowledge/confluence__get_evidence", "knowledge/confluence__verify_citations", "knowledge/confluence__submit_feedback", "knowledge/confluence__feedback_report", "read", "edit", "execute"]
 ---
 <!--
 INSTALL — ONE file only: copy this into your repo at .github/agents/ (or upload
@@ -293,12 +293,13 @@ Recover in order:
 - `X doctor` self-heals: restarts the daemon — dead OR running
   older code than the installed package (`status` flags it) — and
   refreshes the registered entry.
-- `register --unified` writes ONE `knowledge` entry instead — its tools
-  are every installed service's tools namespaced `<service>__<tool>`
-  (e.g. `confluence__search`), and services installed later appear on
-  the next `tools/list` with no re-registration or reload. When this
-  entry is what the IDE registered, call the tools by their prefixed
-  names — the routing and behaviour are identical.
+- `register` writes ONE `knowledge` entry by default — its tools are
+  every installed service's tools namespaced `<service>__<tool>` (e.g.
+  `confluence__search`), and services installed later appear on the
+  next `tools/list` with no re-registration or reload. When this entry
+  is what the IDE registered, call the tools by their prefixed names —
+  the routing and behaviour are identical. `register --per-service`
+  writes this service's own entry instead (unprefixed names).
 - The JetBrains IDE entry carries the token in the URL query
   (`?token=…`) on purpose — the Copilot plugin drops `headers` there
   (upstream bug). VS Code uses the header.

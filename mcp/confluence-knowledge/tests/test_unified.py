@@ -126,14 +126,49 @@ def test_broken_service_does_not_hide_others(monkeypatch):
 
 
 def test_unified_registration_writes_module(tmp_path, monkeypatch):
-    """`register --unified` maps to server_id=knowledge + the unified
-    module — the entry the daemon also mounts at /knowledge/mcp."""
+    """`register` writes the unified entry BY DEFAULT (#269) —
+    server_id=knowledge + the unified module, the same mount the daemon
+    serves at /knowledge/mcp."""
     from confluence_knowledge import registration as reg
     mcp_json = tmp_path / "mcp.json"
     monkeypatch.setattr(reg, "targets", lambda *a, **k: [mcp_json])
     monkeypatch.setattr(reg, "ensure_gitignore", lambda *a, **k: None)
-    reg.register("all", server_id="knowledge",
-                 module="confluence_knowledge.unified")
+    reg.register("all")
     data = json.loads(mcp_json.read_text())
     entry = data["servers"]["knowledge"]
     assert entry["args"] == ["-m", "confluence_knowledge.unified"]
+    assert "env" not in entry        # union proxy sets no service workdir
+
+
+def test_per_service_registration_opt_out(tmp_path, monkeypatch):
+    """`register --per-service` keeps the service's own id/module —
+    both entries may coexist with the unified one."""
+    from confluence_knowledge import registration as reg
+    mcp_json = tmp_path / "mcp.json"
+    monkeypatch.setattr(reg, "targets", lambda *a, **k: [mcp_json])
+    monkeypatch.setattr(reg, "ensure_gitignore", lambda *a, **k: None)
+    reg.register("all", server_id="confluence-knowledge",
+                 module="confluence_knowledge.server")
+    data = json.loads(mcp_json.read_text())
+    entry = data["servers"]["confluence-knowledge"]
+    assert entry["args"] == ["-m", "confluence_knowledge.server"]
+
+
+def test_registration_flag_accepts_knowledge_only(tmp_path, monkeypatch):
+    """Doctor must not nag a unified-only user: the registration check
+    treats a `knowledge` entry as satisfying the service (#269)."""
+    from confluence_knowledge import registration as reg
+    mcp_json = tmp_path / "mcp.json"
+    mcp_json.write_text(json.dumps(
+        {"servers": {"knowledge": {"command": "py", "args": ["-m", "u"]}}}))
+    monkeypatch.setattr(reg, "targets", lambda *a, **k: [mcp_json])
+    # registered_paths finds it via the knowledge id even though the
+    # service's own id is absent
+    assert reg.registered_paths("knowledge") == [mcp_json]
+    assert reg.registered_paths("confluence-knowledge") == []
+    from confluence_knowledge import health
+    checks = health.health_checks(tmp_path, tmp_path,
+                                  "confluence-knowledge",
+                                  "confluence-knowledge")
+    reg_flag = next(c for c in checks if c["flag"] == "registration")
+    assert reg_flag["ok"], reg_flag
