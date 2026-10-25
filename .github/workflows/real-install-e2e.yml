@@ -1,0 +1,28 @@
+name: real-install-e2e
+
+# The heavyweight tier (#271): a real venv, real wheels, real pip install
+# mid-flight — the zero-reload scenario unit tests can only fake. Weekly
+# plus on demand; too heavy for the per-PR matrix.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"          # Monday 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  real-install:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Secure installer (emSign CA fix)
+        run: python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"
+      - name: Install the mcp client for the script's session driver
+        run: pip install "mcp>=1.30.0"
+      - name: Real-install e2e — live pip install while daemon serves
+        run: python mcp/confluence-knowledge/scripts/e2e_real_install.py

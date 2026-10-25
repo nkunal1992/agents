@@ -202,7 +202,10 @@ class Daemon:
                 spawn_watchdog(self.workdir, live_daemon=True)
             t = _t.Thread(target=kick, daemon=True,
                           name="watchdog-kicker")
-            t.start()
+            try:
+                t.start()
+            except RuntimeError:
+                return   # teardown/thread-pressure — the next kick retries
             if wait:
                 t.join(wait)
 
@@ -407,7 +410,17 @@ class Daemon:
                 log.debug(traceback.format_exc())
 
         t = threading.Thread(target=work, daemon=True, name=f"rpc-{tool}")
-        t.start()
+        try:
+            t.start()
+        except RuntimeError as e:
+            live = [x.name for x in threading.enumerate()]
+            log.warning("rpc worker start failed (%s) — %d threads: %s",
+                        e, len(live), live[:40])
+            self.rpc.respond(
+                rid, error="daemon shutting down"
+                if sys.is_finalizing()
+                else f"cannot start rpc worker: {e}")
+            return
         self._inflight.append(t)
         self._inflight = [x for x in self._inflight if x.is_alive()]
 
@@ -423,10 +436,28 @@ class Daemon:
         `register --transport http` misses the service in /_services
         and restarts us via ensure_mounted — self-healing."""
         importlib.invalidate_caches()
-        try:
-            found = discover_services(self.only_module)
-        except Exception:
-            log.exception("service re-discovery failed")
+        # the import can take seconds on a cold disk (torch/onnx chains)
+        # and we're inside the heartbeat-driven dispatch loop — scan on
+        # a scoped thread and keep beating or callers see a false-dead
+        # daemon and bail with DaemonUnavailable mid-remount
+        import threading
+        found: dict = {}
+        failed = []
+
+        def scan() -> None:
+            try:
+                found.update(discover_services(self.only_module))
+            except Exception:
+                log.exception("service re-discovery failed")
+                failed.append(True)
+
+        t = threading.Thread(target=scan, daemon=True,
+                             name="remount-scan")
+        t.start()
+        while t.is_alive():
+            self.rpc.heartbeat_daemon(self.owner)
+            t.join(2.0)
+        if failed:
             return None
         for name, mod in found.items():
             if name in self.services:
@@ -526,6 +557,14 @@ class Daemon:
 def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s daemon %(message)s")
+    # self-mark FIRST, before any service module can be imported: the
+    # role flag is normally injected by ensure_daemon's spawn env, but a
+    # daemon launched directly (`python -m ...daemon`, an external
+    # supervisor, a debugger) would otherwise leave daemon_enabled() ON
+    # inside the daemon — its imported tools then re-proxy into its own
+    # rpc.db, and every dispatch re-submits itself (the 6k rpc-connect
+    # thread-bomb seen in real-venv e2e)
+    os.environ["KNOWLEDGE_DAEMON_ROLE"] = "1"
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     module = None
     if "--module" in sys.argv:

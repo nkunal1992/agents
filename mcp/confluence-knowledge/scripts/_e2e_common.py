@@ -216,7 +216,6 @@ def fresh_venv(venv_dir: Path) -> Path:
 # --- shared MCP-client helpers (call/check used by both smoke and bootstrap) ---
 
 import json as _json
-import os as _os
 import time as _time
 from datetime import timedelta as _timedelta
 
@@ -231,9 +230,11 @@ def check(cond, msg, detail=None):
         # output crash print(); degrade to ? rather than fail the e2e
         print(line.encode("ascii", "replace").decode("ascii"), flush=True)
     if not cond:
-        import sys as _sys
-        _sys.stdout.flush()  # os._exit skips the buffered tail
-        _os._exit(1)  # skip the client's teardown traceback noise
+        # SystemExit, not os._exit: finally blocks and atexit hooks must
+        # run so sandboxed daemons/watchdogs get reaped — a bare _exit
+        # orphaned them and past runs piled up dozens of respawning
+        # pairs until the host ran out of threads entirely
+        raise SystemExit(1)
 
 
 def stop_shared_daemon(cli: Path, env: dict) -> None:
