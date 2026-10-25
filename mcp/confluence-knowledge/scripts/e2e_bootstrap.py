@@ -153,16 +153,16 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
           "register: JetBrains user config written", written)
     merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
     check("colleague-server" in merged["servers"]
-          and "confluence-knowledge" in merged["servers"],
+          and "knowledge" in merged["servers"],   # unified default (#269)
           "register: merged existing .vscode/mcp.json without clobbering")
-    entry = merged["servers"]["confluence-knowledge"]
+    entry = merged["servers"]["knowledge"]
     if entry.get("type") == "http":
         # #206 — daemon-hosted endpoint: url + bearer, no command
-        check("/confluence-knowledge/mcp" in entry["url"]
+        check("/knowledge/mcp" in entry["url"]
               and "127.0.0.1" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
-              "register: http entry points at the daemon's confluence path",
+              "register: http entry points at the daemon's unified path",
               entry)
     else:
         check(Path(entry["command"]).resolve().parent ==

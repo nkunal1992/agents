@@ -172,14 +172,14 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     check(jb and "sharepoint-knowledge" in jb[0].read_text(),
           "register: JetBrains user config written", written)
     merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
-    check("sharepoint-knowledge" in merged["servers"],
+    check("knowledge" in merged["servers"],   # unified default (#269)
           "register: merged into .vscode/mcp.json")
-    entry = merged["servers"]["sharepoint-knowledge"]
+    entry = merged["servers"]["knowledge"]
     if entry.get("type") == "http":
-        check("/sharepoint-knowledge/mcp" in entry["url"]
+        check("/knowledge/mcp" in entry["url"]
               and entry.get("headers", {}).get("Authorization",
                                                "").startswith("Bearer "),
-              "register: http entry points at the daemon's sp path",
+              "register: http entry points at the daemon's unified path",
               entry)
     else:
         check(entry["command"] == str(vpy)
