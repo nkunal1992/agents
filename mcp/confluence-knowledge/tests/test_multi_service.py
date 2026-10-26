@@ -437,9 +437,11 @@ def test_stop_never_signals_pid_reused_foreign_process(tmp_path):
     now points at an unrelated process must NOT be SIGTERMed — pid
     reuse hands the number to an innocent program."""
     import subprocess
+    import sys
 
     from confluence_knowledge.watchdog import stop_daemon
-    victim = subprocess.Popen(["sleep", "60"])
+    victim = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         (tmp_path / ".daemon.pid").write_text(str(victim.pid))
         out = stop_daemon(tmp_path, timeout=1)
