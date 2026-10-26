@@ -371,6 +371,9 @@ def main() -> int:
            "LOCAL_KNOWLEDGE_WORKDIR": str(home / "work-local"),
            "KNOWLEDGE_SHARED_HOME": str(home / ".knowledge"),
            "CONF_KNOWLEDGE_TOKEN": DC_TOKEN,
+           # this script exercises the shared-daemon mount — opt in
+           # explicitly (local-first is the default since #285)
+           "KNOWLEDGE_DAEMON": "1",
            "KNOWLEDGE_MODELS_DIR":
                os.environ.get("KNOWLEDGE_MODELS_DIR")
                or os.environ.get("CK_MODEL_CACHE")

@@ -293,12 +293,17 @@ def _cmdline_is(pid: int, needle: str) -> bool:
 
 
 def daemon_enabled(service_env: str) -> bool:
-    """Proxy mode gate (#189/#196): ON by default — the service env opt-out
-    (e.g. LOCAL_KNOWLEDGE_DAEMON=0) is the only off switch. The daemon
-    itself never re-proxies (KNOWLEDGE_DAEMON_ROLE=1 in its env)."""
+    """Local-first (#285): tools run in the window's own server process —
+    the shared daemon is opt-in via the service env (e.g.
+    CONF_KNOWLEDGE_DAEMON=1) or KNOWLEDGE_DAEMON=1 for every service at
+    once; a service's own =0 always wins over the master switch. The
+    daemon itself never re-proxies (KNOWLEDGE_DAEMON_ROLE=1 in its env)."""
     if os.environ.get("KNOWLEDGE_DAEMON_ROLE"):
         return False
-    return os.environ.get(service_env, "1") != "0"
+    v = os.environ.get(service_env)
+    if v is None:
+        v = os.environ.get("KNOWLEDGE_DAEMON", "0")
+    return v == "1"
 
 
 def daemon_owner() -> str:

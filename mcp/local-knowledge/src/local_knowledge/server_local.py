@@ -309,6 +309,34 @@ def _resume_job(scope_key: str, job_id: str) -> None:
     _ensure_worker(s, job_id)
 
 
+_ORPHANS_SWEPT = False
+
+
+def _resume_orphaned_crawls() -> None:
+    """Local-mode orphan reclaim (#285): the daemon used to sweep
+    'running' jobs whose worker died at ITS boot; locally the first
+    status/connect call does. _resume_job rebuilds the scope from index
+    meta and _ensure_worker wins-or-yields the lease — a job owned by a
+    LIVE process is left alone by acquire_lease itself."""
+    global _ORPHANS_SWEPT
+    if _ORPHANS_SWEPT or _daemon_on():
+        return
+    _ORPHANS_SWEPT = True
+    try:
+        dbs = [d for d in index_root().glob("*.db")
+               if d.name != "rpc.db"]
+    except OSError:
+        return
+    for db in dbs:
+        try:
+            idx = _index_for(db.stem)
+            job = idx.latest_job()
+            if job is not None and job["state"] == "running":
+                _resume_job(db.stem, job["job_id"])
+        except Exception:       # noqa: BLE001,S112 — best-effort
+            continue            # reclaim; a bad index must not break status/connect
+
+
 def _indexed_scopes() -> list[dict]:
     """Persisted scopes on disk — a new chat (or restarted daemon) has an
     empty _scopes, but index_root/*.db proves what was connected. Handles
@@ -345,6 +373,7 @@ def status() -> dict:
     except SetupError as e:
         cfg = {"error": str(e)}
     from confluence_knowledge.health import health_checks
+    _resume_orphaned_crawls()
     root = index_root()
     checks = health_checks(home(), workdir(), APP_NAME, "local-knowledge",
                            index_root=root)
@@ -383,7 +412,7 @@ def status() -> dict:
             "home": str(home()),
             "workdir": str(workdir()),
             "daemon_home": str(daemon_home()),
-            "daemon_url": _daemon_url(),
+            "daemon_url": _daemon_url() if _daemon_on() else "",
         },
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
@@ -400,6 +429,7 @@ def status() -> dict:
 def connect(root: str) -> dict:
     """Bind a scope to a file or folder path. No credentials needed — the
     filesystem itself is the ACL (we can only read what the user can)."""
+    _resume_orphaned_crawls()
     out = _daemon_call("connect", {"root": root}, 120)
     if out is not None:
         h = out.get("scope_handle")

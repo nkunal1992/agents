@@ -503,3 +503,43 @@ def test_search_reports_timings(wired, monkeypatch):
     res = server.search(c["scope_handle"], "text")
     assert res["timings"]["retrieval_ms"] >= 0
     assert res["timings"]["search_ms"] >= res["timings"]["retrieval_ms"]
+
+
+def test_status_reclaims_orphaned_crawl(wired, monkeypatch):
+    """#285: local mode — a 'running' job whose worker died with its
+    process is reclaimed by the first status/connect call (the daemon's
+    boot sweep moved into the server)."""
+    c = server.connect("1")
+    job = server.start_crawl(c["scope_handle"])
+    key = c["scope_handle"].split(":")[1]
+    server._workers.clear()                     # worker died with process
+    reclaimed = []
+    monkeypatch.setattr(server, "_resume_job",
+                        lambda k, j: reclaimed.append((k, j)))
+    monkeypatch.setattr(server, "_ORPHANS_SWEPT", False)
+    server.status()
+    assert (key, job["job_id"]) in reclaimed
+    # once-guard: a second status must not re-sweep
+    reclaimed.clear()
+    server.status()
+    assert reclaimed == []
+
+
+def test_orphan_sweep_skipped_under_daemon(wired, monkeypatch):
+    """#285: daemon mode keeps the daemon's own boot sweep — the
+    server-side sweep must not also fire (double workers)."""
+    monkeypatch.setattr(server, "_daemon_on", lambda: True)
+    called = []
+    monkeypatch.setattr(server, "_resume_job",
+                        lambda k, j: called.append(j))
+    monkeypatch.setattr(server, "_ORPHANS_SWEPT", False)
+    server._resume_orphaned_crawls()
+    assert called == [] and server._ORPHANS_SWEPT is False
+
+
+def test_status_reports_no_daemon_url_locally(wired, monkeypatch):
+    """#285: local mode must not advertise a daemon endpoint."""
+    monkeypatch.setattr(server, "_daemon_url",
+                        lambda: "http://127.0.0.1:1/")
+    out = server.status()
+    assert out["daemon"] == "off" and out["paths"]["daemon_url"] == ""

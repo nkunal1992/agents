@@ -344,6 +344,7 @@ def status() -> dict:
         cfg = {"error": str(e)}
     from .health import health_checks
     from .registration import SERVER_ID
+    _resume_orphaned_crawls()
     idx_root = workspace_index_root(_workdir())
     checks = health_checks(home, _workdir(), SERVER_ID, "confluence-knowledge",
                            index_root=idx_root)
@@ -407,7 +408,7 @@ def status() -> dict:
             "home": str(_home()),
             "workdir": str(_workdir()),
             "daemon_home": str(daemon_home()),
-            "daemon_url": _daemon_url(),
+            "daemon_url": _daemon_url() if _daemon_on() else "",
         },
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
@@ -459,6 +460,7 @@ def register_token(site: str, env: str = "cloud", email: str = "") -> dict:
 @tool(mcp)
 def connect(root: str) -> dict:
     """Validate credentials + root readability; bind a scope handle."""
+    _resume_orphaned_crawls()
     dargs = {"root": root}
     out = _daemon_call("connect", dargs, 120)
     if out is not None:
@@ -703,6 +705,34 @@ def _resume_job(scope_key: str, job_id: str) -> None:
     # acquires the job lease; a raw thread here raced a later crawl_step
     # into spawning a second worker on the same job (StaleJobError)
     _ensure_worker(s, job_id)
+
+
+_ORPHANS_SWEPT = False
+
+
+def _resume_orphaned_crawls() -> None:
+    """Local-mode orphan reclaim (#285): the daemon used to sweep
+    'running' jobs whose worker died at ITS boot; locally the first
+    status/connect call does. _resume_job rebuilds the scope from index
+    meta and _ensure_worker wins-or-yields the lease — a job owned by a
+    LIVE process is left alone by acquire_lease itself."""
+    global _ORPHANS_SWEPT
+    if _ORPHANS_SWEPT or _daemon_on():
+        return
+    _ORPHANS_SWEPT = True
+    try:
+        dbs = [d for d in index_root().glob("*.db")
+               if d.name != "rpc.db"]
+    except OSError:
+        return
+    for db in dbs:
+        try:
+            idx = _index_for(db.stem)
+            job = idx.latest_job()
+            if job is not None and job["state"] == "running":
+                _resume_job(db.stem, job["job_id"])
+        except Exception:       # noqa: BLE001,S112 — best-effort
+            continue            # reclaim; a bad index must not break status/connect
 
 
 def _owner_label(idx, job_id: str) -> str:

@@ -234,6 +234,9 @@ def main() -> int:
            "CONF_KNOWLEDGE_HOME": str(home / ".confluence-knowledge"),
            "CONF_KNOWLEDGE_WORKDIR": str(home / "work"),
            "KNOWLEDGE_SHARED_HOME": str(home / ".knowledge"),
+           # this leg exercises the shared-daemon http surface — opt in
+           # explicitly (local-first is the default since #285)
+           "CONF_KNOWLEDGE_DAEMON": "1",
            # real ONNX models from the dev store — no re-download, and
            # this leg must never fall back to fake embeddings
            "KNOWLEDGE_MODELS_DIR":

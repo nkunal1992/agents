@@ -55,6 +55,9 @@ def _env(sandbox: Path) -> dict:
              KNOWLEDGE_FAKE_EMBEDDINGS="1",
              KNOWLEDGE_SHARED_HOME=str(sandbox / "shared"),
              KNOWLEDGE_DAEMON_HOME=str(sandbox / "daemon"),
+             # exercises the daemon lifecycle — opt in (local-first is
+             # the default since #285)
+             KNOWLEDGE_DAEMON="1",
              CONF_KNOWLEDGE_WORKDIR=str(sandbox / "conf-wd"),
              LOCAL_KNOWLEDGE_WORKDIR=str(sandbox / "local-wd"),
              PIP_DISABLE_PIP_VERSION_CHECK="1")
