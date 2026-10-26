@@ -136,7 +136,14 @@ def test_registration_missing_flagged(tmp_path, monkeypatch):
 
 
 def test_deps_flag_when_missing(tmp_path, monkeypatch):
+    """A genuinely missing dep turns the flag red — tested on the
+    non-excluded path (where fastembed IS expected); #302's degrade is
+    covered by test_sparse_platform_excluded_degrades_checks."""
     import importlib.util
+
+    from confluence_knowledge import retrieval
+    monkeypatch.setattr(retrieval, "sparse_platform_excluded",
+                        lambda: False)
     real = importlib.util.find_spec
     monkeypatch.setattr(importlib.util, "find_spec",
                         lambda m: None if m == "fastembed" else real(m))

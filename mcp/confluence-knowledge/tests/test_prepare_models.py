@@ -6,6 +6,17 @@ import types
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _non_excluded_platform(monkeypatch):
+    """These tests exercise the generic prepare path — pin the platform
+    predicate off so they behave identically on win_arm64 hosts (#302);
+    the excluded-path test overrides it back to True."""
+    monkeypatch.setattr(
+        "confluence_knowledge.retrieval.sparse_platform_excluded",
+        lambda: False)
+
+
 FAKE_LOCK = {"models": {
     "embed": {"repo": "org/emb", "revision": "r1", "license": "MIT",
               "files": ["m.onnx", "tokenizer.json"]},

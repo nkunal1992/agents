@@ -98,14 +98,18 @@ def test_citation_check(tmp_path):
 def test_sparse_embedder_transitive_dep_gap(tmp_path, monkeypatch):
     """#287: a missing transitive dep (py_rust_stemmers on win_arm64)
     raises SparseUnavailable — degradable — while fastembed itself
-    missing stays a hard SetupError."""
+    missing stays a hard SetupError on platforms where it's expected
+    (the #302 marker-skipped case is covered separately)."""
     import builtins
 
     import pytest
 
+    from confluence_knowledge import retrieval
     from confluence_knowledge.retrieval import LocalSparseEmbedder, SparseUnavailable
     from confluence_knowledge.settings import SetupError
 
+    monkeypatch.setattr(retrieval, "sparse_platform_excluded",
+                        lambda: False)
     real_import = builtins.__import__
 
     def fake_import(name, *a, **k):
