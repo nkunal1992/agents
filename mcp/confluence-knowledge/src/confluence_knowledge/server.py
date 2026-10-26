@@ -1150,6 +1150,8 @@ def search(scope_handle: str = "", question: str = "") -> dict:
                        "search_ms": int((time.monotonic() - t0) * 1000)}
     if daemon_note:
         resp["daemon"] = f"{daemon_note} — answered locally"
+    if _pool.sparse_missing:
+        resp["sparse"] = _pool.sparse_missing      # degraded leg (#287)
     return resp
 
 

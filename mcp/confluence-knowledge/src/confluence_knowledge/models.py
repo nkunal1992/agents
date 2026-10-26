@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .resources import limits
-from .retrieval import LocalEmbedder, LocalReranker, LocalSparseEmbedder
+from .retrieval import LocalEmbedder, LocalReranker, LocalSparseEmbedder, SparseUnavailable
 from .settings import SetupError
 
 
@@ -43,6 +43,7 @@ class ModelPool:
         self._embedder: LocalEmbedder | None = None
         self._reranker: LocalReranker | None = None
         self._sparse: LocalSparseEmbedder | None = None
+        self._sparse_missing: str | None = None   # #287 degrade reason
         # injectable for tests — {kind: factory(home, cli)}
         self._loaders: dict[str, Callable] = {
             "embedder": LocalEmbedder,
@@ -62,16 +63,30 @@ class ModelPool:
         if obj is not None:
             self._touch()
             return obj
+        if kind == "sparse" and self._sparse_missing is not None:
+            return None        # degraded leg — don't retry per call (#287)
         # the loader runs under a per-kind lock, not the pool lock —
         # session init used to serialize all three models (~0.6s) even
         # though they build independent ONNX graphs (#255)
         with self._load_locks.setdefault(kind, threading.Lock()):
             obj = getattr(self, attr)
             if obj is None:
-                obj = self._loaders[kind](self._home_fn(), self._cli)
+                try:
+                    obj = self._loaders[kind](self._home_fn(), self._cli)
+                except SparseUnavailable as e:
+                    if kind != "sparse":
+                        raise
+                    self._sparse_missing = str(e)
+                    obj = None
                 setattr(self, attr, obj)
         self._touch()
         return obj
+
+    @property
+    def sparse_missing(self) -> str | None:
+        """Why the sparse leg degraded to None (#287) — platform wheel
+        gap, not a broken install. None when loaded or never attempted."""
+        return self._sparse_missing
 
     def embedder(self) -> LocalEmbedder:
         return self._get("embedder")
@@ -79,7 +94,7 @@ class ModelPool:
     def reranker(self) -> LocalReranker:
         return self._get("reranker")
 
-    def sparse(self) -> LocalSparseEmbedder:
+    def sparse(self) -> LocalSparseEmbedder | None:
         return self._get("sparse")
 
     @property
@@ -139,6 +154,7 @@ class ModelPool:
             if self._clock() - self._last_use < idle_s:
                 return False
             self._embedder = self._reranker = self._sparse = None
+            self._sparse_missing = None     # retry — a reinstall may heal it
             self._ready.clear()
             with self._warm_lock:
                 self._warm_started = False

@@ -984,7 +984,7 @@ def search(scope_handle: str = "", question: str = "") -> dict:
                                   "epoch": idx.snapshot_epoch()}
     idx.persist_evset(set_id, [e["chunk_id"] for e in ev],
                       _evidence_sets[set_id]["epoch"])   # #231
-    return {
+    resp = {
         "evidence_set": set_id,
         # echo the resolved handle — auto-picked scopes (#263) still need
         # it for the get_evidence/verify_citations chain
@@ -1004,6 +1004,9 @@ def search(scope_handle: str = "", question: str = "") -> dict:
             for e in ev
         ],
     }
+    if _pool.sparse_missing:
+        resp["sparse"] = _pool.sparse_missing      # degraded leg (#287)
+    return resp
 
 
 @tool(mcp)

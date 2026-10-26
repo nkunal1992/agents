@@ -400,6 +400,13 @@ class LocalEmbedder:
         return np.stack([cache[k] for k in keys])
 
 
+class SparseUnavailable(SetupError):
+    """The sparse leg can't run on this platform (#287) — e.g. fastembed's
+    `py_rust_stemmers` dep has no win_arm64 wheel. Distinct from
+    SetupError so callers can degrade to dense+rerank instead of failing
+    the crawl/search."""
+
+
 class LocalSparseEmbedder:
     """Learned term-weight sparse vectors via fastembed (ONNX, no torch).
 
@@ -415,6 +422,13 @@ class LocalSparseEmbedder:
             if is_app_control_block(e):
                 raise SetupError(
                     app_control_remediation("fastembed")) from e
+            if getattr(e, "name", None) != "fastembed":
+                # a missing transitive dep (py_rust_stemmers etc.) means
+                # the platform can't build it — degrade honestly, never
+                # tell the user to reinstall a wheel that doesn't exist
+                raise SparseUnavailable(
+                    f"sparse leg unavailable: {e.name or e} can't load on "
+                    "this platform — dense+rerank legs still used") from e
             raise SetupError("fastembed isn't installed — reinstall the "
                              f"service ({cli} bootstrap reinstalls deps)") from e
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
