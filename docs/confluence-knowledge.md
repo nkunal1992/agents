@@ -286,7 +286,13 @@ The server is designed to stay out of the way on a developer laptop:
   disables. A detached background daemon owns the index, crawl workers,
   and model pool; each IDE window's MCP server is a thin read-only
   proxy. Crawls survive IDE restarts/crashes; a new window attaches to
-  the running job.
+  the running job. When the daemon is unreachable or times out,
+  read-only tools (`search`, `verify_citations`, `feedback_report`) run
+  locally instead of erroring — the response's `daemon` field discloses
+  the fallback; write tools keep refusing with `daemon: starting` plus
+  the concrete `reason` (#283). `search` carries `timings`
+  (`retrieval_ms`, `search_ms`, `proxy_wait_ms`) so slow-query reports
+  show where the time went.
 - **Parallel fetching**: page bodies and child listings run on
   `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6, max 16) while
   the submission window breathes with system pressure (`fetch_cap` in
