@@ -11,7 +11,7 @@ service itself — from the bundled service/ directory when present, or your
 configured pip index — sets up a venv, and registers the MCP server.
 You'll approve each command and reload the IDE once (the IDE reads
 mcp.json at startup; everything after that — credentials, crawls, model
-loads — is picked up live by the daemon, no further reloads).
+loads — is picked up live by the server, no further reloads).
 Optional slash commands: copy prompts/confluence-ask.prompt.md and
 prompts/confluence-refresh.prompt.md into .github/prompts/.
 -->
@@ -31,7 +31,7 @@ first-run installation.
 
 ## Shared runtime
 
-All three knowledge services share ONE venv (`~/.knowledge/venv`), ONE model store (`~/.knowledge/models/`), and ONE background daemon serving each service's own MCP path (`/<service>/mcp` on a random localhost port). Install the services you need into that same venv — **any order works**: `register` mounts this service on the shared daemon (restarting it once if it predates the install — during that restart other knowledge tools may briefly answer "daemon unavailable — retry"; it passes). A service installed in its own venv also works — it just gets its own daemon and models.
+All three knowledge services share ONE venv (`~/.knowledge/venv`), ONE model store (`~/.knowledge/models/`), and ONE index root under `~/.knowledge/`. Each IDE window runs its own `python -m …server` process — every tool executes in-process there (local-first, #285); no shared daemon is spawned by default. Install the services you need into that same venv — **any order works**: each window's server picks up every installed service on the next session. A service installed in its own venv also works — it just gets its own models. (`CONF_KNOWLEDGE_DAEMON=1` or `KNOWLEDGE_DAEMON=1` opts back into the legacy shared-daemon mode.)
 
 ## Bootstrap mode (first run, or when status/connect are missing)
 
@@ -127,7 +127,7 @@ pausing between them; the user sees each command anyway.
 5. **Reload the window once — now, not later.** The IDE reads mcp.json at
    startup, so this is the ONE reload the whole setup ever needs — after
    it the tools are callable, and everything else (credentials, crawls,
-   models) is picked up live by the daemon with no further reloads.
+   models) is picked up live by the server with no further reloads.
 6. **Credentials — in chat, via the tool.** Once the reload lands and
    `status` is callable, drive it conversationally:
    1. **Ask as a numbered pick**: "Which Confluence do you use — reply
@@ -145,7 +145,7 @@ pausing between them; the user sees each command anyway.
       corporate sites). It reads the OS clipboard itself, validates the
       token against the API FIRST, persists to the OS keyring only on
       success, and replies with a masked confirmation (`abcd…wxyz`).
-      The daemon picks the credential up live.
+      The server picks the credential up live.
    5. **On `configured: false`, retry is expected** — each call reads
       the clipboard fresh, so just tell the user in plain language what
       happened and have them copy the token again: "clipboard is empty"
@@ -250,49 +250,40 @@ wheel path for the install step — everything else is identical.
 local service link dropped — a transport state, never a content verdict.
 Recover in order:
 
-1. Retry `status` once — a dropped HTTP session often self-heals on the
+1. Retry `status` once — a dropped MCP session often self-heals on the
    next request.
 2. Still down → run `confluence-knowledge doctor` via `execute` — it
-   checks the daemon's http endpoint, restarts the daemon, and rewrites
-   the registered URL if the port drifted. Then retry `status`.
-3. Still down → **diagnose before dead-ending** — read the
-   daemon's own logs: `~/.knowledge/daemon/*/daemon.log` and
-   `watchdog.log` (`read` them, or `execute` a `tail`/`type`). Relay
-   the last real error to the user — never say just "unreachable".
-   If doctor printed `self-heal failed: <e>` that's the diagnosis —
-   report `<e>` verbatim.
-4. If the daemon won't stay up — especially on Windows, where a
-   closing terminal can take it down — `confluence-knowledge register` then
-   reload once: the default stdio entry means each IDE window
-   spawns its own proxy and the proxy brings the daemon up
-   itself (daemon restarts then stay invisible — no more reloads).
-   (Rare: if the daemon home is somehow on a synced or
-   network-mounted dir, set `KNOWLEDGE_SHARED_HOME=C:\knowledge`
-   and re-run register.)
+   reports the health checks and rewrites the registered entry if it
+   drifted. Then retry `status`.
+3. Still down → **diagnose before dead-ending** — the server writes to
+   the IDE's MCP log/output panel (and `stderr` of the
+   `confluence_knowledge.server` process). Have the user open the MCP
+   panel and relay the last real error — never say just "unreachable".
+   (Only when `CONF_KNOWLEDGE_DAEMON=1`/`KNOWLEDGE_DAEMON=1` is set:
+   read `~/.knowledge/daemon/*/daemon.log` + `watchdog.log` too.)
+4. Still down → `confluence-knowledge register` then reload once: the
+   stdio entry means each IDE window spawns its own server — a reload
+   replaces the dead one outright.
 5. Only then → tell the user exactly: "the local knowledge service
    can't be reached — open the IDE's MCP server panel and restart
-   confluence-knowledge, or reload the window once." The crawl keeps running either
-   way; `status`/`last_crawl` picks it back up.
+   confluence-knowledge, or reload the window once." Any in-flight
+   crawl resumes on the next `status`/`crawl_step` — the queue and
+   per-page checkpoints are durable.
 6. **Never emit the "not documented" refusal here** — the failure is
    connectivity, not evidence. Say what broke and what you're doing.
 
-## Daemon lifecycle (the shared service behind the tools)
+## Runtime (how the tools live)
 
-- Home: `~/.knowledge/daemon/<venv-hash>/` — `http.json` (port + bearer
-  token), `rpc.db` (tool-call queue + lease), `daemon.log`,
-  `watchdog.log`. One daemon per Python env serves every installed
-  knowledge service — this service's path is `/confluence-knowledge/mcp`.
-- `register` writes a **stdio** entry by default: each IDE
-  window spawns a `python -m confluence_knowledge.server` proxy that owns the MCP session —
-  daemon restarts are invisible to the IDE. `register --transport
-  http` writes the shared `http://127.0.0.1:<port>/confluence-knowledge/mcp?token=…`
-  URL instead — one endpoint for all windows, but a daemon restart
-  stales the session until a reload.
-- `X stop` stops the daemon AND its watchdog cleanly (`X` = the CLI name)
-  — the only shutdown that survives; a bare kill just gets respawned.
-- `X doctor` self-heals: restarts the daemon — dead OR running
-  older code than the installed package (`status` flags it) — and
-  refreshes the registered entry.
+- Each IDE window spawns `python -m confluence_knowledge.server` — a
+  **stdio** MCP server that owns its own model sessions, crawl workers
+  and index handles. Everything runs in that process; there is no
+  background daemon by default (#285 local-first).
+- Index files live under `~/.knowledge/` and are shared by every window
+  — one window's crawl is queryable from the others on the next query.
+- `job_lease` (a SQLite row per crawl job) fences workers across
+  windows: a second `start_crawl` on a running scope never duplicates
+  work, and a job whose owning window died is reclaimed automatically
+  by the next `status`/`connect`/`crawl_step`/`wait_for_crawl` call.
 - `register` writes ONE `knowledge` entry by default — its tools are
   every installed service's tools namespaced `<service>__<tool>` (e.g.
   `confluence__search`), and services installed later appear on the
@@ -300,12 +291,19 @@ Recover in order:
   is what the IDE registered, call the tools by their prefixed names —
   the routing and behaviour are identical. `register --per-service`
   writes this service's own entry instead (unprefixed names).
+- Opt-in legacy mode: `CONF_KNOWLEDGE_DAEMON=1` (or
+  `KNOWLEDGE_DAEMON=1` for every service) restores the shared
+  daemon + watchdog under `~/.knowledge/daemon/<venv-hash>/` —
+  `register --transport http` then writes the shared
+  `http://127.0.0.1:<port>/confluence-knowledge/mcp?token=…` URL;
+  `X stop` stops daemon + watchdog cleanly; `X doctor` restarts a
+  dead or outdated daemon.
 - The JetBrains IDE entry carries the token in the URL query
   (`?token=…`) on purpose — the Copilot plugin drops `headers` there
-  (upstream bug). VS Code uses the header.
-- Config the daemon sees is file-based (`profile.json` under
-  `~/.confluence-knowledge/`); shell env vars only reach it if the spawning shell set
-  them — never rely on IDE-side env for config.
+  (upstream bug). VS Code uses the header. (HTTP transport only.)
+- Config the server sees is file-based (`profile.json` under
+  `~/.confluence-knowledge/`); shell env vars only reach it if the
+  spawning shell set them — never rely on IDE-side env for config.
 
 ## Interaction flow
 
@@ -354,7 +352,9 @@ Recover in order:
    client's request timeout) and returns early whenever the phase or
    page count moves. Call it in a loop and relay one concise line per
    change. If it returns a `note` (e.g. "the computer slept"), relay it
-   verbatim and keep polling — the crawl is daemon-side and kept going.
+   verbatim and keep polling — the crawl worker keeps running
+   server-side (or is resumed by this very call if its owning window
+   died — the job queue is durable).
    **Report `pulse`, not internals** — the response carries a ready-made
    human line (`pulse`, e.g. "fetching pages · 410 done · ~6/min · ~2 min
    left") and a `stages` breakdown; relay those verbatim-ish in plain
