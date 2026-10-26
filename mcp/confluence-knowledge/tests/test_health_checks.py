@@ -81,7 +81,11 @@ def test_sparse_platform_excluded_degrades_checks(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
     checks = health.health_checks(home, tmp_path / "work", "sid", "ck")
-    assert _flag(checks, "deps")["ok"] is True
+    # fastembed must not be a required dep on the excluded platform —
+    # other deps may legitimately be absent in this env, so assert the
+    # missing-list contents, not the aggregate ok
+    deps = _flag(checks, "deps")
+    assert "fastembed" not in deps["detail"]
     sp = _flag(checks, "model_sparse")
     assert sp["ok"] is True
     assert sp["detail"] == "platform-degraded"
