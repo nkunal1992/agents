@@ -54,7 +54,6 @@ def test_doc_threshold_constants_match_code():
     checks = {
         "MIN_RERANK_SCORE": _const("MIN_RERANK_SCORE"),
         "TOP_K_EVIDENCE": _const("TOP_K_EVIDENCE"),
-        "RERANK_MAX": _const("RERANK_MAX"),
         "RERANK_MAX_TOKENS": _const("RERANK_MAX_TOKENS"),
         "MAX_SEARCHABLE_CHUNKS": _const("MAX_SEARCHABLE_CHUNKS"),
     }

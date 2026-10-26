@@ -1041,6 +1041,11 @@ class Index:
 
     def fts_search(self, query: str, limit: int = 30,
                    active: set[str] | None = None) -> list[tuple[str, float]]:
+        # LIMIT applies before the Python-side active filter — without an
+        # over-fetch a subtree scope can lose every in-scope hit to
+        # higher-ranked siblings (#281); bounded so full-scope calls are
+        # unchanged.
+        fetch = limit if active is None else min(limit * 10, 500)
         with self._rlock:
             try:
                 rows = self._read().execute(
@@ -1048,7 +1053,7 @@ class Index:
                     "ORDER BY rank LIMIT ?",
                     (" OR ".join('"' + w.replace('"', '""') + '"'
                                  for w in query.split()[:16] if w.strip()) or '""',
-                     limit)).fetchall()
+                     fetch)).fetchall()
             except sqlite3.OperationalError:
                 return []
         if active is None:

@@ -57,6 +57,30 @@ def test_evidence_carries_citation_fields(tmp_path):
                for e in ev)
 
 
+def test_rerank_max_env_bound():
+    """#281: the rerank window is the dominant search cost — bounded by
+    env, clamped to [TOP_K_EVIDENCE, 40], default 12."""
+    import os
+
+    from confluence_knowledge.retrieval import _rerank_max
+    old = os.environ.pop("KNOWLEDGE_RERANK_MAX", None)
+    try:
+        assert _rerank_max() == 12
+        os.environ["KNOWLEDGE_RERANK_MAX"] = "25"
+        assert _rerank_max() == 25
+        os.environ["KNOWLEDGE_RERANK_MAX"] = "garbage"
+        assert _rerank_max() == 12
+        os.environ["KNOWLEDGE_RERANK_MAX"] = "2"
+        assert _rerank_max() == TOP_K_EVIDENCE   # never below evidence cap
+        os.environ["KNOWLEDGE_RERANK_MAX"] = "999"
+        assert _rerank_max() == 40               # latency guard rail
+    finally:
+        if old is None:
+            os.environ.pop("KNOWLEDGE_RERANK_MAX", None)
+        else:
+            os.environ["KNOWLEDGE_RERANK_MAX"] = old
+
+
 def test_citation_check(tmp_path):
     ev = retrieve(_index(tmp_path), "vpn approval", FakeEmbedder())
     cid = ev[0]["chunk_id"]

@@ -422,6 +422,8 @@ def connect(root: str) -> dict:
     idx = _index_for(scope_key, for_write=True)
     idx.meta_set("root_path", str(path))   # daemon orphan resume (#189)
     st = idx.stats()
+    if st["pages"] > 0:
+        idx._warm_search_cache()    # first search pays ~0 build (#281)
     covering = None
     if st["pages"] == 0:
         # #240: a folder inside a fully-indexed parent root answers
@@ -893,8 +895,10 @@ def search(scope_handle: str = "", question: str = "") -> dict:
                 "note": "this index was built with an older embedding model "
                         "— run start_crawl once to rebuild it, then search again"}
     emb = _embedder()
+    t_ret = time.monotonic()
     ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse(),
                   allow_chunks=_subtree_allow(s, idx))
+    retrieval_ms = round((time.monotonic() - t_ret) * 1000)
     corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
     # unique immutable handle — never derived from cache size; bound to the
     # snapshot epoch so a refresh can't silently re-point a citation
@@ -914,6 +918,7 @@ def search(scope_handle: str = "", question: str = "") -> dict:
         "scope_handle": scope_handle,
         "coverage": _coverage(idx),
         "as_of": st["as_of"],
+        "retrieval_ms": retrieval_ms,
         "user_corrections": corrections,
         "evidence": [
             {"chunk_id": e["chunk_id"], "page_id": e["page_id"],

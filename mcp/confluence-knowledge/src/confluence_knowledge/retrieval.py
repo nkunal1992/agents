@@ -104,7 +104,21 @@ EMBED_ONNX_DATA = active_embed_spec()["onnx_data"]
 
 TOP_K_RETRIEVE = 30
 TOP_K_EVIDENCE = 8
-RERANK_MAX = 25          # bounds cross-encoder latency on CPU
+
+
+def _rerank_max() -> int:
+    """Pairs fed to the cross-encoder per query — ~95% of search latency
+    (measured ~950ms for 25 pairs on CPU, #281). 12 leaves margin above
+    TOP_K_EVIDENCE for the noise-floor/abstention pass; KNOWLEDGE_RERANK_MAX
+    restores the wider window where quality beats latency."""
+    raw = os.environ.get("KNOWLEDGE_RERANK_MAX", "12").strip()
+    try:
+        v = int(raw)
+    except ValueError:
+        v = 12
+    return max(TOP_K_EVIDENCE, min(40, v))
+
+
 MIN_RERANK_SCORE = 0.1   # noise floor — mxbai-xsmall scores junk 0.02-0.06,
                          # real answers ~0.9+; 0.1 sits an order of magnitude
                          # between the bands (golden-set abstention regressed
@@ -755,7 +769,9 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
         top = top[np.argsort(-scores[top])]
         dense_rank = [allowed[i] for i in top]
 
-    # keyword leg — FTS filtered by the cached active-id set
+    # keyword leg — FTS filtered by the cached active-id set; subtree
+    # scopes over-fetch inside fts_search so in-scope hits aren't starved
+    # by higher-ranked out-of-scope siblings (#281)
     fts_active = cache.ids_set if allow_chunks is None else set(allowed)
     fts_rank = [cid for cid, _ in
                 index.fts_search(query, active=fts_active)
@@ -792,7 +808,7 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     candidates = [by_id[c] for c in fused if c in by_id]
 
     if reranker is not None and candidates:
-        scored = candidates[:RERANK_MAX]
+        scored = candidates[:_rerank_max()]
         scores = reranker.score(query, [c["text"] for c in scored])
         order = np.argsort(-scores)[:TOP_K_EVIDENCE]
         evidence = []
