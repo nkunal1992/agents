@@ -418,3 +418,88 @@ def test_descendent_alias_needs_same_principal(wired, monkeypatch):
     assert "covered_by" not in c and c["cached"] is False
     res = server.search(c["scope_handle"], "text")
     assert res["evidence"] == [] and res["coverage"] == "empty"
+
+
+# ---- #283: daemon-unavailable fallback for read tools ----
+
+
+def _daemon_dead(monkeypatch, reason="daemon spawn failed: boom"):
+    """Daemon mode on, but the daemon never answers."""
+    from confluence_knowledge.rpc import DaemonUnavailable
+    monkeypatch.setenv("CONF_KNOWLEDGE_DAEMON", "1")
+    monkeypatch.setattr(server, "_daemon_on", lambda: True)
+    monkeypatch.setattr(
+        server, "ensure_daemon",
+        lambda rpc: (_ for _ in ()).throw(DaemonUnavailable(reason)))
+    monkeypatch.setattr(server, "_rpc", lambda: None)
+
+
+def test_daemon_call_returns_none_and_stashes_reason(monkeypatch):
+    """The reason rides args so callers can disclose it (#253 diagnosis
+    kept) while callers fall back to local execution (#283)."""
+    _daemon_dead(monkeypatch, "daemon response timed out")
+    args = {"q": "x"}
+    assert server._daemon_call("search", args, 5) is None
+    assert args["_daemon_unavailable"] == "daemon response timed out"
+
+
+def test_search_falls_back_locally_when_daemon_dead(wired, monkeypatch):
+    """#283: a dead daemon must not turn search into an _error retry loop —
+    the local read path answers instead and says so."""
+    c = _tree_crawl(wired, monkeypatch)
+    _daemon_dead(monkeypatch)
+    res = server.search(c["scope_handle"], "text")
+    assert res["evidence"] and "_error" not in res
+    assert "daemon" in res and "answered locally" in res["daemon"]
+    assert "spawn failed" in res["daemon"]
+    assert res["timings"]["retrieval_ms"] >= 0
+
+
+def test_search_falls_back_on_daemon_timeout(wired, monkeypatch):
+    """Alive-but-slow daemon: rpc.wait times out → same local fallback."""
+    from confluence_knowledge.rpc import DaemonUnavailable
+    c = _tree_crawl(wired, monkeypatch)
+    monkeypatch.setenv("CONF_KNOWLEDGE_DAEMON", "1")
+    monkeypatch.setattr(server, "_daemon_on", lambda: True)
+
+    class _SlowRpc:
+        def submit(self, *a, **k):
+            return "rid1"
+        def wait(self, rid, timeout_s, on_tick=None):
+            raise DaemonUnavailable("daemon response timed out")
+    monkeypatch.setattr(server, "_rpc", lambda: _SlowRpc())
+    monkeypatch.setattr(server, "ensure_daemon", lambda rpc: None)
+    res = server.search(c["scope_handle"], "text")
+    assert res["evidence"] and "_error" not in res
+    assert "timed out" in res["daemon"]
+
+
+def test_verify_citations_falls_back_locally(wired, monkeypatch):
+    """Evidence set lives in the proxy after a local-fallback search —
+    verify must check it locally rather than erroring."""
+    c = _tree_crawl(wired, monkeypatch)
+    _daemon_dead(monkeypatch)
+    res = server.search(c["scope_handle"], "text")
+    q = res["evidence"][0]
+    ok = server.verify_citations(c["scope_handle"], res["evidence_set"], [
+        {"claim": "x", "chunk_id": q["chunk_id"],
+         "quote": q["text"][:12]}])
+    assert ok["ok"] is True and "daemon" in ok
+
+
+def test_start_crawl_still_refuses_locally_with_reason(wired, monkeypatch):
+    """Writes never bypass the daemon (#189) — the guard still fires,
+    now carrying the concrete cause."""
+    c = _tree_crawl(wired, monkeypatch)
+    _daemon_dead(monkeypatch, "daemon response timed out")
+    out = server.start_crawl(c["scope_handle"])
+    assert out["_error"] and out["daemon"] == "starting"
+    assert "timed out" in out["reason"]
+
+
+def test_search_reports_timings(wired, monkeypatch):
+    """Self-diagnosing latency: every search carries phase timings."""
+    c = _tree_crawl(wired, monkeypatch)
+    res = server.search(c["scope_handle"], "text")
+    assert res["timings"]["retrieval_ms"] >= 0
+    assert res["timings"]["search_ms"] >= res["timings"]["retrieval_ms"]

@@ -459,7 +459,8 @@ def register_token(site: str, env: str = "cloud", email: str = "") -> dict:
 @tool(mcp)
 def connect(root: str) -> dict:
     """Validate credentials + root readability; bind a scope handle."""
-    out = _daemon_call("connect", {"root": root}, 120)
+    dargs = {"root": root}
+    out = _daemon_call("connect", dargs, 120)
     if out is not None:
         h = out.get("scope_handle")
         if h and h.startswith("scope:"):
@@ -470,11 +471,7 @@ def connect(root: str) -> dict:
                               "client": None, "profile": None}
         return out
     if _daemon_on():
-        # writes may never bypass the daemon (#189 safeguard 2) — a
-        # transient spawn/claim gap is a retryable error, never a local
-        # crawl on the read-only index
-        return {"_error": "daemon unavailable — retry in a few seconds",
-                "daemon": "starting"}
+        return _daemon_required(dargs)
 
 
     profile = SiteProfile.load(_home())
@@ -654,9 +651,26 @@ def _daemon_call(name: str, args: dict, timeout: float) -> dict | None:
                         on_tick=lambda: heartbeat(
                             0, message=f"daemon {name}"))
     except DaemonUnavailable as e:
-        return {"_error": f"daemon unavailable: {e}"}
+        # dead or slow daemon: callers fall back to the local path —
+        # {_error} here turned every read into a retry loop during
+        # daemon churn (#283). The reason rides on args so the caller
+        # (or the _daemon_on() write-guard) can still surface it (#253);
+        # the daemon never sees the key — submit serializes args first.
+        args["_daemon_unavailable"] = str(e)
+        return None
     except RuntimeError as e:
         return {"_error": str(e)}
+
+
+def _daemon_required(dargs: dict) -> dict:
+    """Guarded refusal when a WRITE can't reach the daemon — a proxy must
+    never bypass it (#189 safeguard 2); carries the concrete cause (#253).
+    Reads fall through to local execution instead of landing here."""
+    err = {"_error": "daemon unavailable — retry in a few seconds",
+           "daemon": "starting"}
+    if dargs.get("_daemon_unavailable"):
+        err["reason"] = dargs["_daemon_unavailable"]
+    return err
 
 
 def _resume_job(scope_key: str, job_id: str) -> None:
@@ -842,16 +856,12 @@ def start_crawl(scope_handle: str, refresh: bool = False) -> dict:
     """Begin crawling the root page and all descendants in a background
     thread. The crawl runs to completion without further input — call
     crawl_step only to read progress."""
-    out = _daemon_call("start_crawl", {"scope_handle": scope_handle,
-                                       "refresh": refresh}, 60)
+    dargs = {"scope_handle": scope_handle, "refresh": refresh}
+    out = _daemon_call("start_crawl", dargs, 60)
     if out is not None:
         return out
     if _daemon_on():
-        # writes may never bypass the daemon (#189 safeguard 2) — a
-        # transient spawn/claim gap is a retryable error, never a local
-        # crawl on the read-only index
-        return {"_error": "daemon unavailable — retry in a few seconds",
-                "daemon": "starting"}
+        return _daemon_required(dargs)
 
     s = _scope(scope_handle)
     if s.get("reads_from"):
@@ -965,16 +975,12 @@ def cancel_crawl(scope_handle: str, job_id: str) -> dict:
     """Stop a running crawl within seconds and mark the job cancelled — it
     never auto-resumes. The previously published snapshot is kept intact;
     start_crawl re-runs (unchanged pages are reused)."""
-    out = _daemon_call("cancel_crawl", {"scope_handle": scope_handle,
-                                        "job_id": job_id}, 30)
+    dargs = {"scope_handle": scope_handle, "job_id": job_id}
+    out = _daemon_call("cancel_crawl", dargs, 30)
     if out is not None:
         return out
     if _daemon_on():
-        # writes may never bypass the daemon (#189 safeguard 2) — a
-        # transient spawn/claim gap is a retryable error, never a local
-        # crawl on the read-only index
-        return {"_error": "daemon unavailable — retry in a few seconds",
-                "daemon": "starting"}
+        return _daemon_required(dargs)
 
 
     s = _scope(scope_handle)
@@ -1043,10 +1049,15 @@ def search(scope_handle: str = "", question: str = "") -> dict:
     scope_handle, err = _pick_scope(scope_handle)
     if err is not None:
         return err
-    out = _daemon_call("search", {"scope_handle": scope_handle,
-                                  "question": question}, 90)
+    dargs = {"scope_handle": scope_handle, "question": question}
+    t0 = time.monotonic()
+    out = _daemon_call("search", dargs, 90)
     if out is not None:
+        if isinstance(out, dict):
+            out.setdefault("timings", {})["proxy_wait_ms"] = \
+                int((time.monotonic() - t0) * 1000)
         return out
+    daemon_note = dargs.get("_daemon_unavailable")
 
     s = _scope(scope_handle)
     idx = _read_index(s)
@@ -1066,8 +1077,10 @@ def search(scope_handle: str = "", question: str = "") -> dict:
                 "note": "this index was built with an older embedding model "
                         "— run start_crawl once to rebuild it, then search again"}
     emb = _embedder()
+    t_ret = time.monotonic()
     ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse(),
                   allow_chunks=_subtree_allow(s, idx))
+    retrieval_ms = int((time.monotonic() - t_ret) * 1000)
     # saved corrections matching this question ride along — the agent
     # must disclose them, so they're part of the response, not a separate call
     corrections = _feedback_for(s["key"]).match(
@@ -1083,7 +1096,7 @@ def search(scope_handle: str = "", question: str = "") -> dict:
                                   "epoch": idx.snapshot_epoch()}
     idx.persist_evset(set_id, [e["chunk_id"] for e in ev],
                       _evidence_sets[set_id]["epoch"])
-    return {
+    resp = {
         "evidence_set": set_id,
         # echo the resolved handle — auto-picked scopes (#263) still need
         # it for the get_evidence/verify_citations chain
@@ -1103,6 +1116,11 @@ def search(scope_handle: str = "", question: str = "") -> dict:
             for e in ev
         ],
     }
+    resp["timings"] = {"retrieval_ms": retrieval_ms,
+                       "search_ms": int((time.monotonic() - t0) * 1000)}
+    if daemon_note:
+        resp["daemon"] = f"{daemon_note} — answered locally"
+    return resp
 
 
 @tool(mcp)
@@ -1147,17 +1165,13 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
                     note: str = "") -> dict:
     """Store a saved correction — disclosed alongside the docs on
     similar future questions (never overrides them)."""
-    out = _daemon_call("submit_feedback",
-                       {"scope_handle": scope_handle, "question": question,
-                        "correction": correction, "note": note}, 30)
+    dargs = {"scope_handle": scope_handle, "question": question,
+             "correction": correction, "note": note}
+    out = _daemon_call("submit_feedback", dargs, 30)
     if out is not None:
         return out
     if _daemon_on():
-        # writes may never bypass the daemon (#189 safeguard 2) — a
-        # transient spawn/claim gap is a retryable error, never a local
-        # crawl on the read-only index
-        return {"_error": "daemon unavailable — retry in a few seconds",
-                "daemon": "starting"}
+        return _daemon_required(dargs)
 
 
     s = _scope(scope_handle)
@@ -1173,12 +1187,15 @@ def submit_feedback(scope_handle: str, question: str, correction: str,
 def feedback_report(scope_handle: str) -> dict:
     """Aggregated corrections — the agent infers which doc keeps
     getting corrected and suggests it to the user."""
-    out = _daemon_call("feedback_report", {"scope_handle": scope_handle}, 30)
+    dargs = {"scope_handle": scope_handle}
+    out = _daemon_call("feedback_report", dargs, 30)
     if out is not None:
         return out
 
-    s = _scope(scope_handle)
-    return _feedback_for(s["key"]).report()
+    rep = _feedback_for(_scope(scope_handle)["key"]).report()
+    if dargs.get("_daemon_unavailable"):
+        rep["daemon"] = f"{dargs['_daemon_unavailable']} — answered locally"
+    return rep
 
 
 @tool(mcp)
@@ -1187,12 +1204,13 @@ def verify_citations(scope_handle: str, evidence_set: str,
     # evidence sets live in whichever process ran `search` — under the
     # daemon that's the daemon, so this must route there (the proxy's
     # _evidence_sets is empty → "unknown evidence set" on every call)
-    out = _daemon_call("verify_citations",
-                       {"scope_handle": scope_handle,
-                        "evidence_set": evidence_set,
-                        "mappings": mappings}, 60)
+    dargs = {"scope_handle": scope_handle,
+             "evidence_set": evidence_set,
+             "mappings": mappings}
+    out = _daemon_call("verify_citations", dargs, 60)
     if out is not None:
         return out
+    daemon_note = dargs.get("_daemon_unavailable")
     s = _scope(scope_handle)  # binds or SetupError — never KeyError below
     with _state_lock:
         rec = _evidence_sets.get(evidence_set)
@@ -1211,7 +1229,10 @@ def verify_citations(scope_handle: str, evidence_set: str,
         raise SecurityException(
             "evidence set predates the latest published snapshot — "
             "run search again and cite the fresh evidence_set")
-    return check_citations(rec["ev"], mappings)
+    res = check_citations(rec["ev"], mappings)
+    if daemon_note:
+        res["daemon"] = f"{daemon_note} — answered locally"
+    return res
 
 
 def main() -> None:
