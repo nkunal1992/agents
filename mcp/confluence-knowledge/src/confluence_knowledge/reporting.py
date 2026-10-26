@@ -59,6 +59,31 @@ def stages(progress: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _classify_warn(warn: str) -> str:
+    """Group skip disclosures (traversal warnings + per-page content
+    warnings) — the 'why is this file missing' answer in one map (#281)."""
+    low = warn.lower()
+    for key, label in (
+        ("noise/cache dir", "skipped — noise/cache dir"),
+        ("secret", "skipped — secret-looking"),
+        ("symlink", "skipped — symlink"),
+        ("cloud placeholder", "skipped — cloud placeholder"),
+        ("not a regular file", "skipped — not a regular file"),
+        ("unreadable", "unreadable"),
+        ("unsupported", "content skipped — unsupported type"),
+        ("binary file", "content skipped — binary file"),
+        ("too large", "content skipped — oversized"),
+        ("empty file", "content skipped — empty file"),
+        ("parse error", "content skipped — parse error"),
+        ("corrupt", "content skipped — corrupt file"),
+        ("no extractable text", "content skipped — no text (scanned?)"),
+        ("chunk cap", "content truncated — chunk cap"),
+    ):
+        if key in low:
+            return label
+    return "other"
+
+
 def _classify_error(err: str) -> str:
     """Group errors so 'Access Denied' vs 'server instability' vs
     'local unreadable' are distinguishable."""
@@ -108,18 +133,40 @@ def audit(index: Index, job_id: str) -> dict[str, Any]:
     groups: dict[str, list[str]] = {}
     for e in job["errors"]:
         groups.setdefault(_classify_error(e), []).append(e)
+    # coverage accounting (#281): files that were reached but not indexed —
+    # traversal skips (job warnings) + content-level skips (page warnings),
+    # plus the count of indexed-but-empty pages. This is the answer to
+    # "it indexed only N — where did the rest go?"
+    import json as _json
+    skips: dict[str, list[str]] = {}
+    warns_raw = index.meta_get(f"warns:{job_id}")
+    if warns_raw:
+        for w in _json.loads(warns_raw):
+            skips.setdefault(_classify_warn(w), []).append(w)
+    for (wjson,) in index.db.execute(
+            "SELECT warnings FROM pages WHERE active=1").fetchall():
+        for w in _json.loads(wjson or "[]"):
+            skips.setdefault(_classify_warn(w), []).append(w)
+    empty_pages = index.db.execute(
+        "SELECT COUNT(*) FROM pages p WHERE p.active=1 AND NOT EXISTS "
+        "(SELECT 1 FROM chunks ch WHERE ch.page_id=p.page_id "
+        "AND ch.active=1)").fetchone()[0]
+    pages_total = len(index.active_pages())
     pub = index.meta_get(f"publish:{job_id}")
     size = index_size_mb(index)
     out: dict[str, Any] = {
         "job_id": job_id,
         "state": job["state"],
-        "pages_indexed": len(index.active_pages()),
+        "pages_indexed": pages_total,
+        "pages_with_content": pages_total - empty_pages,
+        "pages_empty": empty_pages,
         "errors_total": len(job["errors"]),
         "errors_by_cause": {k: len(v) for k, v in sorted(groups.items())},
         "error_examples": {k: v[:3] for k, v in sorted(groups.items())},
+        "skipped_by_cause": {k: len(v) for k, v in sorted(skips.items())},
+        "skip_examples": {k: v[:3] for k, v in sorted(skips.items())},
     }
     if pub:
-        import json as _json
         out["publish"] = _json.loads(pub)   # staged/deleted/kept
     if size is not None:
         out["index_size_mb"] = size

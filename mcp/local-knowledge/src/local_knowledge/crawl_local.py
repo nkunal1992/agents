@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 import uuid
@@ -32,11 +33,24 @@ from confluence_knowledge.settings import SetupError
 _CLOUD_ONLY_ATTRS = 0x1000 | 0x400000 | 0x40000
 
 SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv",
-             "venv", ".idea", ".vscode", "target", "dist", "build", ".tox"}
+             "venv", ".idea", ".vscode", "target", "dist", "build", ".tox",
+             ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 MAX_FILE_BYTES = 25 * 1024 * 1024  # 25MB — bigger files get a warning, not a crash
 FLUSH_MAX_CHUNKS = 128   # chunks per embed flush — bounds each call
 BATTERY_DUTY = 0.5       # battery saver duty ratio, ~proportional steps
-MAX_FILES = 20_000                  # guard against "pointed at $HOME" accidents
+
+
+def _max_files() -> int:
+    """Cap on files per crawl — a pointed-at-$HOME accident guard.
+    A garbage env value must never break the module import."""
+    try:
+        return max(100, int(os.environ.get(
+            "LOCAL_KNOWLEDGE_MAX_FILES", "20000") or 20000))
+    except ValueError:
+        return 20_000
+
+
+MAX_FILES = _max_files()
 
 
 def resolve_root(path: str) -> Path:
@@ -119,7 +133,11 @@ class LocalCrawler:
                              "(files-on-demand) — skipped")
                 continue
             if e.is_dir():
-                if e.name in SKIP_DIRS or e.name.startswith(".git"):
+                # exact name match — a '.git*' prefix test used to drop
+                # '.github'/'.gitlab' trees silently (#281); every skip is
+                # disclosed, per the documented exclusion contract
+                if e.name in SKIP_DIRS:
+                    warns.append(f"{self._rel(e)}: skipped — noise/cache dir")
                     continue
                 out.append(f"dir:{e}")
             elif e.is_file():
@@ -127,6 +145,10 @@ class LocalCrawler:
                     warns.append(f"{self._rel(e)}: looks like a secret — skipped")
                     continue
                 out.append(f"file:{e}")
+            else:
+                # fifo/socket/dangling symlink — is_dir/is_file both False;
+                # silently dropped before (#281)
+                warns.append(f"{self._rel(e)}: not a regular file — skipped")
         return out, warns
 
     def _page(self, f: Path) -> tuple[dict, list]:
@@ -436,9 +458,13 @@ class LocalCrawler:
                     break
                 if processed and (time.monotonic() - last_ckpt >= 5.0
                                   or processed - last_ckpt_n >= 50):
+                    # pending must ride the checkpoint too — processed-but-
+                    # unflushed files used to vanish from the queue on a
+                    # crash; resume then tombstoned their pages (#281)
                     self._checkpoint(
                         job_id, list(queue) + sorted(inflight.values())
-                        + sorted(flush_entries),
+                        + sorted(flush_entries)
+                        + [t[5] for t in pending],
                         errors, seen, levels, warns, keep_failed)
                     _save_stats()
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
@@ -553,7 +579,8 @@ class LocalCrawler:
         # checkpoint may be several items behind the last processed one
         self._checkpoint(job_id,
                          list(queue) + sorted(inflight.values())
-                         + sorted(flush_entries),
+                         + sorted(flush_entries)
+                         + [t[5] for t in pending],
                          errors, seen, levels, warns, keep_failed)
         # fence: an abandoned/superseded job must never publish or resurrect
         current = self.index.job(job_id)

@@ -313,6 +313,28 @@ def test_audit_groups_errors_by_cause(tmp_path):
     assert "index_size_mb" in a
 
 
+def test_audit_reports_coverage_gaps(tmp_path):
+    """#281: the audit must say WHERE files went — traversal skips (job
+    warnings), content skips (page warnings) and zero-chunk pages."""
+    from confluence_knowledge.reporting import audit
+    idx = Index(tmp_path / "a.db")
+    idx.create_job("j", "1")
+    p = {"page_id": "1", "parent_id": None, "title": "Binary",
+         "url": "/p/1", "level": 0, "version": "1", "content_hash": "h",
+         "warnings": ["binary file '.png' — skipped"]}
+    idx.upsert_page(p, [], None)
+    idx.publish({"1"})
+    idx.meta_set("warns:j",
+                 '["build: skipped — noise/cache dir"]')
+    idx.save_job("j", "done", [], [])
+    a = audit(idx, "j")
+    assert a["pages_indexed"] == 1 and a["pages_empty"] == 1
+    assert a["pages_with_content"] == 0
+    assert a["skipped_by_cause"]["skipped — noise/cache dir"] == 1
+    assert a["skipped_by_cause"]["content skipped — binary file"] == 1
+    assert a["skip_examples"]["skipped — noise/cache dir"]
+
+
 def test_progress_for_exposes_pulse_and_stages(tmp_path, monkeypatch):
     """Running jobs carry tier-1/2 fields; terminal jobs carry audit."""
     monkeypatch.setattr(server, "_progress", {})

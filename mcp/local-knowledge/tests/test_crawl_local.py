@@ -46,12 +46,14 @@ def test_crawl_folder(tree, idx):
     assert "SECRET=x" not in " ".join(p["title"] for p in pages.values())
     assert ".env" not in titles and "id_rsa" not in titles
     assert "config" not in titles
-    # excluded + unsupported disclosed — secrets land in job warnings (not
-    # coverage-degrading errors), parse issues in that page's warnings
+    # excluded + non-indexable disclosed — secrets + the .git dir skip land
+    # in job warnings (not coverage-degrading errors), content issues in
+    # that page's warnings (#281)
     assert "secret" in " ".join(r["warnings"])
+    assert "noise/cache dir" in " ".join(r["warnings"])
     warn_pages = [w for p in idx.db.execute(
         "SELECT warnings FROM pages").fetchall() for w in json.loads(p[0])]
-    assert any("unsupported" in w for w in warn_pages)
+    assert any("binary" in w for w in warn_pages)
 
 
 def test_crawl_single_file(tmp_path, idx):
@@ -96,6 +98,110 @@ def test_dir_cycle_terminates(tmp_path, idx):
     c = LocalCrawler(idx, root)
     r = run_all(c, c.start())
     assert r["state"] == "done"  # terminates — no infinite queue
+
+
+def test_dotgithub_indexes_and_skip_dir_disclosed(tmp_path, idx):
+    """#281: a '.git*' prefix check silently dropped '.github' trees; noise
+    dirs are still skipped but now every skip is disclosed in warnings."""
+    root = tmp_path / "docs"
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / "build").mkdir()
+    (root / ".github" / "workflows" / "ci.txt").write_text("ci steps here")
+    (root / "build" / "artifact.md").write_text("build notes")
+    c = LocalCrawler(idx, root)
+    r = run_all(c, c.start())
+    titles = {p["title"] for p in idx.active_pages().values()}
+    assert "ci.txt" in titles              # .github indexes now
+    assert "artifact.md" not in titles     # build still skipped…
+    w = " ".join(r["warnings"])
+    assert "build" in w and "noise/cache dir" in w   # …but disclosed
+
+
+def test_non_regular_file_disclosed(tmp_path, idx):
+    """#281: fifo/socket/dangling-symlink entries silently vanished."""
+    import os
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "a.txt").write_text("x")
+    try:
+        os.mkfifo(root / "pipe")
+    except (AttributeError, OSError):
+        pytest.skip("no mkfifo on this platform")
+    c = LocalCrawler(idx, root)
+    r = run_all(c, c.start())
+    assert "not a regular file" in " ".join(r["warnings"])
+
+
+def test_text_like_files_index_content(tmp_path, idx):
+    """#281: logs/configs/source/extensionless docs were 'indexed' with
+    zero chunks — unsearchable. Auto-detection makes them searchable."""
+    root = tmp_path / "docs"
+    (root / "data").mkdir(parents=True)
+    (root / "data" / "app.log").write_text("gateway restart procedure")
+    (root / "data" / "conf.yaml").write_text("gateway: restart-first")
+    (root / "README").write_text("the onboarding runbook lives here")
+    c = LocalCrawler(idx, root)
+    r = run_all(c, c.start())
+    assert r["state"] == "done"
+    pages = idx.active_pages()
+    assert {"app.log", "conf.yaml", "README"} <= \
+        {p["title"] for p in pages.values()}
+    # every page must carry real chunks — no searchable-empty pages
+    for pid, p in pages.items():
+        n = idx.db.execute(
+            "SELECT COUNT(*) FROM chunks WHERE page_id=? AND active=1",
+            (pid,)).fetchone()[0]
+        assert n > 0, f"{p['title']} indexed with zero chunks"
+
+
+def test_checkpoint_retains_pending_files(tmp_path, idx, monkeypatch):
+    """#281: files extracted but still buffered in `pending` were missing
+    from the durable queue — a crash before their flush dropped them, and
+    the resumed crawl tombstoned their pages. 60 one-chunk files keep
+    pending non-empty when the 50-item checkpoint fires."""
+    import numpy as np
+    root = tmp_path / "docs"
+    root.mkdir()
+    for i in range(60):
+        (root / f"f{i:02}.txt").write_text(f"unique content {i} " * 20)
+
+    captured: list[list[str]] = []
+    orig = LocalCrawler._checkpoint
+
+    def spy(self, job_id, queue, *a, **k):
+        captured.append(list(queue))
+        return orig(self, job_id, queue, *a, **k)
+
+    monkeypatch.setattr(LocalCrawler, "_checkpoint", spy)
+
+    class Emb:
+        def embed(self, texts, query: bool = False):
+            return np.ones((len(texts), 4), dtype=np.float32)
+
+    c = LocalCrawler(idx, root, embedder=Emb())
+    r = run_all(c, c.start())
+    assert r["state"] == "done"
+    assert captured, "expected at least one throttled checkpoint"
+    # the in-loop checkpoint (first capture) must carry the pending files —
+    # pre-fix it held only the unprocessed tail (~10 entries)
+    first = [e for e in captured[0] if e.startswith("file:")]
+    assert len(first) >= 45, \
+        f"checkpoint dropped pending files: only {len(first)} file entries"
+    assert len(idx.active_pages()) == 60
+
+
+def test_max_files_env_override(monkeypatch):
+    """#281: the 20k file cap is env-tunable — garbage must not break the
+    module import, and the floor clamps at 100."""
+    import importlib
+
+    import local_knowledge.crawl_local as cl
+    for raw, want in (("500", 500), ("5", 100), ("bogus", 20_000)):
+        monkeypatch.setenv("LOCAL_KNOWLEDGE_MAX_FILES", raw)
+        importlib.reload(cl)
+        assert cl.MAX_FILES == want, f"{raw} → {cl.MAX_FILES}"
+    monkeypatch.delenv("LOCAL_KNOWLEDGE_MAX_FILES", raising=False)
+    importlib.reload(cl)
 
 
 def test_resolve_root(tmp_path):
