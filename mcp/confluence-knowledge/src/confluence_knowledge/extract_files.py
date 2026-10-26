@@ -19,7 +19,12 @@ MAX_FILE_WORDS = 200_000   # ~1MB of text — beyond that, index metadata only
 MAX_CHUNKS_PER_DOC = 2048  # one doc can't stall a crawl (#244)
 
 SUPPORTED = {".txt", ".md", ".markdown", ".adoc", ".asciidoc", ".asc",
-             ".csv", ".html", ".htm", ".docx", ".pptx", ".xlsx", ".pdf"}
+             ".csv", ".tsv", ".html", ".htm", ".docx", ".pptx", ".xlsx", ".pdf"}
+# formats parsed as decoded text — the byte→word size guard applies to
+# them directly; office/zip formats are bounded post-extraction by
+# MAX_CHUNKS_PER_DOC instead (compressed bytes undercount real text, #281)
+TEXT_FORMATS = {".txt", ".md", ".markdown", ".adoc", ".asciidoc", ".asc",
+                ".csv", ".tsv", ".html", ".htm"}
 
 # Names that look like credentials/secrets — excluded by default and
 # disclosed in coverage warnings.
@@ -33,7 +38,8 @@ def is_secret_name(filename: str) -> bool:
     from pathlib import Path as P
     name = P(filename).name.lower()
     return (name in SECRET_NAMES
-            or name.startswith(".env.") or name.endswith(".env")
+            or name.startswith((".env.", "credentials"))
+            or name.endswith(".env")
             or P(name).suffix in SECRET_SUFFIXES)
 
 
@@ -50,6 +56,43 @@ def _decode_text(data: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return data.decode("utf-8", errors="replace")
+
+
+def _decode_auto(data: bytes) -> str | None:
+    """Decode `data` as text for extension-unknown files; None = binary.
+    Sniffs RAW bytes first — a decoded stream can't distinguish binary
+    from UTF-16 text (any even-length byte pair yields a printable
+    codepoint). NULs scattered off the even/odd lane = binary; NULs on
+    one lane = probable UTF-16, decoded with the matching endianness."""
+    probe = data[:8192]
+    if not probe:
+        return ""
+    if probe.count(0):
+        evens, odds = probe[0::2], probe[1::2]
+        if not (evens.count(0) > 3 * odds.count(0)
+                or odds.count(0) > 3 * evens.count(0)):
+            return None          # NULs in no UTF-16 pattern → binary
+        enc = ("utf-16-le" if odds.count(0) > evens.count(0)
+               else "utf-16-be")
+        text = data.decode(enc, errors="replace").lstrip("\ufeff")
+    else:
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1")
+    sample = text[:8192]
+    bad = sum(1 for c in sample
+              if c == "\ufffd" or ord(c) < 9 or 13 < ord(c) < 32
+              or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff)
+    if bad / max(len(sample), 1) > 0.05:
+        return None              # control-char mess → binary
+    return text
+
+
+def _too_big(text: str) -> bool:
+    """Word-count guard on the decoded text — same threshold as the old
+    len(data)//6 estimate, applied to the readable content."""
+    return len(text) // 6 > MAX_FILE_WORDS * 6
 
 
 def _text_chunks(text: str, heading: str, kind: str = "text",
@@ -259,9 +302,11 @@ def _md_chunks(data: bytes, measure=_word_count,
 
 
 def _csv_chunks(data: bytes, measure=_word_count,
-                budget: int = MAX_WORDS) -> list[Chunk]:
+                budget: int = MAX_WORDS,
+                delimiter: str = ",") -> list[Chunk]:
     text = _decode_text(data)
-    rows = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
+    rows = [r for r in csv.reader(io.StringIO(text), delimiter=delimiter)
+            if any(c.strip() for c in r)]
     if not rows:
         return []
     header, *body = rows
@@ -290,11 +335,21 @@ def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
         return out
     from pathlib import Path as P
     ext = P(filename).suffix.lower()
-    if ext not in SUPPORTED:
-        return [], [f"unsupported type '{ext or filename}' — skipped"]
+    if not data:
+        return [], ["empty file — nothing to index"]
 
-    words = len(data) // 6  # rough guard against absurd inputs
-    if words > MAX_FILE_WORDS * 6:  # bytes→words estimate too big
+    if ext not in SUPPORTED:
+        # auto-detect: a decodable, non-binary file is plain text —
+        # extension/extensionless names are not a coverage gate (#281).
+        # Real binaries (OLE .doc/.xls/.ppt, zips, images) warn and skip.
+        text = _decode_auto(data)
+        if text is None:
+            return [], [f"binary file '{ext or filename}' — skipped"]
+        if _too_big(text):
+            return [], [f"file too large ({len(data)} bytes) — skipped"]
+        return _cap((_text_chunks(text, "", measure=measure, budget=budget), []))
+
+    if ext in TEXT_FORMATS and _too_big(_decode_text(data)):
         return [], [f"file too large ({len(data)} bytes) — skipped"]
 
     try:
@@ -309,6 +364,9 @@ def extract_file_chunks(filename: str, data: bytes, measure=_word_count,
             return _cap(extract_chunks(_decode_text(data), measure, budget))
         if ext == ".csv":
             return _cap((_csv_chunks(data, measure, budget), []))
+        if ext == ".tsv":
+            return _cap((_csv_chunks(data, measure, budget,
+                                     delimiter="\t"), []))
         if ext == ".docx":
             return _cap((_docx_chunks(data, measure, budget), []))
         if ext == ".pptx":

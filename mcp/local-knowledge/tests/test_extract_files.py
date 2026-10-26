@@ -95,9 +95,73 @@ def test_pptx_chunks():
     assert "Migration Plan" in text and "database" in text
 
 
-def test_unknown_type_warns():
-    chunks, warns = extract_file_chunks("x.bin", b"\x00\x01")
-    assert not chunks and warns and "unsupported" in warns[0]
+def test_binary_unknown_type_warns():
+    """#281: real binaries with unknown extensions are disclosed, not
+    treated as text — OLE office, zips and images must never index."""
+    png = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + b"\x00" * 100
+           + b"\x89\x50\x4e\x47" * 200)
+    ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 512 + b"garbage"
+    zipf = b"PK\x03\x04\x14\x00\x06\x00\x08\x00" + b"\x00\x01" * 300
+    for name, blob in (("img.png", png), ("old.doc", ole), ("x.bin", zipf)):
+        chunks, warns = extract_file_chunks(name, blob)
+        assert not chunks and warns and "binary" in warns[0], \
+            f"{name}: warns={warns} chunks={len(chunks)}"
+
+
+def test_utf16_text_autodetects():
+    """#281: UTF-16 files are NUL-dense in bytes but ARE text — the
+    alternating-byte pattern must keep them indexable (BOM and BOM-less)."""
+    body = "deploy runbook: restart the gateway first\n" * 20
+    for name, blob in (("notes.txt", body.encode("utf-16")),
+                       ("n.log", body.encode("utf-16-le")),
+                       ("n.log", body.encode("utf-16-be"))):
+        chunks, warns = extract_file_chunks(name, blob)
+        assert chunks and not warns, f"{name}/{len(blob)}: {warns}"
+        assert "gateway" in " ".join(c.text for c in chunks)
+
+
+def test_unknown_text_extension_autodetects():
+    """#281: ordinary text files outside the allowlist (logs, configs,
+    source) must index — the extension list is not a coverage gate."""
+    for name in ("app.log", "conf.yaml", "notes.json", "run.py",
+                 "Makefile", "README", "data.tsv~"):
+        chunks, warns = extract_file_chunks(
+            name, b"deploy runbook: restart the gateway first\n" * 20)
+        assert chunks and not warns, f"{name}: {warns}"
+        assert "gateway" in " ".join(c.text for c in chunks)
+
+
+def test_tsv_chunks():
+    chunks, _ = extract_file_chunks("t.tsv", b"a\tb\n1\t2\n3\t4\n")
+    assert chunks[0].kind == "table" and "row 1: 1 | 2" in chunks[0].text
+
+
+def test_empty_file_warns():
+    chunks, warns = extract_file_chunks("empty.txt", b"")
+    assert not chunks and warns and "empty" in warns[0]
+
+
+def test_large_docx_not_skipped_by_byte_estimate():
+    """#281: the old `len(data)//6` guard skipped any file over ~7.2MB —
+    a docx is zip-compressed, so embedded media bytes counted as 'words'.
+    Office formats are bounded by chunk count, not raw bytes."""
+    import io
+    import zipfile
+
+    import docx
+    d = docx.Document()
+    d.add_paragraph("deploy runbook: restart the gateway first")
+    buf = io.BytesIO()
+    d.save(buf)
+    # pad the zip with a large inert media part — 9MB of noise bytes
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as zin, \
+            zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zout:
+        for item in zin.namelist():
+            zout.writestr(item, zin.read(item))
+        zout.writestr("word/media/big.bin", b"\x07" * (9 * 1024 * 1024))
+    chunks, warns = extract_file_chunks("runbook.docx", out.getvalue())
+    assert chunks and "gateway" in " ".join(c.text for c in chunks), warns
 
 
 def test_corrupt_office_warns_not_crashes():
