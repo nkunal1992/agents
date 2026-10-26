@@ -379,6 +379,8 @@ def main() -> int:
     sandbox = ws / "sandbox"
     # the default workspace is a fixed path reused across runs — stale
     # venvs/homes/index DBs from earlier runs must not poison this one.
+    for stale in ws.glob("sandbox.r*"):
+        shutil.rmtree(stale, ignore_errors=True)   # locks long released
     # A crashed run can leave its sandbox daemons alive holding log/index
     # handles — POSIX tolerates rmtree on open files, Windows fails
     # WinError 32 (and the orphan keeps its port either way). Stop them
@@ -390,7 +392,24 @@ def main() -> int:
                 watchdog.stop_daemon(dh, timeout=5)
             except Exception:           # noqa: BLE001,S110 — a dead or
                 pass                    # foreign daemon is fine; rmtree decides
-        shutil.rmtree(sandbox)
+        try:
+            shutil.rmtree(sandbox)
+        except PermissionError:
+            # a killed daemon's handles can stay held a minute or more —
+            # teardown lag plus AV/indexer scans (kernel-held, invisible
+            # to open_files); renaming the dir fails too since sqlite
+            # opens children without share-delete. Don't fight it: run
+            # in a fresh sibling and sweep the stale tree when its locks
+            # release (now — best-effort — and on every later run).
+            for n in range(2, 10):
+                cand = sandbox.with_name(f"sandbox.r{n}")
+                if not cand.exists():
+                    sandbox = cand
+                    break
+            else:
+                raise
+            note(f"stale sandbox still locked by a dead daemon — running "
+                 f"in fresh {sandbox.name} instead")
     home = sandbox / "home"; home.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
            "CONF_KNOWLEDGE_HOME": str(home / ".confluence-knowledge"),
