@@ -116,7 +116,7 @@ def start_fake(pages: int, hostile: bool, out_dir: Path,
         if proc.poll() is not None:
             raise RuntimeError("fake DC died on startup")
         time.sleep(0.05)
-    base = json.loads(prof.read_text())["base_url"]
+    base = json.loads(prof.read_text(encoding="utf-8"))["base_url"]
     return proc, base, logf
 
 
@@ -217,7 +217,7 @@ class StallProbe:
             self.proc.kill()
         overs = []
         if self.out_file.exists():
-            for line in self.out_file.read_text().splitlines():
+            for line in self.out_file.read_text(encoding="utf-8").splitlines():
                 try:
                     overs.append(json.loads(line)["overshoot_ms"])
                 except json.JSONDecodeError:
@@ -413,7 +413,7 @@ class Ctx:
     def request_stats(self) -> dict:
         if not self.logf.exists():
             return {}
-        rows = [json.loads(x) for x in self.logf.read_text().splitlines()
+        rows = [json.loads(x) for x in self.logf.read_text(encoding="utf-8").splitlines()
                 if x.strip()]
         by_status: dict[int, int] = {}
         for r in rows:
@@ -449,7 +449,7 @@ async def scenario_ctx(name: str, pages: int, seed: int, hostile: bool,
     ctx.budget_s = max(CRAWL_BUDGET_S, pages * 10)  # scale with tree size
     (models / "profile.json").write_text(json.dumps(
         {"env": "datacenter", "base_url": base, "email": None,
-         "credential_ref": "stress"}))
+         "credential_ref": "stress"}), encoding="utf-8")
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     env = server_env(profile, models, work,
@@ -493,7 +493,7 @@ def finish(ctx: Ctx, extra_verdicts: dict | None = None) -> dict:
     if ctx.stall:
         res["laptop"] = ctx.stall.stop()
     res["verdicts"] = {**baseline_verdicts(ctx, res), **(extra_verdicts or {})}
-    (ctx.out_dir / "result.json").write_text(json.dumps(res, indent=2))
+    (ctx.out_dir / "result.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
     return res
 
 
@@ -560,7 +560,7 @@ async def s_refresh_unchanged(ctx: Ctx) -> dict:
     await ctx.connect_and_crawl()
     first = await ctx.run_crawl()
     ctx.calls.clear()
-    ctx.logf.write_text("")  # reset request log for the refresh leg
+    ctx.logf.write_text("", encoding="utf-8")  # reset request log for the refresh leg
     j = await ctx.call("start_crawl",
                        {"scope_handle": ctx.handle, "refresh": True},
                        timeout=30)
@@ -848,7 +848,7 @@ def render_report(results: list[dict], out_dir: Path) -> Path:
             f"{'; '.join(fails) if fails else 'all PASS'} |")
     lines.append("")
     rep = out_dir / "report.md"
-    rep.write_text("\n".join(lines))
+    rep.write_text("\n".join(lines), encoding="utf-8")
     return rep
 
 
@@ -916,7 +916,7 @@ def main() -> int:
                                        args.seed, models, out_dir, env_extra))
         except Exception as e:  # noqa: BLE001 — one bad scenario ≠ all lost
             rf = out_dir / "result.json"
-            res = (json.loads(rf.read_text()) if rf.exists()
+            res = (json.loads(rf.read_text(encoding="utf-8")) if rf.exists()
                    else {"scenario": name,
                          "error": f"{type(e).__name__}: {e}",
                          "verdicts": {"scenario completed": "FAIL"}})
@@ -928,7 +928,7 @@ def main() -> int:
 
     rep = render_report(results, out_root)
     print(f"\nreport: {rep}", flush=True)
-    (out_root / "all-results.json").write_text(json.dumps(results, indent=2))
+    (out_root / "all-results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     return 0
 
 

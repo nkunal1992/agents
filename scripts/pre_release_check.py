@@ -256,7 +256,7 @@ def main() -> int:
     verdict = ("GREEN — safe to tag" if not fails
                else f"RED — {len(fails)} check(s) failed")
     lines += ["", f"**verdict: {verdict}**"]
-    REPORT.write_text("\n".join(lines) + "\n")
+    REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
     print(f"\nreport → {REPORT}")
     return 1 if fails else 0

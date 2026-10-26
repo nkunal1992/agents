@@ -76,5 +76,5 @@ if __name__ == "__main__":
     a = ap.parse_args()
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(build()))
+    out.write_text(json.dumps(build()), encoding="utf-8")
     print(f"{out}: {len(PAGES)} hostile pages")

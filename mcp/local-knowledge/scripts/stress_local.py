@@ -149,7 +149,7 @@ def build_tree(root: Path, files: int, seed: int = 7) -> dict:
         cp = root / f"canary-{ci:04d}.md"
         cp.write_text(_BODY.format(name=cp.stem, i=ci,
                                    codeword=codeword(seed, ci),
-                                   ret=30, lorem=_LOREM))
+                                   ret=30, lorem=_LOREM), encoding="utf-8")
         canaries.append(cp)
     n = 0
     dirs = [root]
@@ -166,17 +166,17 @@ def build_tree(root: Path, files: int, seed: int = 7) -> dict:
         p = d / f"doc-{i:05d}{ext}"
         body = _BODY.format(name=p.stem, i=i, codeword=codeword(seed, i),
                             ret=rng.randrange(7, 400), lorem=_LOREM)
-        p.write_text(body)
+        p.write_text(body, encoding="utf-8")
         n += 1
     # edge cases: oversized file, unreadable dir+file, symlinks, unicode
     (root / "huge.bin").write_bytes(b"\x00" * (26 * 1024 * 1024))
     unreadable = root / "locked-dir"
     unreadable.mkdir(exist_ok=True)
-    (unreadable / "hidden.md").write_text("secret doc")
+    (unreadable / "hidden.md").write_text("secret doc", encoding="utf-8")
     unreadable.chmod(0o000)
-    (root / "unreadable-file.md").write_text("no read")
+    (root / "unreadable-file.md").write_text("no read", encoding="utf-8")
     (root / "unreadable-file.md").chmod(0o000)
-    (root / "ユニコード-仕様書.md").write_text("unicode filename content")
+    (root / "ユニコード-仕様書.md").write_text("unicode filename content", encoding="utf-8")
     try:
         (root / "internal-link.md").symlink_to(root / "doc-00000.md")
         (root / "escape-link.md").symlink_to(Path("/etc/passwd"))
@@ -205,13 +205,13 @@ def mutate_tree(root: Path, files: int, seed: int = 99) -> dict:
         p.rename(np_)
         renames.append(np_)
     for p in modified:
-        p.write_text(p.read_text() + "\n\nmutation: content updated\n")
+        p.write_text(p.read_text(encoding="utf-8") + "\n\nmutation: content updated\n", encoding="utf-8")
     added = []
     for i in range(max(1, n // 50)):
         np_ = root / f"added-{seed}-{i:04d}.md"
         np_.write_text(_BODY.format(name=np_.stem, i=900000 + i,
                                     codeword=codeword(seed, 900000 + i),
-                                    ret=30, lorem=_LOREM))
+                                    ret=30, lorem=_LOREM), encoding="utf-8")
         added.append(np_)
 
     def rel(ps):
@@ -313,7 +313,7 @@ class StallProbe:
             self.proc.kill()
         overs = []
         if self.out_file.exists():
-            for line in self.out_file.read_text().splitlines():
+            for line in self.out_file.read_text(encoding="utf-8").splitlines():
                 try:
                     overs.append(json.loads(line)["overshoot_ms"])
                 except json.JSONDecodeError:
@@ -615,7 +615,7 @@ def finish(ctx: Ctx, extra_verdicts: dict | None = None) -> dict:
         res["laptop"] = ctx.stall.stop()
     res["verdicts"] = {**baseline_verdicts(ctx, res), **(extra_verdicts or {})}
     (ctx.out_dir / "result.json").write_text(
-        json.dumps(res, indent=2, default=str))
+        json.dumps(res, indent=2, default=str), encoding="utf-8")
     return res
 
 
@@ -1138,7 +1138,7 @@ def main() -> int:
             res = {"scenario": name, "verdicts": {"scenario ran": "FAIL"},
                    "notes": _flatten_exc(e)}
             (out_dir / "result.json").write_text(
-                json.dumps(res, indent=2, default=str))
+                json.dumps(res, indent=2, default=str), encoding="utf-8")
         rows.append(res)
         print(json.dumps({k: v2 for k, v2 in res.items()
                           if k not in ("calls", "progress_tail", "waits",
@@ -1159,7 +1159,7 @@ def main() -> int:
             f"{r.get('freezes', {}).get('freeze_events', '?')} | "
             f"{r.get('canary_ok', '?')}/{r.get('canary_total', '?')} | "
             f"{vd} |")
-    (args.out / "report.md").write_text("\n".join(lines) + "\n")
+    (args.out / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
     fails = sum(1 for r in rows
                 for x in r.get("verdicts", {}).values() if x == "FAIL")

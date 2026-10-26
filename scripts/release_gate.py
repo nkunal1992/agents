@@ -89,14 +89,14 @@ def pyproject_version(pkg: str, root: Path | None = None) -> str:
     pp = root / "mcp" / pkg / "pyproject.toml"
     if not pp.exists():
         raise GateError(f"{pp} not found")
-    return tomllib.loads(pp.read_text())["project"]["version"]
+    return tomllib.loads(pp.read_text(encoding="utf-8"))["project"]["version"]
 
 
 def engine_specifier(pkg: str, root: Path | None = None) -> SpecifierSet:
     """The `confluence-knowledge…` requirement inside a service's deps."""
     root = root if root is not None else REPO_ROOT
     deps = tomllib.loads(
-        (root / "mcp" / pkg / "pyproject.toml").read_text()
+        (root / "mcp" / pkg / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]["dependencies"]
     for dep in deps:
         if dep.startswith(ENGINE):
@@ -199,13 +199,13 @@ def set_version(pkg: str, version: str, root: Path | None = None) -> Path:
     """Rewrite `version = "…"` in the package pyproject — exactly one hit."""
     root = root if root is not None else REPO_ROOT
     pp = root / "mcp" / pkg / "pyproject.toml"
-    text = pp.read_text()
+    text = pp.read_text(encoding="utf-8")
     hits = re.findall(r'^version = "[^"]+"', text, flags=re.MULTILINE)
     if len(hits) != 1:
         raise GateError(
             f"{pp}: expected one `version =` line, found {len(hits)}")
     pp.write_text(re.sub(r'^version = "[^"]+"', f'version = "{version}"',
-                         text, count=1, flags=re.MULTILINE))
+                         text, count=1, flags=re.MULTILINE), encoding="utf-8")
     return pp
 
 

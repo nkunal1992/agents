@@ -23,7 +23,7 @@ def _corpus_texts(n: int) -> list[str]:
     """~400-token real-text slices — matches the crawl's chunk shape."""
     pool_dir = Path("/tmp/lk-realtext")
     if pool_dir.exists():
-        pool = "\n\n".join(f.read_text(errors="ignore")
+        pool = "\n\n".join(f.read_text(errors="ignore", encoding="utf-8")
                            for f in sorted(pool_dir.glob("*.txt")))
     else:
         pool = "the quick brown fox jumps over the lazy dog " * 4000

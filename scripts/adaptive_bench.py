@@ -210,7 +210,7 @@ def main() -> int:
           f"({leg['embed_ms'] / max(auto['embed_ms'], 1):.1f}x)")
     print(f"pages/s: {leg['pages_per_s']:.2f} → "
           f"{auto['pages_per_s']:.2f}")
-    Path("ADAPTIVE_BENCH.json").write_text(json.dumps(results, indent=1))
+    Path("ADAPTIVE_BENCH.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
     print("\nwrote ADAPTIVE_BENCH.json")
     return 0
 

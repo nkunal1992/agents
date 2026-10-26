@@ -97,7 +97,7 @@ async def main() -> int:
         check(not st["configured"], "fresh home → unconfigured")
 
         # --- onboarding: bad clipboard → re-ask → good clipboard ---
-        clip.write_text("not-a-real-token")
+        clip.write_text("not-a-real-token", encoding="utf-8")
         # keyring write + token validation can exceed the default 20 s
         # on CI runners (Windows Credential Manager especially)
         bad = await call(s, "register_token",
@@ -106,7 +106,7 @@ async def main() -> int:
               or "error" in bad or "_error" in bad,
               "register_token rejects a bad clipboard", bad)
 
-        clip.write_text(TOKEN)
+        clip.write_text(TOKEN, encoding="utf-8")
         good = await call(s, "register_token",
                           {"site": base, "env": "datacenter"}, timeout=90)
         check(good.get("configured") is True

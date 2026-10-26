@@ -86,12 +86,12 @@ def _gen_corpus(root: Path, files: int) -> dict:
         (adoc_dir / f"page{i}.adoc").write_text(
             f"= Page {i}\n\n" + "\n".join(
                 f"== Section {s}\n\ntext " * 1 + "word " * 40
-                for s in range(5)))
+                for s in range(5)), encoding="utf-8")
         (adoc_dir / f"note{i}.md").write_text(
             f"# Note {i}\n\n" + "\n".join(
-                "- " + "item " * 10 for _ in range(30)))
+                "- " + "item " * 10 for _ in range(30)), encoding="utf-8")
         (adoc_dir / f"plain{i}.txt").write_text(
-            "\n".join("plain line " + "word " * 10 for _ in range(50)))
+            "\n".join("plain line " + "word " * 10 for _ in range(50)), encoding="utf-8")
     return made
 
 

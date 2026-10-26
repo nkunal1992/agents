@@ -44,7 +44,7 @@ def _load_corpus() -> tuple[dict, dict, dict]:
     path = os.environ.get("FAKE_DC_CORPUS")
     if not path:
         return PAGES, CHILDREN, {}
-    d = json.loads(Path(path).read_text())["pages"]
+    d = json.loads(Path(path).read_text(encoding="utf-8"))["pages"]
     pages = {pid: (p.get("title", pid), p.get("body", ""))
              for pid, p in d.items()}
     children = {pid: p.get("children", []) for pid, p in d.items()}
@@ -262,7 +262,7 @@ def stop_shared_daemon(cli: Path, env: dict) -> None:
             for f in _g.glob(str(Path(shared) / pat), recursive=True):
                 try:
                     lines = Path(f).read_text(
-                        errors="replace").splitlines()
+                        errors="replace", encoding="utf-8").splitlines()
                     print(f"---- {f} (last 40) ----")
                     print("\n".join(lines[-40:]))
                 except OSError:

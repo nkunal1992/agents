@@ -157,21 +157,21 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     site_url = f"http://127.0.0.1:{urlparse(graph_base).port}/sites/team"
     (sp_home / "profile.json").write_text(json.dumps({
         "tenant_id": "e2e-tenant", "client_id": "e2e-client",
-        "site_url": site_url, "credential_ref": "e2e"}))
+        "site_url": site_url, "credential_ref": "e2e"}), encoding="utf-8")
 
     ws = sandbox / "repo"
     (ws / ".vscode").mkdir(parents=True)
     (ws / ".vscode" / "mcp.json").write_text(
-        json.dumps({"servers": {"colleague-server": {"command": "x"}}}))
+        json.dumps({"servers": {"colleague-server": {"command": "x"}}}), encoding="utf-8")
     reg_out = run([str(cli), "register", "--ide", "all", "--workspace", str(ws)],
                   env, "register: wrote IDE configs")
     written = [ln.split(":", 1)[1].strip() for ln in reg_out.stdout.splitlines()
                if ":" in ln and ln.split(":", 1)[0] in ("written", "removed",
                                                         "backup-replaced")]
     jb = [Path(p) for p in written if "github-copilot" in p]
-    check(jb and "sharepoint-knowledge" in jb[0].read_text(),
+    check(jb and "sharepoint-knowledge" in jb[0].read_text(encoding="utf-8"),
           "register: JetBrains user config written", written)
-    merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
+    merged = json.loads((ws / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
     # unified default is `knowledge` (0.10.1+); an older published
     # service still writes its per-service id — accept either shape
     kid = next((k for k in ("knowledge", "sharepoint-knowledge")

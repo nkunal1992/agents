@@ -43,7 +43,7 @@ def load_env() -> dict:
     if not ENV_FILE.exists():
         sys.exit(f"credentials file missing: {ENV_FILE} — fill in "
                  "CONFLUENCE_CLOUD_SITE/EMAIL/TOKEN")
-    for line in ENV_FILE.read_text().splitlines():
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
@@ -391,7 +391,7 @@ def main() -> int:
     reseed = "--reseed" in sys.argv
     wipe = "--wipe" in sys.argv
     env = load_env()
-    manifest = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
     ensure_space(env)
     space_key = env["CONFLUENCE_CLOUD_SPACE"]
 
@@ -403,7 +403,7 @@ def main() -> int:
             except urllib.error.HTTPError as e:
                 print("delete failed", title, e.code)
             time.sleep(PAUSE_S)
-        MANIFEST.write_text("{}")
+        MANIFEST.write_text("{}", encoding="utf-8")
         print("wiped")
         return 0
 
@@ -437,7 +437,7 @@ def main() -> int:
             cur["body_hash"] = bhash
             updated += 1
             if updated % 20 == 0:
-                MANIFEST.write_text(json.dumps(manifest, indent=1))
+                MANIFEST.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
                 print(f"  {updated} pages upgraded…")
             time.sleep(PAUSE_S)
             continue
@@ -475,10 +475,10 @@ def main() -> int:
         id_of[title] = page["id"]
         created += 1
         if created % 25 == 0:
-            MANIFEST.write_text(json.dumps(manifest, indent=1))
+            MANIFEST.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
             print(f"  {created} pages created…")
         time.sleep(PAUSE_S)
-    MANIFEST.write_text(json.dumps(manifest, indent=1))
+    MANIFEST.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     print(f"done — {created} created, {updated} upgraded, "
           f"{skipped} skipped, {len(manifest)} total in space "
           f"{space_key}")

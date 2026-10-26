@@ -70,7 +70,7 @@ def _corpus(root: Path) -> None:
     (root / "runbook.md").write_text(
         "# Deployment runbook\n\nThe oncall runbook covers rollback "
         "steps, escalation owners, and the production cutover "
-        "checklist.\n" * 20)
+        "checklist.\n" * 20, encoding="utf-8")
 
 
 async def _call(sess, tool: str, args: dict) -> dict:
@@ -273,7 +273,7 @@ def main() -> int:
             found = False
             for p in hits:
                 try:
-                    doc = json.loads(p.read_text())
+                    doc = json.loads(p.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError):
                     continue
                 servers = doc.get("mcpServers", doc.get("servers", {}))
@@ -291,7 +291,7 @@ def main() -> int:
             if tail.exists():
                 print("---- daemon stderr (last 30) ----")
                 print("\n".join(tail.read_text(
-                    errors="replace").splitlines()[-30:]))
+                    errors="replace", encoding="utf-8").splitlines()[-30:]))
     print("PASS real-install e2e")
     return 0
 

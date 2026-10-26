@@ -114,7 +114,7 @@ def main() -> None:
     env["SP_KNOWLEDGE_TOKEN"] = TOKEN
     (home / "profile.json").write_text(json.dumps({
         "tenant_id": "e2e", "client_id": "e2e", "site_url": site_url,
-        "credential_ref": "e2e"}))
+        "credential_ref": "e2e"}), encoding="utf-8")
     d = run([str(cli), "doctor"], env, check_rc=False)
     flags = {c["flag"]: c["ok"] for c in
              __import__("json").JSONDecoder().raw_decode(d.stdout)[0]
@@ -160,14 +160,14 @@ def main() -> None:
                             "dist", "build", "__pycache__", "*.egg-info",
                             ".venv", "tests", "scripts"))
         pp = src2 / "pyproject.toml"
-        t = pp.read_text()
+        t = pp.read_text(encoding="utf-8")
         t = _re.sub(r'version = "[^"]+"', f'version = "{version}"',
                     t, count=1)
         t = _re.sub(r'requires = \[[^\]]*\]',
                     'requires = ["hatchling"]', t, count=1)
         t = _re.sub(r'build-backend = "[^"]+"',
                     'build-backend = "hatchling.build"', t)
-        pp.write_text(t)
+        pp.write_text(t, encoding="utf-8")
         return src2
 
     # engine wheel too — freeze pins it (path install → ==ver) and the
@@ -175,29 +175,29 @@ def main() -> None:
     eng_dir = REPO_SVC.parent / "confluence-knowledge"
     eng_src = _src_copy("engine", "0.0.0", src_dir=eng_dir)
     pp = eng_src / "pyproject.toml"
-    t = pp.read_text()
+    t = pp.read_text(encoding="utf-8")
     inst_eng = run([str(vpy), "-m", "pip", "show", "confluence-knowledge"],
                    env, "installed engine").stdout.split(
                        "Version: ")[1].split()[0]
     t = _re.sub(r'version = "[^"]+"', f'version = "{inst_eng}"',
                 t, count=1)
-    pp.write_text(t)
+    pp.write_text(t, encoding="utf-8")
     run([outer, "-m", "pip", "wheel", str(eng_src), "-w", str(wheels),
          "--no-deps", "--quiet"], env, "build engine wheel")
     cur_src = _src_copy("cur", "0.0.0")  # version patched below
     pp = cur_src / "pyproject.toml"
-    t = pp.read_text()
+    t = pp.read_text(encoding="utf-8")
     inst_v = run([str(vpy), "-m", "pip", "show", "sharepoint-knowledge"], env,
                  "installed version").stdout.split("Version: ")[1].split()[0]
     t = _re.sub(r'version = "[^"]+"', f'version = "{inst_v}"',
                 t, count=1)
-    pp.write_text(t)
+    pp.write_text(t, encoding="utf-8")
     run([outer, "-m", "pip", "wheel", str(cur_src), "-w", str(wheels),
          "--no-deps", "--quiet"], env, "build current-version wheel")
     bad_src = _src_copy("bad", "99.0.0")
     broken = bad_src / "src" / "sharepoint_knowledge" / "server_sp.py"
     broken.write_text('raise RuntimeError("selftest-canary")\n'
-                      + broken.read_text())
+                      + broken.read_text(encoding="utf-8"), encoding="utf-8")
     run([outer, "-m", "pip", "wheel", str(bad_src), "-w", str(wheels),
          "--no-deps", "--quiet"], env, "build broken 99.0.0 wheel")
     env_upd = {**env, "PIP_FIND_LINKS": str(wheels),

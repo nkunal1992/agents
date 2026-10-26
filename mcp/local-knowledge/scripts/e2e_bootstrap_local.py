@@ -72,10 +72,10 @@ def make_docs(sandbox: Path) -> Path:
     (docs / "sub").mkdir(parents=True)
     (docs / "deploy.md").write_text(
         "# Runbook\n\nProduction deploys happen only on Thursdays after 18:00.\n"
-        "The gateway must be restarted before every deploy.\n")
-    (docs / "sub" / "owners.csv").write_text("service,owner\ngateway,ops-team\n")
-    (docs / ".env").write_text("API_KEY=should-never-be-indexed")
-    (docs / "id_rsa").write_text("PRIVATE KEY MATERIAL")
+        "The gateway must be restarted before every deploy.\n", encoding="utf-8")
+    (docs / "sub" / "owners.csv").write_text("service,owner\ngateway,ops-team\n", encoding="utf-8")
+    (docs / ".env").write_text("API_KEY=should-never-be-indexed", encoding="utf-8")
+    (docs / "id_rsa").write_text("PRIVATE KEY MATERIAL", encoding="utf-8")
     return docs
 
 
@@ -167,16 +167,16 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     ws = sandbox / "repo"
     (ws / ".vscode").mkdir(parents=True)
     (ws / ".vscode" / "mcp.json").write_text(
-        json.dumps({"servers": {"colleague-server": {"command": "x"}}}))
+        json.dumps({"servers": {"colleague-server": {"command": "x"}}}), encoding="utf-8")
     reg_out = run([str(cli), "register", "--ide", "all", "--workspace", str(ws)],
                   env, "register: wrote IDE configs")
     written = [ln.split(":", 1)[1].strip() for ln in reg_out.stdout.splitlines()
                if ":" in ln and ln.split(":", 1)[0] in ("written", "removed",
                                                         "backup-replaced")]
     jb = [Path(p) for p in written if "github-copilot" in p]
-    check(jb and "local-knowledge" in jb[0].read_text(),
+    check(jb and "local-knowledge" in jb[0].read_text(encoding="utf-8"),
           "register: JetBrains user config written", written)
-    merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
+    merged = json.loads((ws / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
     # unified default is `knowledge` (0.10.1+); an older published
     # service still writes its per-service id — accept either shape
     kid = next((k for k in ("knowledge", "local-knowledge")

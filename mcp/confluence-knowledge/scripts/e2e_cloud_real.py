@@ -37,7 +37,7 @@ def load_env() -> dict:
         sys.exit(f"SKIP — no {ENV_FILE} (real-cloud leg needs "
                  "credentials; the fake-DC legs cover CI)")
     env = {}
-    for line in ENV_FILE.read_text().splitlines():
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
         if line.strip() and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip()
@@ -81,7 +81,7 @@ def http_meta(shared_home: Path, prefix: str,
         metas = list(daemon_root.glob("*/http.json")) \
             if daemon_root.exists() else []
         for f in metas:
-            meta = json.loads(f.read_text())
+            meta = json.loads(f.read_text(encoding="utf-8"))
             try:
                 with socket.socket() as sk:
                     sk.settimeout(0.5)

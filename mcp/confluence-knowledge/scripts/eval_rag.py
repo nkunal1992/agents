@@ -98,12 +98,12 @@ def main() -> int:
     # merge-only mode — fold Copilot verdicts into an existing report
     if "--merge-verdicts" in args:
         vpath = Path(args[args.index("--merge-verdicts") + 1])
-        rep = json.loads(report_p.read_text())
+        rep = json.loads(report_p.read_text(encoding="utf-8"))
         known_q = {p["question"] for p in rep["pairs"]}
         valid_v = {"correct", "partial", "wrong", "no_answer"}
         verdicts = {}
         skipped = []
-        for v in json.loads(vpath.read_text()):
+        for v in json.loads(vpath.read_text(encoding="utf-8")):
             if not isinstance(v, dict) or not v.get("question") \
                     or v.get("verdict") not in valid_v or v["question"] not in known_q:
                 skipped.append(v)
@@ -115,7 +115,7 @@ def main() -> int:
             if v:
                 pair["judge"] = v
                 n += 1
-        report_p.write_text(json.dumps(rep, indent=2))
+        report_p.write_text(json.dumps(rep, indent=2), encoding="utf-8")
         ok = sum(1 for v in verdicts.values() if v.get("verdict") == "correct")
         print(f"merged {n}/{len(rep['pairs'])} verdicts — "
               f"judge: {ok}/{len(verdicts)} correct")
@@ -124,7 +124,7 @@ def main() -> int:
                   "bad schema or unknown question")
         return 0
 
-    pairs = json.loads(golden.read_text())["pairs"]
+    pairs = json.loads(golden.read_text(encoding="utf-8"))["pairs"]
     home = Path(os.path.expanduser(os.environ["CONF_KNOWLEDGE_HOME"]))
     emb = retrieval.LocalEmbedder(home)
     rr = retrieval.LocalReranker(home)
@@ -145,7 +145,7 @@ def main() -> int:
     candidates = {}
     if "--candidate-answers" in args:
         candidates = json.loads(
-            Path(args[args.index("--candidate-answers") + 1]).read_text())
+            Path(args[args.index("--candidate-answers") + 1]).read_text(encoding="utf-8"))
 
     results, lat = [], []
     for pair in pairs:
@@ -176,7 +176,7 @@ def main() -> int:
                             "honesty": honesty,
                             "p50_ms": int(lat[len(lat) // 2] * 1000),
                             "p95_ms": int(lat[int(len(lat) * .95)] * 1000)}}
-    report_p.write_text(json.dumps(report, indent=2))
+    report_p.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print(f"\nrecall@8:       {recall:.0%}  ({sum(r['recall_hit'] for r in q)}/{len(q)})")
     print(f"fact coverage:  {facts:.0%}")

@@ -67,7 +67,7 @@ async def main() -> None:
                          "confluence-knowledge prepare-models")
     srv, base, _hits = serve()
     (home / "profile.json").write_text(json.dumps(
-        {"env": "datacenter", "base_url": base, "email": None, "credential_ref": "e2e"}))
+        {"env": "datacenter", "base_url": base, "email": None, "credential_ref": "e2e"}), encoding="utf-8")
     work = Path(tempfile.mkdtemp(prefix="ck-e2e-work-")).resolve()
     env = {**os.environ, "CONF_KNOWLEDGE_HOME": str(home),
            "CONF_KNOWLEDGE_WORKDIR": str(work), "CONF_KNOWLEDGE_TOKEN": TOKEN,

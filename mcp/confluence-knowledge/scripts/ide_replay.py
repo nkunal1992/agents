@@ -241,11 +241,11 @@ class FakeIDE:
             await asyncio.sleep(2)
         elif v == "set_clipboard":
             clip = Path(self.env["CONF_KNOWLEDGE_CLIPBOARD_FILE"])
-            clip.write_text(self._sub(step.get("text", "")))
+            clip.write_text(self._sub(step.get("text", "")), encoding="utf-8")
         elif v == "corrupt_clipboard":
             self.vars["bad_clip"] = "not-a-real-token"
             clip = Path(self.env["CONF_KNOWLEDGE_CLIPBOARD_FILE"])
-            clip.write_text(self.vars["bad_clip"])
+            clip.write_text(self.vars["bad_clip"], encoding="utf-8")
         elif v == "confluence_down":
             self._server.shutdown()
             self._server.server_close()   # release the port — shutdown()
@@ -308,14 +308,14 @@ class FakeIDE:
             out = Path(self.vars.get("transcript_dir",
                                      tempfile.gettempdir())
                        ) / f"transcript-{step.get('name', 'session')}.json"
-            out.write_text(json.dumps(self.transcript, indent=2))
+            out.write_text(json.dumps(self.transcript, indent=2), encoding="utf-8")
             check(True, f"transcript → {out}")
         else:
             raise AssertionError(f"unknown verb: {v}")
 
 
 async def run_session(path: Path) -> int:
-    spec = json.loads(path.read_text())
+    spec = json.loads(path.read_text(encoding="utf-8"))
     print(f"\n=== session: {spec['name']} ===", flush=True)
     home = Path(tempfile.mkdtemp(prefix="ide-home-"))
     work = Path(tempfile.mkdtemp(prefix="ide-work-"))

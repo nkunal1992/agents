@@ -213,7 +213,7 @@ def main() -> int:
               for n_, ok, v in gates]
     verdict = "GREEN" if not fails else f"RED — {len(fails)} gate(s)"
     lines += ["", f"**verdict: {verdict}**"]
-    Path(args.report).write_text("\n".join(lines) + "\n")
+    Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nreport → {args.report}\n" + "\n".join(
         f"  {n_}: {v} ({'PASS' if ok else 'FAIL'})"
         for n_, ok, v in gates))

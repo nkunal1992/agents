@@ -87,7 +87,7 @@ def make_local_docs(root: Path) -> Path:
         "golden signals against green.\n\n"
         "## Step 5 — full cutover\nRoute 100% to blue; keep green warm "
         "for 24h as rollback. Rollback codeword reference: "
-        f"{LOCAL_CANARY}.\n")
+        f"{LOCAL_CANARY}.\n", encoding="utf-8")
     (docs / "architecture_spec.txt").write_text(
         "Architecture Specification — Database Layer\n"
         "============================================\n\n"
@@ -97,7 +97,7 @@ def make_local_docs(root: Path) -> Path:
         "clients retry through the connection pool. A consensus lock on "
         "the coordinator prevents split-brain.\n\n"
         "Storage: row-oriented OLTP; nightly snapshots to object "
-        "storage, WAL archives every 5 minutes.\n")
+        "storage, WAL archives every 5 minutes.\n", encoding="utf-8")
     (docs / "incident_playbook.md").write_text(
         "# Incident Playbook\n\n"
         "Sev-1 pages on-call + incident commander; ack within 5 min.\n\n"
@@ -107,7 +107,7 @@ def make_local_docs(root: Path) -> Path:
         "| 3 | engineering manager | 30 min |\n"
         "| 4 | director | 45 min |\n\n"
         "Blameless postmortem within 72 hours. Runbook index lives in "
-        "the ops handbook.\n")
+        "the ops handbook.\n", encoding="utf-8")
     return docs
 
 
@@ -172,7 +172,7 @@ def http_meta(shared_home: Path, timeout: float = 40) -> dict:
     while time.monotonic() < deadline:
         for f in (root.glob("*/http.json") if root.exists() else []):
             try:
-                meta = json.loads(f.read_text())
+                meta = json.loads(f.read_text(encoding="utf-8"))
                 with socket.socket() as sk:
                     sk.settimeout(0.5)
                     sk.connect(("127.0.0.1", meta["port"]))
@@ -420,7 +420,7 @@ def main() -> int:
     ck_home.mkdir(parents=True, exist_ok=True)
     (ck_home / "profile.json").write_text(json.dumps(
         {"env": "datacenter", "base_url": base, "email": None,
-         "credential_ref": "e2e"}))
+         "credential_ref": "e2e"}), encoding="utf-8")
 
     run([str(cli), "doctor"], env, "confluence doctor",
         check_rc=False)
@@ -462,7 +462,7 @@ def main() -> int:
         "## Crawl phase timing\n\n"
         + _phase_table("confluence", report.get("conf_stats"))
         + _phase_table("local", report.get("local_stats"))
-        + "\n## Log\n```\n" + "\n".join(LOG) + "\n```\n")
+        + "\n## Log\n```\n" + "\n".join(LOG) + "\n```\n", encoding="utf-8")
     note(f"report → {args.report}")
     note("\nREAL DATA E2E OK")
     return 0

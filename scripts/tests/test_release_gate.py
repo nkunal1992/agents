@@ -22,7 +22,7 @@ def _root(tmp_path: Path, pkg: str, version: str = VER,
     d.mkdir(parents=True)
     (d / "pyproject.toml").write_text(
         """[project]\nname = "{}"\nversion = "{}"\ndependencies = [{}]\n""".format(
-            pkg, version, ", ".join(f'"{x}"' for x in deps)))
+            pkg, version, ", ".join(f'"{x}"' for x in deps)), encoding="utf-8")
     return tmp_path
 
 
@@ -191,7 +191,7 @@ def test_set_version_rewrites(tmp_path):
     root = _root(tmp_path, "confluence-knowledge")
     rg.set_version("confluence-knowledge", f"{VER}rc1", root=root)
     pp = (root / "mcp" / "confluence-knowledge" / "pyproject.toml")
-    assert f'version = "{VER}rc1"' in pp.read_text()
+    assert f'version = "{VER}rc1"' in pp.read_text(encoding="utf-8")
 
 
 def test_main_cli_rc_and_fail(tmp_path, monkeypatch, capsys):

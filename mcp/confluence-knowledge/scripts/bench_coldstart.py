@@ -47,7 +47,7 @@ def _gen_corpus(root: Path, n: int) -> None:
             f"# Document {i}\n\n"
             + " ".join(["deploy", "runbook", "verify", "owner",
                         "escalation", f"svc-{i}", "handover",
-                        "incident", "review"] * (10 + i % 5)))
+                        "incident", "review"] * (10 + i % 5)), encoding="utf-8")
 
 
 def _seed(home: Path, corpus: Path) -> dict:
@@ -126,7 +126,7 @@ def main() -> int:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
-                meta = json.loads((dhome / "http.json").read_text())
+                meta = json.loads((dhome / "http.json").read_text(encoding="utf-8"))
                 if _tcp_ok(meta["port"]):
                     t_http = time.monotonic() - t0
                     break
@@ -177,7 +177,7 @@ def main() -> int:
         time.sleep(0.5)
         for f in (dhome / ".daemon.pid",):
             try:
-                pid = int(f.read_text().strip())
+                pid = int(f.read_text(encoding="utf-8").strip())
                 if pid != proc.pid:
                     os.kill(pid, signal.SIGKILL)
             except Exception:       # noqa: BLE001,S110

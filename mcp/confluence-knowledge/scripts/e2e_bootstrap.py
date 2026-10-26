@@ -128,7 +128,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     srv, base, hits = serve()
     (ck_home / "profile.json").write_text(json.dumps(
         {"env": "datacenter", "base_url": base, "email": None,
-         "credential_ref": "e2e"}))
+         "credential_ref": "e2e"}), encoding="utf-8")
     # pre-register doctor: registration flag is correctly red (exit 4)
     doctor = run([str(cli), "doctor"], env,
                  "doctor: configured + models + heartbeat", check_rc=False)
@@ -140,7 +140,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
     ws = sandbox / "repo"
     (ws / ".vscode").mkdir(parents=True)
     (ws / ".vscode" / "mcp.json").write_text(
-        json.dumps({"servers": {"colleague-server": {"command": "x"}}}))
+        json.dumps({"servers": {"colleague-server": {"command": "x"}}}), encoding="utf-8")
     reg_out = run([str(cli), "register", "--ide", "all", "--workspace", str(ws)],
                   env, "register: wrote IDE configs")
     # the JetBrains user-level file is OS-specific; find it in the command's
@@ -149,9 +149,9 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
                if ":" in ln and ln.split(":", 1)[0] in ("written", "removed",
                                                         "backup-replaced")]
     jb = [Path(p) for p in written if "github-copilot" in p]
-    check(jb and "confluence-knowledge" in jb[0].read_text(),
+    check(jb and "confluence-knowledge" in jb[0].read_text(encoding="utf-8"),
           "register: JetBrains user config written", written)
-    merged = json.loads((ws / ".vscode" / "mcp.json").read_text())
+    merged = json.loads((ws / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
     # unified default is `knowledge` (0.13.1+); an older published
     # service still writes its per-service id — accept either shape
     kid = next((k for k in ("knowledge", "confluence-knowledge")
