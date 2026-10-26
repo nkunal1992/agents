@@ -1,7 +1,8 @@
 # sharepoint-knowledge
 
 Grounded Q&A over a SharePoint **site, library, or folder** — Site Pages
-plus document libraries (`docx`/`pdf`/`pptx`/`xlsx`/`csv`/`md`/`txt`/`html`) —
+plus document libraries (`docx`/`pdf`/`pptx`/`xlsx`/`csv`/`tsv`/`md`/`txt`/`html`,
+plus anything else that decodes as text — binaries warn and skip) —
 indexed locally by a self-installing MCP service. Same engine as
 [confluence-knowledge](confluence-knowledge.md) and
 [local-knowledge](local-knowledge.md); only the connector differs.

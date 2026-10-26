@@ -1,7 +1,9 @@
 # local-knowledge — Copilot agent bundle
 
 Grounded Q&A over a local **file or folder** — docx, pdf, pptx, xlsx, csv,
-md, txt, html — via GitHub Copilot custom agents + a local MCP service.
+tsv, md, txt, html, plus anything else that decodes as text (source,
+configs, logs, JSON/YAML, extensionless files) — via GitHub Copilot
+custom agents + a local MCP service.
 Everything runs on the user's machine; files never leave the laptop.
 
 **No credentials needed at all** — the filesystem is the ACL (the service can
@@ -22,7 +24,7 @@ exact files, and says "not in these documents" instead of guessing.
 | It refuses instead of inventing | missing info → explicit "not documented" |
 | Fully local | retrieval + rerank on pinned OSS models, zero inference cost |
 | No credentials | no accounts, tokens, or sign-in — paths only |
-| Reads real office files | docx/pptx/xlsx/pdf/csv/md/txt/html, not just code |
+| Reads real office files | docx/pptx/xlsx/pdf/csv/tsv/md/txt/html + auto-detected text (logs, configs, source), not just code |
 | Safe by default | `.env`, `id_rsa`, `*.pem`, `*credentials*` etc. are skipped and disclosed |
 
 ## Intended use
@@ -78,7 +80,7 @@ the same command; changed files update, deleted files drop out.
 |---|---|
 | `local-knowledge/*` tools missing | run bootstrap — the agent does it, or Manual Setup in the agent file |
 | models not ready | `…/venv/bin/local-knowledge prepare-models` (or `…\Scripts\` on Windows) |
-| a file isn't found in answers | check crawl `warnings` — it was skipped (unsupported type / secret-looking / too large) |
+| a file isn't found in answers | check crawl `warnings` + `summary.skipped_by_cause` — it was skipped (noise dir / secret-looking / binary / too large) |
 | any Windows | models run on ONNX Runtime — no torch needed, ARM64 included |
 | doctor shows red flags | each flag names its fix — run it and re-doctor (`model_*` → `prepare-models`, `registration` → `register`, `index:* corrupt` → `clean` + recrawl, `creds_valid` → `setup`) |
 

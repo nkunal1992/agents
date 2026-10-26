@@ -1,8 +1,12 @@
 # local-knowledge
 
 Grounded Q&A over a local **file or folder** — `docx`, `pdf`, `pptx`,
-`xlsx`, `csv`, `md`, `txt`, `html` — indexed locally on the user's machine
-by a self-installing MCP service. Same engine as
+`xlsx`, `csv`, `tsv`, `md`, `txt`, `html` — indexed locally on the user's
+machine by a self-installing MCP service. Beyond those, any file that
+*decodes as text* (source, configs, logs, JSON/YAML, extensionless
+`README`/`Makefile`…) is indexed automatically — the extension list
+is not a coverage gate. Real binaries (images, old `.doc`/`.xls`,
+archives) are disclosed-and-skipped. Same engine as
 [confluence-knowledge](confluence-knowledge.md), pointed at the filesystem.
 
 **No credentials.** There is no `setup` command — the filesystem is the
@@ -50,10 +54,15 @@ Citations are `file://` absolute paths — clickable in most IDEs.
   `connect` *directly* at such a file is the explicit override — you asked.)
 - Symlinks that resolve **outside** the chosen root are skipped and
   disclosed.
+- **Noise/cache directories are skipped and disclosed** — `.git`, `.hg`,
+  `.svn`, `node_modules`, `__pycache__`, `.venv`/`venv`, `.idea`,
+  `.vscode`, `target`, `dist`, `build`, `.tox`, `.*_cache`. Every skipped
+  directory and file is named in the crawl's warnings and counted in the
+  summary's `skipped_by_cause` — nothing is dropped silently.
 - Read-only — the service never writes to the indexed tree; its index lives
   in `~/.local-knowledge/work` (or `LOCAL_KNOWLEDGE_WORKDIR`).
-- Size caps: files over 25 MB and folder scans over 20k files are
-  disclosed-and-skipped, not crashes.
+- Size caps: files over 25 MB and folder scans over 20k files
+  (`LOCAL_KNOWLEDGE_MAX_FILES`) are disclosed-and-skipped, not crashes.
 
 ## CLI
 
@@ -73,6 +82,8 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 |---|---|
 | `LOCAL_KNOWLEDGE_HOME` | installation root (default `~/.local-knowledge`) |
 | `LOCAL_KNOWLEDGE_RERANKER` | `mixedbread-ai/mxbai-rerank-base-v1` for a heavier, stronger reranker |
+| `KNOWLEDGE_RERANK_MAX` | candidate pairs fed to the reranker per query (12; raise toward 25-40 where recall beats latency — the cross-encoder is ~95% of search time) |
+| `LOCAL_KNOWLEDGE_MAX_FILES` | folder-scan file cap (20000) — raise for very large trees |
 | `LOCAL_KNOWLEDGE_WORKDIR` | index location (default `~/.local-knowledge/work`) |
 | `KNOWLEDGE_THREADS` | native inference threads per session (default ≈ cores/4, max 4) |
 | `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 4 items |
@@ -96,7 +107,11 @@ Running jobs surface live reporting fields (`status`, `crawl_step`,
 - `stages` — structured `fetch`/`embed` counts, `pct_complete`, `eta_s`
 - terminal jobs carry `summary` — `errors_by_cause` grouped (access
   denied / server error / timeout / unreadable), `publish`
-  (staged/deleted/kept), `index_size_mb`, `pages_indexed`
+  (staged/deleted/kept), `index_size_mb`, `pages_indexed`,
+  `pages_with_content`/`pages_empty`, and `skipped_by_cause` +
+  `skip_examples` — the "it indexed only N files" answer: every
+  skipped file/directory counted by reason (noise dir, secret-looking,
+  symlink, binary, oversized, empty, parse error…)
 
 
 ## Sharing across IDEs
