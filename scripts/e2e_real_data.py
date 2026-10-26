@@ -38,6 +38,7 @@ REPO = Path(__file__).resolve().parents[1]
 CK_SRC = REPO / "mcp" / "confluence-knowledge"
 LK_SRC = REPO / "mcp" / "local-knowledge"
 sys.path.insert(0, str(CK_SRC / "scripts"))
+sys.path.insert(0, str(CK_SRC / "src"))
 from _e2e_common import call, check, fresh_venv
 from _fake_dc_work import FakeTree, Hostility, serve
 
@@ -377,8 +378,18 @@ def main() -> int:
     report = {"workspace": str(ws), "phases": []}
     sandbox = ws / "sandbox"
     # the default workspace is a fixed path reused across runs — stale
-    # venvs/homes/index DBs from earlier runs must not poison this one
+    # venvs/homes/index DBs from earlier runs must not poison this one.
+    # A crashed run can leave its sandbox daemons alive holding log/index
+    # handles — POSIX tolerates rmtree on open files, Windows fails
+    # WinError 32 (and the orphan keeps its port either way). Stop them
+    # first via the hardened kill path.
     if sandbox.exists():
+        from confluence_knowledge import watchdog
+        for dh in (sandbox / "home").glob("**/daemon/*/"):
+            try:
+                watchdog.stop_daemon(dh, timeout=5)
+            except Exception:           # noqa: BLE001,S110 — a dead or
+                pass                    # foreign daemon is fine; rmtree decides
         shutil.rmtree(sandbox)
     home = sandbox / "home"; home.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
