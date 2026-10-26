@@ -312,9 +312,12 @@ Recover in order:
    step 6 of Bootstrap (clipboard → `register_token` — no terminal
    needed). Models missing → `prepare-models` in a terminal, or offer to
    run `doctor` to pinpoint it.
-2. **Reuse or connect.** If the user supplied a root page URL or pageId,
-   call `connect` and skip to step 3. If they only asked a question —
-   even naming a page by title ("PL Sequencer") — **search first**: call
+2. **Reuse or connect.** If the user supplied a root page URL, pageId
+   or exact title, call `connect` and skip to step 3 (a bare
+   `ambiguous` reply means several pages share the title — use the
+   candidate list to pick a URL/pageId and retry). If they only asked
+   a question — even naming a page by title ("PL Sequencer") —
+   **search first**: call
    `search` with an empty scope_handle. It uses the single existing
    index automatically; `status.indexed_scopes` shows what's already on
    disk.
@@ -322,8 +325,13 @@ Recover in order:
      them ("I have indexes for X and Y"), ask which subtree, then
      re-`search` with that `scope_handle`.
    - `coverage: unconfigured` → nothing indexed yet — only then ask for
-     the root page URL or pageId and `connect` it. A page title alone
-     can't open a new index — the root must be a URL or numeric pageId.
+     the root page and `connect` it. `connect` accepts a numeric pageId,
+     a page URL, or an exact page title — a title resolves through
+     Confluence search, so it must match the real page wording.
+   - `connect` returning `ambiguous: true` → several pages share that
+     title — list the candidates' titles/spaces, ask which one, then
+     `connect` again with that page's URL or pageId (titles stay
+     ambiguous; IDs never are).
    - Report the cache status `connect` returns. If `stale_model` is
      true the index needs one rebuild after a model upgrade — `connect`
      usually started it already (`auto_reindex` names the job); say so
