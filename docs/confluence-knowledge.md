@@ -296,6 +296,14 @@ The server is designed to stay out of the way on a developer laptop:
   daemon is unreachable (`daemon` field discloses; #283). `search`
   carries `timings` (`retrieval_ms`, `search_ms`, `proxy_wait_ms`) so
   slow-query reports show where the time went.
+- **Self-refresh after upgrades**: a stdio server keeps the code it
+  spawned with, so `pip -U` used to leave it stale until a window
+  reload. A watcher now compares the installed version every
+  `KNOWLEDGE_PROXY_POLL_S` (default 60 s, `0` disables); two
+  consecutive mismatches mark `status.stale_code` and the process
+  exits cleanly so the client's next request respawns fresh code —
+  deferred while a crawl worker runs. `KNOWLEDGE_PROXY_SELFKILL=0`
+  opts out entirely.
 - **Parallel fetching**: page bodies and child listings run on
   `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6, max 16) while
   the submission window breathes with system pressure (`fetch_cap` in

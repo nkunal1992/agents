@@ -645,3 +645,95 @@ def test_connect_url_skips_search(wired, monkeypatch):
     calls = _wire_titles(monkeypatch, [])
     server.connect("https://c/pages/123")
     assert calls == []
+
+
+# ---- #272: stale-code self-respawn watcher ----
+
+def _arm_watcher(monkeypatch, seq_loaded_then_cur=("1.0", "9.9")):
+    """Install a fake version source: first call (loaded at start)
+    differs from every later poll."""
+    calls = []
+    loaded, cur = seq_loaded_then_cur
+
+    def fake_version():
+        calls.append(1)
+        return loaded if len(calls) == 1 else cur
+
+    monkeypatch.setenv("KNOWLEDGE_PROXY_POLL_S", "0.02")
+    monkeypatch.setattr(server, "_installed_version", fake_version)
+    monkeypatch.setattr(server, "_WATCHER_STARTED", None)
+    monkeypatch.setattr(server, "_STALE_CODE", False)
+    return calls
+
+
+def test_stale_watcher_marks_flag_then_exits(wired, monkeypatch):
+    _arm_watcher(monkeypatch)
+    exits = []
+    monkeypatch.setattr(server.os, "_exit", lambda c: exits.append(c))
+    server._start_stale_watcher()
+    end = time.monotonic() + 3
+    while not exits and time.monotonic() < end:
+        time.sleep(0.02)
+    assert exits and exits[0] == 0 and server._STALE_CODE is True
+
+
+def test_stale_watcher_flap_does_not_exit(wired, monkeypatch):
+    """The debounce: a version flapping between old and new mid-install
+    resets the skew count every other poll — never reaching two, so no
+    exit regardless of timing."""
+    calls = []
+
+    def fake_version():
+        calls.append(1)
+        if len(calls) == 1:
+            return "1.0"                    # loaded at start
+        return "9.9" if len(calls) % 2 else "1.0"   # flap every poll
+
+    monkeypatch.setenv("KNOWLEDGE_PROXY_POLL_S", "0.02")
+    monkeypatch.setattr(server, "_installed_version", fake_version)
+    monkeypatch.setattr(server, "_WATCHER_STARTED", None)
+    monkeypatch.setattr(server, "_STALE_CODE", False)
+    exits = []
+    monkeypatch.setattr(server.os, "_exit", lambda c: exits.append(c))
+    server._start_stale_watcher()
+    time.sleep(0.25)          # ~12 polls — a stable skew exits by 2
+    assert exits == []
+
+
+def test_stale_watcher_defers_exit_while_crawl_runs(wired, monkeypatch):
+    _arm_watcher(monkeypatch)
+
+    class Alive:
+        def is_alive(self):
+            return True
+
+    monkeypatch.setattr(server, "_workers", {"x": Alive()})
+    exits = []
+    monkeypatch.setattr(server.os, "_exit", lambda c: exits.append(c))
+    server._start_stale_watcher()
+    time.sleep(0.15)
+    assert exits == [] and server._STALE_CODE is True
+
+
+def test_stale_watcher_stable_version_stays(wired, monkeypatch):
+    _arm_watcher(monkeypatch, seq_loaded_then_cur=("1.0", "1.0"))
+    exits = []
+    monkeypatch.setattr(server.os, "_exit", lambda c: exits.append(c))
+    server._start_stale_watcher()
+    time.sleep(0.12)
+    assert exits == [] and server._STALE_CODE is False
+
+
+def test_stale_watcher_disabled_by_env(wired, monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_PROXY_SELFKILL", "0")
+    monkeypatch.setattr(server, "_WATCHER_STARTED", None)
+    server._start_stale_watcher()
+    assert server._WATCHER_STARTED is None       # never armed
+    time.sleep(0.06)     # earlier generations drain on their last tick
+    assert not any(t.name == "stale-watcher" and t.is_alive()
+                   for t in threading.enumerate())
+
+
+def test_status_reports_stale_code(wired, monkeypatch):
+    monkeypatch.setattr(server, "_STALE_CODE", True)
+    assert server.status()["stale_code"] is True

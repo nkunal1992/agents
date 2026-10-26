@@ -96,6 +96,7 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
 | `LOCAL_KNOWLEDGE_DAEMON` | **Local-first (#285): off by default** — every tool runs in the window's own server process; crawls resume automatically via `job_lease` + checkpoints if the window dies. `1` opts back into the shared daemon (`KNOWLEDGE_DAEMON=1` enables it for all services at once). |
+| `KNOWLEDGE_PROXY_POLL_S` | Seconds between installed-version checks (default 60, `0` disables). Two mismatches → `status.stale_code` + clean exit so the IDE respawns fresh code; `KNOWLEDGE_PROXY_SELFKILL=0` opts out. |
 
 ### Three-tier reporting
 

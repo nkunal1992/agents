@@ -277,3 +277,27 @@ def test_descendent_alias_needs_same_principal(sp_env, monkeypatch):
     sp_env._index_for(a).meta_set("principal", "other-user")
     c2 = sp_env.connect(f"item:{DRIVE_ID}:f1")
     assert "covered_by" not in c2 and c2["cached"] is False
+
+
+def test_stale_watcher_exits_on_version_skew(sp_env, monkeypatch):
+    """#272: installed version diverging from the loaded one for two
+    polls → the server exits so the client respawns fresh code."""
+    import time
+
+    from sharepoint_knowledge import server_sp
+    calls = []
+
+    def fake_version():
+        calls.append(1)
+        return "1.0" if len(calls) == 1 else "9.9"
+
+    monkeypatch.setenv("KNOWLEDGE_PROXY_POLL_S", "0.02")
+    monkeypatch.setattr(server_sp, "_installed_version", fake_version)
+    monkeypatch.setattr(server_sp, "_WATCHER_STARTED", None)
+    exits = []
+    monkeypatch.setattr(server_sp.os, "_exit", lambda c: exits.append(c))
+    server_sp._start_stale_watcher()
+    end = time.monotonic() + 3
+    while not exits and time.monotonic() < end:
+        time.sleep(0.02)
+    assert exits and exits[0] == 0 and server_sp._STALE_CODE

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 import time
 import uuid
@@ -116,6 +117,67 @@ def _feedback_for(scope_key: str) -> FeedbackStore:
 
 def _any_worker_alive() -> bool:
     return any(t.is_alive() for t in list(_workers.values()))
+
+
+_STALE_CODE = False
+_WATCHER_STARTED = None   # generation sentinel — see _start_stale_watcher
+
+
+def _installed_version() -> str | None:
+    try:
+        from importlib.metadata import version
+        return version("sharepoint-knowledge")
+    except Exception:            # noqa: BLE001 — not installed (src run)
+        return None               # → nothing to compare against
+
+
+def _start_stale_watcher() -> None:
+    """#272: a stdio server keeps the code it spawned with — `pip -U`
+    leaves it stale until window reload. Watch the installed version;
+    on skew confirmed by two polls (debounce for a mid-install flap)
+    log to stderr, expose `stale_code` on status, and exit so the
+    client's next request respawns fresh code. Deferred while a crawl
+    worker lives — killing it just hands the resumable orphan to
+    another window. KNOWLEDGE_PROXY_SELFKILL=0 disables."""
+    global _WATCHER_STARTED
+    if _WATCHER_STARTED is not None:
+        return
+    try:
+        poll = float(os.environ.get("KNOWLEDGE_PROXY_POLL_S", "60"))
+    except ValueError:
+        poll = 60.0
+    loaded = _installed_version()
+    if (poll <= 0 or loaded is None
+            or os.environ.get("KNOWLEDGE_PROXY_SELFKILL") == "0"):
+        return
+    _WATCHER_STARTED = gen = object()
+
+    def watch() -> None:
+        global _STALE_CODE
+        skew = 0
+        # the generation sentinel is the kill switch: clearing
+        # _WATCHER_STARTED ends THIS watcher only — a later armer gets a
+        # new sentinel and can't resurrect dead generations (monkeypatch
+        # teardown relies on that so watchers never outlive a test)
+        while _WATCHER_STARTED is gen:
+            time.sleep(poll)
+            cur = _installed_version()
+            if cur == loaded:
+                skew = 0
+                _STALE_CODE = False
+                continue
+            if cur is None:       # metadata briefly gone mid-install
+                continue
+            skew += 1
+            _STALE_CODE = True
+            print(f"knowledge: installed {cur} != loaded {loaded} — "
+                  "will exit for a fresh respawn", file=sys.stderr)
+            if (skew >= 2 and _WATCHER_STARTED is gen
+                    and not _any_worker_alive()):
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True,
+                     name="stale-watcher").start()
 
 
 def _on_models_unloaded() -> None:
@@ -394,6 +456,9 @@ def status() -> dict:
         },
         "daemon": ("running" if _daemon_on() and _rpc().daemon_alive()
                    else "off" if not _daemon_on() else "starting"),
+        # #272: the installed package moved ahead of the code this
+        # process loaded — the watcher exits for respawn once idle
+        "stale_code": _STALE_CODE,
         "live_scopes": sorted(_scopes),
         # persisted scopes — visible even when _scopes is empty (new
         # chat, stdio process, restarted daemon) so the agent can reuse
@@ -1121,6 +1186,7 @@ def main() -> None:
     # confluence_knowledge.resources / .models for the policy
     lower_priority()
     _pool.start_reaper()
+    _start_stale_watcher()
     mcp.run()
 
 
