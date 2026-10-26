@@ -215,14 +215,16 @@ One index per (site, account, root) lives in `~/.confluence-knowledge`
 a page once in VS Code makes it queryable from Windsurf, Cursor or
 JetBrains on the **very next query**, with no IDE reload.
 
-How it works:
+How it works (#285 — local-first):
 
-- Each IDE window's MCP server is a thin read-only **proxy** (#189); a
-  detached per-install **daemon** owns the index, crawl workers and the
-  model pool (#206). Two installs = two daemons over the same index.
-- `job_lease` (a SQLite row) fences crawls across processes — a second
-  `start_crawl` on a running scope never duplicates work, and a kill
-  mid-crawl lets the other install's daemon resume it.
+- Each IDE window's MCP server runs **every tool in-process** — reads,
+  writes and crawl workers all live in that window's server. No shared
+  daemon, no watchdog, no rpc polling.
+- `job_lease` (a SQLite row) still fences crawls across processes — a
+  second `start_crawl` on a running scope never duplicates work, and a
+  job whose worker died is reclaimed by the next `status`/`connect`/
+  `crawl_step`/`wait_for_crawl` call in any window (durable queue +
+  per-page checkpoints make resume cheap).
 - `snapshot_epoch` is bumped inside every publish; each query re-reads it
   — sibling installs see a new snapshot automatically.
 
@@ -239,7 +241,7 @@ Rules of the road:
   writes VS Code + JetBrains + Windsurf (`~/.codeium/windsurf/
   mcp_config.json`) + Cursor (`~/.cursor/mcp.json`,
   `<repo>/.cursor/mcp.json`) configs.
-- Each install's daemon holds its own model sessions (~0.2 GB idle —
+- Each window's server holds its own model sessions (~0.2 GB idle —
   the reaper unloads after inactivity). Prefer one shared install if RAM
   is tight; `stop`/`clean` act per install.
 
@@ -282,17 +284,18 @@ The server is designed to stay out of the way on a developer laptop:
   `KNOWLEDGE_NO_NICE=1` opts out.
 - `KNOWLEDGE_IDLE_UNLOAD_S` sets the idle timeout in seconds
   (0 disables unloading).
-- **Proxy-daemon** (#189/#196): on by default — `CONF_KNOWLEDGE_DAEMON=0`
-  disables. A detached background daemon owns the index, crawl workers,
-  and model pool; each IDE window's MCP server is a thin read-only
-  proxy. Crawls survive IDE restarts/crashes; a new window attaches to
-  the running job. When the daemon is unreachable or times out,
-  read-only tools (`search`, `verify_citations`, `feedback_report`) run
-  locally instead of erroring — the response's `daemon` field discloses
-  the fallback; write tools keep refusing with `daemon: starting` plus
-  the concrete `reason` (#283). `search` carries `timings`
-  (`retrieval_ms`, `search_ms`, `proxy_wait_ms`) so slow-query reports
-  show where the time went.
+- **Local-first** (#285): every tool runs in the window's own server
+  process — no daemon is spawned. Crawl workers are in-process threads
+  fenced by the `job_lease` row; a window closing mid-crawl leaves a
+  resumable job that the next `status`/`connect`/`crawl_step` call in
+  any window picks up automatically.
+- **Optional shared daemon** (#189/#196): `CONF_KNOWLEDGE_DAEMON=1` (or
+  `KNOWLEDGE_DAEMON=1` for all services) restores the legacy mode — a
+  detached daemon + watchdog owns crawls/models and serves HTTP; each
+  window's server proxies to it. Reads still fall back locally when the
+  daemon is unreachable (`daemon` field discloses; #283). `search`
+  carries `timings` (`retrieval_ms`, `search_ms`, `proxy_wait_ms`) so
+  slow-query reports show where the time went.
 - **Parallel fetching**: page bodies and child listings run on
   `KNOWLEDGE_FETCH_CONCURRENCY` worker threads (default 6, max 16) while
   the submission window breathes with system pressure (`fetch_cap` in

@@ -95,7 +95,7 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `KNOWLEDGE_FETCH_CONCURRENCY` / `KNOWLEDGE_FETCH_MAX` | fetch workers (6) / adaptive ceiling — default 0 caps the window at the base; the window halves under CPU ≥75 % and bottoms at 1 over ≥90 % (`fetch_cap` in progress) |
 | `KNOWLEDGE_BATTERY_SAVER` | `0` disables on-battery throttling (fetch concurrency halves, ~50% embed duty cycle) |
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
-| `LOCAL_KNOWLEDGE_DAEMON` | `0` disables the proxy-daemon architecture (#189/#196). **On by default** — a long-lived background daemon owns the index/crawls/models; the per-window MCP server is a thin read-only proxy. IDE restarts no longer interrupt crawls; the daemon survives and a new window reattaches. |
+| `LOCAL_KNOWLEDGE_DAEMON` | **Local-first (#285): off by default** — every tool runs in the window's own server process; crawls resume automatically via `job_lease` + checkpoints if the window dies. `1` opts back into the shared daemon (`KNOWLEDGE_DAEMON=1` enables it for all services at once). |
 
 ### Three-tier reporting
 
@@ -120,11 +120,12 @@ One index per (realpath, machine) lives in `~/.local-knowledge` — indexing
 a folder once in one IDE makes it queryable from every other IDE/chat on
 the machine on the **very next query**, no reload needed.
 
-- Each IDE window's MCP server is a thin read-only proxy; a detached
-  per-install daemon owns the index + crawl workers (#189/#206). Separate
-  installs share the same index files over WAL.
+- Each IDE window's MCP server runs every tool in-process (#285) — the
+  index files are shared over WAL, so separate installs read each
+  other's snapshots immediately.
 - `job_lease` fences crawls across processes — a second `start_crawl` on a
-  running scope never duplicates work.
+  running scope never duplicates work; an orphaned job is reclaimed by
+  the next `status`/`connect`/`crawl_step` call in any window.
 - `snapshot_epoch` bumps inside every publish; each query re-reads it, so
   a sibling install's crawl is visible automatically.
 
