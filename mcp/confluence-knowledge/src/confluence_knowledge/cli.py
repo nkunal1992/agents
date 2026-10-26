@@ -23,6 +23,7 @@ from .settings import (
     SiteProfile,
     default_home,
     ensure_gitignore,
+    reconfigure_console,
     resolve_workdir,
 )
 
@@ -296,6 +297,7 @@ def _doctor() -> int:
 
 
 def main() -> None:
+    reconfigure_console()
     ap = argparse.ArgumentParser(prog="confluence-knowledge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     st = sub.add_parser("setup", help="guided credential + config setup")

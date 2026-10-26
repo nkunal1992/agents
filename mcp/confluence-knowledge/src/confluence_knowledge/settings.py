@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -68,6 +69,17 @@ def workspace_index_root(workdir: Path, index_dir: str = INDEX_DIR_NAME) -> Path
 
 def _is_windows() -> bool:
     return os.name == "nt"
+
+
+def reconfigure_console() -> None:
+    """cp1252 consoles (default on Western Windows) can't encode →/✗ —
+    doctor and update crashed printing them there (#316). Degrade
+    unencodable glyphs to '?' rather than raising; streams without a
+    reconfigure method (capture buffers, pipes) are left alone."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
 
 
 def reject_unsafe_path(path: Path) -> Path:

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from confluence_knowledge.retrieval import prepare_models
-from confluence_knowledge.settings import SetupError
+from confluence_knowledge.settings import SetupError, reconfigure_console
 
 from .settings_local import (
     APP_NAME,
@@ -95,6 +95,7 @@ def _doctor() -> int:
 
 
 def main() -> None:
+    reconfigure_console()
     ap = argparse.ArgumentParser(prog=APP_NAME)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("doctor", help="verify install + models")

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from confluence_knowledge.registration import register as _register
 from confluence_knowledge.retrieval import prepare_models
-from confluence_knowledge.settings import SetupError, ensure_gitignore
+from confluence_knowledge.settings import SetupError, ensure_gitignore, reconfigure_console
 
 from .settings_sp import (
     APP_NAME,
@@ -164,6 +164,7 @@ def _doctor() -> int:
 
 
 def main() -> None:
+    reconfigure_console()
     p = argparse.ArgumentParser(prog="sharepoint-knowledge",
                                 description="Local SharePoint indexer + "
                                             "grounded-Q&A MCP service")

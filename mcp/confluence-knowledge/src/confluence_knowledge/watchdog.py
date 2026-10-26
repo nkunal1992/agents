@@ -248,6 +248,9 @@ def restart_daemon(home: Path, timeout: float = 8) -> None:
 def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s watchdog %(message)s")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")   # cp1252 consoles #316
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         print("usage: python -m confluence_knowledge.watchdog "

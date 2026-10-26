@@ -557,6 +557,9 @@ class Daemon:
 def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s daemon %(message)s")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")   # cp1252 consoles #316
     # self-mark FIRST, before any service module can be imported: the
     # role flag is normally injected by ensure_daemon's spawn env, but a
     # daemon launched directly (`python -m ...daemon`, an external
