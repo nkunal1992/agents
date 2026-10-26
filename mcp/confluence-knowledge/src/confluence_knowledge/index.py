@@ -788,6 +788,97 @@ class Index:
         self._warm_search_cache()
         return {"staged": staged_n, "deleted": deleted_n, "kept": kept}
 
+    def publish_incremental(self, job_id: str) -> int:
+        """#213 — promote this job's already-staged pages into the live
+        snapshot mid-crawl: readers see a consistent growing prefix
+        instead of an empty index until job end. Unlike publish() this
+        NEVER deletes — a page the crawl hasn't reached yet is not proof
+        of removal; the job-end publish still does the full reconcile.
+
+        Per-page atomicity is inherited from upsert_page (a staged page
+        is complete in one commit), so promotion can run while a flush
+        is in flight: either a whole staged page moves or none of it.
+
+        Deletions, dead-stage purge and the O(corpus) term-stats rebuild
+        stay with publish() — BM25 keeps the last full snapshot's idf
+        for the crawl's duration, which is self-consistent.
+
+        Returns the number of pages promoted (0 when the job went stale
+        or nothing was staged)."""
+        with self.lock, _LockedRetry(self.db):
+            row = self.db.execute(
+                "SELECT state FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None or row[0] != "running":
+                return 0
+            staged = self.db.execute(
+                "SELECT DISTINCT page_id FROM pages_stage WHERE job_id=?",
+                (job_id,)).fetchall()
+            if not staged:
+                return 0
+            doomed = ("SELECT chunk_id FROM chunks WHERE page_id IN "
+                      "(SELECT page_id FROM pages_stage WHERE job_id=?)")
+            for t in ("chunks_fts", "vectors", "sparse_vectors"):
+                self.db.execute(
+                    f"DELETE FROM {t} WHERE chunk_id IN ({doomed})",  # nosec B608
+                    (job_id,))
+            self.db.execute(
+                "DELETE FROM chunks WHERE page_id IN "
+                "(SELECT page_id FROM pages_stage WHERE job_id=?)", (job_id,))
+            self.db.execute(
+                "DELETE FROM pages WHERE page_id IN "
+                "(SELECT page_id FROM pages_stage WHERE job_id=?)", (job_id,))
+            self.db.execute(
+                "INSERT INTO pages(page_id,parent_id,title,url,level,version,"
+                "fetched_at,content_hash,warnings,active) SELECT page_id,"
+                "parent_id,title,url,level,version,fetched_at,content_hash,"
+                "warnings,1 FROM pages_stage WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO chunks(chunk_id,page_id,heading,kind,ordinal,"
+                "text,active) SELECT chunk_id,page_id,heading,kind,ordinal,"
+                "text,1 FROM chunks_stage WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO chunks_fts(chunk_id,text) SELECT chunk_id,text "
+                "FROM chunks_fts_stage WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO vectors SELECT chunk_id,vec FROM vectors_stage "
+                "WHERE job_id=?", (job_id,))
+            self.db.execute(
+                "INSERT INTO sparse_vectors SELECT chunk_id,payload "
+                "FROM sparse_vectors_stage WHERE job_id=?", (job_id,))
+            if self._ensure_ann():
+                dim = self.db.execute(
+                    "SELECT length(vec)/4 FROM vectors LIMIT 1"
+                ).fetchone()
+                if dim and dim[0]:
+                    try:
+                        self.db.execute(
+                            f"CREATE VIRTUAL TABLE IF NOT EXISTS "
+                            f"vec_chunks USING vec0(chunk_id TEXT "
+                            f"PRIMARY KEY, embedding float[{dim[0]}] "
+                            f"distance_metric=cosine)")
+                    except sqlite3.OperationalError:
+                        self.db.execute("DROP TABLE IF EXISTS vec_chunks")
+                        self.db.execute(
+                            f"CREATE VIRTUAL TABLE vec_chunks USING "
+                            f"vec0(chunk_id TEXT PRIMARY KEY, embedding "
+                            f"float[{dim[0]}] distance_metric=cosine)")
+                    self.db.execute(
+                        "DELETE FROM vec_chunks WHERE chunk_id NOT IN "
+                        "(SELECT chunk_id FROM vectors)")
+                    self.db.execute(
+                        "INSERT INTO vec_chunks(chunk_id,embedding) "
+                        "SELECT chunk_id,vec FROM vectors WHERE "
+                        "chunk_id NOT IN (SELECT chunk_id FROM "
+                        "vec_chunks)")
+            for t in _STAGE_TABLES:
+                self.db.execute(
+                    f"DELETE FROM {t} WHERE job_id=?", (job_id,))  # nosec B608
+            self.db.execute(
+                "INSERT OR REPLACE INTO meta VALUES ('snapshot_epoch', ?)",
+                (str(self.snapshot_epoch() + 1),))
+        self._warm_search_cache()
+        return len(staged)
+
     def _warm_search_cache(self) -> None:
         """Pre-build the retrieval structures off the request path — the
         first search after a publish used to pay the full postings scan

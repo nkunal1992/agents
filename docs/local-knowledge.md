@@ -97,6 +97,7 @@ Citations are `file://` absolute paths — clickable in most IDEs.
 | `KNOWLEDGE_NOTIFY` | `0` disables the desktop notification on crawl done/error/cancelled (default on) |
 | `LOCAL_KNOWLEDGE_DAEMON` | **Local-first (#285): off by default** — every tool runs in the window's own server process; crawls resume automatically via `job_lease` + checkpoints if the window dies. `1` opts back into the shared daemon (`KNOWLEDGE_DAEMON=1` enables it for all services at once). |
 | `KNOWLEDGE_PROXY_POLL_S` | Seconds between installed-version checks (default 60, `0` disables). Two mismatches → `status.stale_code` + clean exit so the IDE respawns fresh code; `KNOWLEDGE_PROXY_SELFKILL=0` opts out. |
+| `KNOWLEDGE_PUBLISH_EVERY` / `KNOWLEDGE_PUBLISH_EVERY_S` | Incremental publish (#213): staged pages go live mid-crawl every N pages (default 200) or T seconds (default 120), whichever first — search sees a consistent growing prefix. `0` pages disables. |
 
 ### Three-tier reporting
 

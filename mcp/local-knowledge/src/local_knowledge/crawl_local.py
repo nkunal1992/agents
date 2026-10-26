@@ -302,6 +302,13 @@ class LocalCrawler:
         processed = 0
         # throttled checkpoints — full state used to be rewritten per item
         last_ckpt, last_ckpt_n = time.monotonic(), 0
+        # #213 incremental publish: readers see a consistent growing
+        # prefix instead of nothing until job end (deletions + term-stats
+        # stay with the job-end publish). Parity with confluence crawl.
+        pub_every = int(os.environ.get("KNOWLEDGE_PUBLISH_EVERY", "200"))
+        pub_every_s = float(
+            os.environ.get("KNOWLEDGE_PUBLISH_EVERY_S", "120"))
+        last_pub, last_pub_n = time.monotonic(), len(seen)
         # bounded fetch pipeline — KNOWLEDGE_FETCH_CONCURRENCY workers read
         # files/dirs ahead while the main thread extracts+embeds+stages;
         # unchanged files (same content_hash) reuse their live rows
@@ -468,6 +475,15 @@ class LocalCrawler:
                         errors, seen, levels, warns, keep_failed)
                     _save_stats()
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
+                if pub_every and (len(seen) - last_pub_n >= pub_every
+                                  or time.monotonic() - last_pub
+                                  >= pub_every_s):
+                    t_pub = time.monotonic()
+                    stats["inc_publish"] = stats.get("inc_publish", 0) \
+                        + self.index.publish_incremental(job_id)
+                    stats["publish_ms"] = stats.get("publish_ms", 0.0) \
+                        + (time.monotonic() - t_pub) * 1000
+                    last_pub, last_pub_n = time.monotonic(), len(seen)
                 cur = (self.control.fetch_concurrency(conc)
                        if self.control is not None else conc)
                 while queue and len(inflight) < cur:
@@ -604,6 +620,14 @@ class LocalCrawler:
             self.index.meta_set(f"publish:{job_id}", json.dumps(pub))
             self.index.set_model_id(_MODEL_ID)
             _save_stats()
+        elif pub_every:
+            # step boundary with work remaining — flush staged pages to
+            # readers before handing back (#213)
+            t_pub = time.monotonic()
+            stats["inc_publish"] = stats.get("inc_publish", 0) \
+                + self.index.publish_incremental(job_id)
+            stats["publish_ms"] = stats.get("publish_ms", 0.0) \
+                + (time.monotonic() - t_pub) * 1000
         self.index.save_job(job_id, "done" if not queue else "running",
                             list(queue) + sorted(flush_entries), errors)
         return {"job_id": job_id,

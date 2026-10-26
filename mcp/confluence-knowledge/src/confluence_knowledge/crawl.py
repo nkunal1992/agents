@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 import uuid
@@ -340,6 +341,15 @@ class Crawler:
         # upsert_page is idempotent so re-staging is safe. In-flight
         # fetches are included in the checkpoint so they can't be lost.
         last_ckpt, last_ckpt_n = time.monotonic(), 0
+        # #213 incremental publish: readers see a consistent growing
+        # prefix instead of nothing until job end. Every KNOWLEDGE_
+        # PUBLISH_EVERY pages or KNOWLEDGE_PUBLISH_EVERY_S seconds —
+        # whichever first (0 pages disables). Deletions + term-stats
+        # stay with the job-end publish.
+        pub_every = int(os.environ.get("KNOWLEDGE_PUBLISH_EVERY", "200"))
+        pub_every_s = float(
+            os.environ.get("KNOWLEDGE_PUBLISH_EVERY_S", "120"))
+        last_pub, last_pub_n = time.monotonic(), len(seen)
         # bounded fetch pipeline: KNOWLEDGE_FETCH_CONCURRENCY workers run
         # the network I/O (page body + child listing) while the main
         # thread does the CPU work — extract, embed (micro-batched),
@@ -507,6 +517,15 @@ class Crawler:
                         + [f"page:{p}" for p in flush_pids],
                         errors, seen, levels, keep_failed)
                     last_ckpt, last_ckpt_n = time.monotonic(), processed
+                if pub_every and (len(seen) - last_pub_n >= pub_every
+                                  or time.monotonic() - last_pub
+                                  >= pub_every_s):
+                    t_pub = time.monotonic()
+                    stats["inc_publish"] = stats.get("inc_publish", 0) \
+                        + self.index.publish_incremental(job_id)
+                    stats["publish_ms"] = stats.get("publish_ms", 0.0) \
+                        + (time.monotonic() - t_pub) * 1000
+                    last_pub, last_pub_n = time.monotonic(), len(seen)
                 # keep the window full — never submit beyond the batch
                 # bound or the adaptive cap (#179)
                 cur = (self.control.fetch_concurrency(conc)
@@ -681,6 +700,14 @@ class Crawler:
                     "remaining": len(queue), "pages_seen": len(seen),
                     "errors": errors}
         if queue:
+            if pub_every:
+                # step boundary with work remaining — flush staged pages
+                # to readers before handing back (#213)
+                t_pub = time.monotonic()
+                stats["inc_publish"] = stats.get("inc_publish", 0) \
+                    + self.index.publish_incremental(job_id)
+                stats["publish_ms"] = stats.get("publish_ms", 0.0) \
+                    + (time.monotonic() - t_pub) * 1000
             self.index.save_job(job_id, "running",
                                 list(queue)
                                 + [f"page:{p}" for p in flush_pids],

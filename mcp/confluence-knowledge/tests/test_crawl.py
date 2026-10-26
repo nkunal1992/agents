@@ -131,3 +131,62 @@ def test_out_of_subtree_page_skipped(tmp_path):
     c.step(job, batch=20)
     assert "4" not in idx.active_pages()
     del CHILDREN["3"], PAGES["4"]
+
+
+def test_incremental_publish_visible_mid_crawl(tmp_path, monkeypatch):
+    """#213: a step boundary publishes staged pages — readers see a
+    consistent prefix instead of an empty index until job end."""
+    monkeypatch.setenv("KNOWLEDGE_PUBLISH_EVERY", "1")
+    idx = Index(tmp_path / "s.db")
+    c = Crawler(_dc_client(), idx, "datacenter")
+    job = c.start("1")
+    r1 = c.step(job, batch=1)               # root only — job still running
+    assert r1["state"] == "running"
+    live = idx.active_pages()
+    assert "1" in live                       # promoted at the step boundary
+    assert "2" not in live                   # unreached stays absent
+    epoch_mid = idx.snapshot_epoch()
+    r2 = c.step(job, batch=10)
+    assert r2["state"] == "done"
+    assert set(idx.active_pages()) == {"1", "2", "3"}
+    assert idx.snapshot_epoch() > epoch_mid  # job-end publish still bumps
+
+
+def test_incremental_publish_never_deletes(tmp_path, monkeypatch):
+    """#213: mid-crawl publish is additive — a page the crawl hasn't
+    reached is not proof of removal. The job-end reconcile still does
+    the deletion."""
+    from confluence_knowledge.extract import extract_chunks
+    monkeypatch.setenv("KNOWLEDGE_PUBLISH_EVERY", "1")
+    idx = Index(tmp_path / "s.db")
+    chunks, _ = extract_chunks("<p>legacy body</p>")
+    for ch in chunks:
+        ch.chunk_id = f"old:{ch.ordinal}"
+    idx.upsert_page({"page_id": "old", "title": "Old", "url": "/old",
+                     "version": 1}, chunks, None, None)
+    idx.publish({"old"})
+    assert "old" in idx.active_pages()
+    c = Crawler(_dc_client(), idx, "datacenter")
+    job = c.start("1")
+    c.step(job, batch=1)
+    assert "old" in idx.active_pages()       # survived the incremental
+    assert "1" in idx.active_pages()         # new content also visible
+    r = c.step(job, batch=10)
+    assert r["state"] == "done"
+    assert "old" not in idx.active_pages()   # reconcile still deletes
+
+
+def test_publish_incremental_guards_stale_job(tmp_path):
+    """A superseded job's stage rows must never reach live."""
+    from confluence_knowledge.extract import extract_chunks
+    idx = Index(tmp_path / "s.db")
+    idx.create_job("j1", "1")
+    idx.save_job("j1", "running", ["page:1"], [])
+    chunks, _ = extract_chunks("<p>x</p>")
+    for ch in chunks:
+        ch.chunk_id = f"p:{ch.ordinal}"
+    idx.upsert_page({"page_id": "p", "title": "P", "url": "/p",
+                     "version": 1}, chunks, None, None, job_id="j1")
+    idx.save_job("j1", "abandoned", [], [])
+    assert idx.publish_incremental("j1") == 0
+    assert "p" not in idx.active_pages()

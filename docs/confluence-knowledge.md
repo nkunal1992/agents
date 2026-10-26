@@ -300,6 +300,7 @@ The server is designed to stay out of the way on a developer laptop:
   spawned with, so `pip -U` used to leave it stale until a window
   reload. A watcher now compares the installed version every
   `KNOWLEDGE_PROXY_POLL_S` (default 60 s, `0` disables); two
+| `KNOWLEDGE_PUBLISH_EVERY` / `KNOWLEDGE_PUBLISH_EVERY_S` | Incremental publish (#213): staged pages go live mid-crawl every N pages (default 200) or T seconds (default 120), whichever first — search sees a consistent growing prefix. `0` pages disables. |
   consecutive mismatches mark `status.stale_code` and the process
   exits cleanly so the client's next request respawns fresh code —
   deferred while a crawl worker runs. `KNOWLEDGE_PROXY_SELFKILL=0`
