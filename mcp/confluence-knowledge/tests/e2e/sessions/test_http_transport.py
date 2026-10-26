@@ -18,10 +18,9 @@ import time
 from pathlib import Path
 
 import pytest
+from _wait import respawn_deadline, supervision_tail, watchdog_failure
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-
-from _wait import respawn_deadline, supervision_tail, watchdog_failure
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("KNOWLEDGE_E2E") != "1",

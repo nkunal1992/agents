@@ -5,10 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent))
-import _wait  # noqa: E402
+import _wait
 
 
 def test_respawn_deadline_default_and_override(monkeypatch):

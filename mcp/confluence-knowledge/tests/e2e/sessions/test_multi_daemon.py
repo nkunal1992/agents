@@ -14,7 +14,6 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-
 from _wait import respawn_deadline, supervision_tail, watchdog_failure
 
 pytestmark = pytest.mark.skipif(
