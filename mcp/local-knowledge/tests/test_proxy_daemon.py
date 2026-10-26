@@ -82,12 +82,18 @@ def test_label(rpc):
 
 
 def test_daemon_role_env(monkeypatch):
-    # default-on (#196): no env → enabled; =0 → off; daemon role always off
-    monkeypatch.delenv("LOCAL_KNOWLEDGE_DAEMON", raising=False)
-    assert daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
-    monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "0")
+    # local-first (#285): no env → off; service =1 or KNOWLEDGE_DAEMON=1
+    # opts in; a service =0 always beats the master switch; the daemon
+    # role itself never re-proxies
+    for v in ("LOCAL_KNOWLEDGE_DAEMON", "KNOWLEDGE_DAEMON"):
+        monkeypatch.delenv(v, raising=False)
     assert not daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
     monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "1")
+    assert daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
+    monkeypatch.setenv("LOCAL_KNOWLEDGE_DAEMON", "0")
+    monkeypatch.setenv("KNOWLEDGE_DAEMON", "1")
+    assert not daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
+    monkeypatch.delenv("LOCAL_KNOWLEDGE_DAEMON")
     assert daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
     monkeypatch.setenv("KNOWLEDGE_DAEMON_ROLE", "1")
     assert not daemon_enabled("LOCAL_KNOWLEDGE_DAEMON")
