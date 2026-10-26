@@ -148,6 +148,31 @@ def _daemon_pid_file(home: Path) -> int | None:
     return pid if _cmdline_is(pid, "confluence_knowledge.daemon") else None
 
 
+def _pids_for(home: Path, module: str) -> set[int]:
+    """Every pid whose cmdline is `<module> <home>` — #288: on uv-style
+    venvs `python.exe` is a launcher stub, so one logical daemon appears
+    as TWO processes (the stub's Popen pid + the real interpreter it
+    spawned). Pid files and the lease hold different halves of that
+    pair; enumerating by cmdline is the only way to cover both."""
+    out: set[int] = set()
+    try:
+        import psutil
+    except ImportError:
+        return out
+    me = os.getpid()
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            if proc.pid == me:
+                continue
+            argv = proc.cmdline() or []
+            if module in " ".join(argv) and str(home) in argv:
+                out.add(proc.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied,
+                psutil.ZombieProcess):
+            continue
+    return out
+
+
 def _watchdog_pid(home: Path) -> int | None:
     try:
         pid = int((home / _PID_FILE).read_text().strip())
@@ -170,35 +195,40 @@ def stop_daemon(home: Path, timeout: float = 8) -> dict:
     pid = rpc.daemon_pid()
     if pid is None:
         pid = _daemon_pid_file(home)   # stale-file path — cmdline verified
-    daemon_pid = (pid if pid is not None and
-                  _cmdline_is(pid, "confluence_knowledge.daemon")
-                  else None)
-    for name, pid_ in (("daemon", daemon_pid),
-                       ("watchdog", _watchdog_pid(home))):
-        if pid_ is None:
-            continue
-        try:
-            os.kill(pid_, _TERM)
-            out[f"{name}_signalled"] = True
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+    daemon_pids = _pids_for(home, "confluence_knowledge.daemon")
+    if pid is not None and _cmdline_is(pid, "confluence_knowledge.daemon"):
+        daemon_pids.add(pid)
+    watchdog_pids = _pids_for(home, "confluence_knowledge.watchdog")
+    wpid = _watchdog_pid(home)
+    if wpid is not None:
+        watchdog_pids.add(wpid)
+    for name, pids in (("daemon", daemon_pids),
+                       ("watchdog", watchdog_pids)):
+        for pid_ in pids:
+            try:
+                os.kill(pid_, _TERM)
+                out[f"{name}_signalled"] = True
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
     deadline = time.monotonic() + timeout
     while rpc.daemon_alive() and time.monotonic() < deadline:
         time.sleep(0.2)
     out["daemon_down"] = not rpc.daemon_alive()
-    if not out["daemon_down"] and daemon_pid is not None:
+    if not out["daemon_down"] and daemon_pids:
         # still breathing after SIGTERM + the full wait — wedge or a
         # suspended loop; SIGKILL is the last word (#253)
-        try:
-            os.kill(daemon_pid, signal.SIGKILL
-                    if hasattr(signal, "SIGKILL") else _TERM)
-            out["daemon_killed"] = True
+        for pid_ in daemon_pids:
+            try:
+                os.kill(pid_, signal.SIGKILL
+                        if hasattr(signal, "SIGKILL") else _TERM)
+                out["daemon_killed"] = True
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        if out.get("daemon_killed"):
             deadline = time.monotonic() + 3
             while rpc.daemon_alive() and time.monotonic() < deadline:
                 time.sleep(0.2)
             out["daemon_down"] = not rpc.daemon_alive()
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
     return out
 
 

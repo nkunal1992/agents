@@ -222,3 +222,53 @@ def test_watchdog_role_blocks_spawn(tmp_path, monkeypatch):
         lambda *a, **k: called.append(a))
     wd.spawn_watchdog(tmp_path)
     assert not called
+
+
+def test_stop_signals_stub_and_real_interpreter(tmp_path, monkeypatch):
+    """#288: uv-style venvs make one logical process look like TWO — a
+    ~6 MB launcher stub (what Popen.pid and .daemon.pid hold) plus the
+    real interpreter (what the lease holds). Signalling only one leaks
+    the other orphaned; stop_daemon must cover every cmdline match on
+    the home — and nothing outside it."""
+    from confluence_knowledge import watchdog as wd
+
+    kills = []
+    home = str(tmp_path)
+
+    class P:
+        def __init__(self, pid, argv):
+            self.pid = pid
+            self._argv = argv
+
+        def cmdline(self):
+            return self._argv
+
+    fake = [
+        P(7001, [r"C:\v\Scripts\python.exe", "-m",
+                 "confluence_knowledge.daemon", home]),      # stub
+        P(7002, [r"C:\py\python.exe", "-m",
+                 "confluence_knowledge.daemon", home]),      # real
+        P(7003, [r"C:\v\Scripts\python.exe", "-m",
+                 "confluence_knowledge.watchdog", home]),    # stub
+        P(7004, [r"C:\py\python.exe", "-m",
+                 "confluence_knowledge.watchdog", home]),    # real
+        P(7005, ["python", "-m", "unrelated"]),              # noise
+        P(7006, [r"C:\py\python.exe", "-m",
+                 "confluence_knowledge.daemon", home + "2"]),  # other home
+    ]
+    import psutil
+    monkeypatch.setattr(psutil, "process_iter",
+                        lambda *a, **k: iter(fake))
+    (tmp_path / ".daemon.pid").write_text("7001")
+    (tmp_path / ".watchdog.pid").write_text("7003")
+
+    class DeadRpc:
+        def daemon_pid(self): return None
+        def daemon_alive(self): return False
+
+    monkeypatch.setattr(wd, "RpcDb", lambda p: DeadRpc())
+    monkeypatch.setattr(wd.os, "kill", lambda p, s: kills.append(p))
+    out = wd.stop_daemon(tmp_path, timeout=0.2)
+    assert {7001, 7002, 7003, 7004} <= set(kills), kills
+    assert 7005 not in kills and 7006 not in kills
+    assert out["daemon_signalled"] and out["watchdog_signalled"]
