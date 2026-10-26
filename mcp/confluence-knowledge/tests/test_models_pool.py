@@ -95,3 +95,51 @@ def test_rewarm_after_unload_via_warm_gate(tmp_path, monkeypatch):
     assert not ready.is_set()
     p._warm_started = False          # server re-arms via on_unload
     assert p.loaded(5.0) and p.ready
+
+
+def test_sparse_unavailable_degrades_to_none(tmp_path):
+    """#287: a platform wheel gap (e.g. py_rust_stemmers on win_arm64)
+    degrades the sparse leg to None — crawl/search keep dense+rerank."""
+    from confluence_knowledge.retrieval import SparseUnavailable
+    p, _calls = _pool(tmp_path)
+    attempts = []
+    def missing(h, c):
+        attempts.append(1)
+        raise SparseUnavailable("sparse leg unavailable: py_rust_stemmers")
+    p._loaders["sparse"] = missing
+    assert p.sparse() is None
+    assert "py_rust_stemmers" in p.sparse_missing
+    assert p.sparse() is None            # short-circuits, no retry storm
+    assert len(attempts) == 1
+    assert p.loaded(5.0) is True         # warm completes despite the gap
+
+
+def test_sparse_unavailable_resets_on_unload(tmp_path, monkeypatch):
+    """#287: idle unload clears the degrade flag — a later reinstall
+    can heal instead of being masked by the cached failure."""
+    from confluence_knowledge.retrieval import SparseUnavailable
+    monkeypatch.setenv("KNOWLEDGE_IDLE_UNLOAD_S", "5")
+    clock = _Clock()
+    p, _ = _pool(tmp_path, clock=clock, ready=threading.Event())
+    p._loaders["sparse"] = lambda h, c: (
+        (_ for _ in ()).throw(SparseUnavailable("gone")))
+    assert p.sparse() is None and p.sparse_missing
+    clock.t = 10
+    p._embedder = object()          # something must be loaded to unload
+    assert p.unload_if_idle() is True
+    assert p.sparse_missing is None
+    p._loaders["sparse"] = lambda h, c: object()
+    assert p.sparse() is not None   # healed: retry loads the new leg
+
+
+def test_sparse_unavailable_does_not_swallow_other_kinds(tmp_path):
+    """#287: SparseUnavailable from a non-sparse loader still propagates —
+    the degrade is scoped to the leg it was designed for."""
+    import pytest
+
+    from confluence_knowledge.retrieval import SparseUnavailable
+    p, _ = _pool(tmp_path)
+    p._loaders["embedder"] = lambda h, c: (
+        (_ for _ in ()).throw(SparseUnavailable("weird")))
+    with pytest.raises(SparseUnavailable):
+        p.embedder()

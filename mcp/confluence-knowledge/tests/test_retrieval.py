@@ -93,3 +93,41 @@ def test_citation_check(tmp_path):
     bad2 = check_citations(ev, [{"claim": "x", "chunk_id": cid,
                                  "quote": "not in the text"}])
     assert not bad2["ok"]
+
+
+def test_sparse_embedder_transitive_dep_gap(tmp_path, monkeypatch):
+    """#287: a missing transitive dep (py_rust_stemmers on win_arm64)
+    raises SparseUnavailable — degradable — while fastembed itself
+    missing stays a hard SetupError."""
+    import builtins
+
+    import pytest
+
+    from confluence_knowledge.retrieval import LocalSparseEmbedder, SparseUnavailable
+    from confluence_knowledge.settings import SetupError
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name == "fastembed":
+            raise ModuleNotFoundError(
+                "No module named 'py_rust_stemmers'",
+                name="py_rust_stemmers")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(SparseUnavailable) as ei:
+        LocalSparseEmbedder(tmp_path)
+    assert "py_rust_stemmers" in str(ei.value)
+
+    def fake_import2(name, *a, **k):
+        if name == "fastembed":
+            raise ModuleNotFoundError("No module named 'fastembed'",
+                                      name="fastembed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import2)
+    with pytest.raises(SetupError) as ei2:
+        LocalSparseEmbedder(tmp_path)
+    assert not isinstance(ei2.value, SparseUnavailable)
+    assert "isn't installed" in str(ei2.value)
