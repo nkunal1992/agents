@@ -360,7 +360,8 @@ class Index:
     def latest_job(self) -> dict | None:
         with self._rlock:
             row = self._read().execute(
-                "SELECT job_id,state,errors FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+                "SELECT job_id,state,errors FROM jobs "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
         return row and {"job_id": row[0], "state": row[1], "errors": json.loads(row[2])}
 
     def save_job(self, job_id: str, state: str, queue: list, errors: list) -> None:

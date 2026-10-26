@@ -111,6 +111,22 @@ def test_new_crawl_supersedes_abandoned_job(tmp_path):
     assert idx.latest_job() == {"job_id": fresh, "state": "done", "errors": []}
 
 
+def test_latest_job_deterministic_on_timestamp_tie(tmp_path, monkeypatch):
+    """#305: Windows time.time() granularity (~15ms) lets two start()s
+    share created_at — ORDER BY alone then returns an arbitrary row and
+    latest_job can report the superseded abandoned job. Insert order
+    must break ties deterministically."""
+    import confluence_knowledge.index as index_mod
+    monkeypatch.setattr(index_mod.time, "time", lambda: 1000.0)
+    idx = Index(tmp_path / "s.db")
+    c = Crawler(_dc_client(), idx, "datacenter")
+    c.start("1")                       # superseded by the next start
+    fresh = c.start("1")
+    c.step(fresh, batch=10)
+    assert idx.latest_job() == {"job_id": fresh, "state": "done",
+                                "errors": []}
+
+
 def test_relative_cloud_links_become_absolute():
     from confluence_knowledge.crawl import _abs_url
     assert _abs_url("/spaces/X/pages/1", "https://a.atlassian.net/wiki") == \
