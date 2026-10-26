@@ -131,3 +131,49 @@ def test_sparse_embedder_transitive_dep_gap(tmp_path, monkeypatch):
         LocalSparseEmbedder(tmp_path)
     assert not isinstance(ei2.value, SparseUnavailable)
     assert "isn't installed" in str(ei2.value)
+
+
+def test_sparse_platform_excluded_marker_match(monkeypatch):
+    """#302: the predicate must mirror the pip marker in pyproject.toml —
+    win32 + ARM64 machine is where fastembed gets skipped at install."""
+    import platform
+    import sys
+
+    from confluence_knowledge import retrieval
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(platform, "machine", lambda: "ARM64")
+    assert retrieval.sparse_platform_excluded() is True
+    monkeypatch.setattr(platform, "machine", lambda: "AMD64")
+    assert retrieval.sparse_platform_excluded() is False
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    assert retrieval.sparse_platform_excluded() is False
+
+
+def test_sparse_embedder_missing_on_excluded_platform_degrades(
+        tmp_path, monkeypatch):
+    """#302: where the marker skips fastembed at install (win_arm64),
+    its absence is the expected wheel gap — SparseUnavailable, not the
+    'reinstall' SetupError that would loop the user forever."""
+    import builtins
+
+    import pytest
+
+    from confluence_knowledge import retrieval
+    from confluence_knowledge.retrieval import LocalSparseEmbedder, SparseUnavailable
+
+    monkeypatch.setattr(retrieval, "sparse_platform_excluded",
+                        lambda: True)
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name == "fastembed":
+            raise ModuleNotFoundError("No module named 'fastembed'",
+                                      name="fastembed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(SparseUnavailable):
+        LocalSparseEmbedder(tmp_path)

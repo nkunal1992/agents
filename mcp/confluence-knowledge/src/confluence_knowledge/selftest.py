@@ -108,11 +108,22 @@ def run(home: Path, server_module: str) -> dict:
 def _mini_rag(home: Path) -> dict:
     from .extract import extract_chunks
     from .index import Index
-    from .retrieval import LocalEmbedder, LocalReranker, LocalSparseEmbedder, check_citations, retrieve
+    from .retrieval import (
+        LocalEmbedder,
+        LocalReranker,
+        LocalSparseEmbedder,
+        SparseUnavailable,
+        check_citations,
+        retrieve,
+    )
     with tempfile.TemporaryDirectory() as td:
         idx = Index(Path(td) / "selftest.db")
         emb = LocalEmbedder(home)
-        sparse = LocalSparseEmbedder(home)
+        sparse = None
+        try:
+            sparse = LocalSparseEmbedder(home)
+        except SparseUnavailable:
+            pass                    # platform wheel gap — dense+rerank
         for doc in MINI_DOCS:
             chunks, _ = extract_chunks(doc["html"])
             for c in chunks:
@@ -120,7 +131,7 @@ def _mini_rag(home: Path) -> dict:
             texts = [f"{doc['title']}\n{c.heading_path}\n{c.text}"
                      for c in chunks]
             vecs = emb.embed(texts)
-            sp_vecs = sparse.embed(texts)
+            sp_vecs = sparse.embed(texts) if sparse else None
             page = {"page_id": doc["page_id"], "title": doc["title"],
                     "url": f"selftest://{doc['page_id']}", "version": 1}
             idx.upsert_page(page, chunks, vecs, sparse=sp_vecs)

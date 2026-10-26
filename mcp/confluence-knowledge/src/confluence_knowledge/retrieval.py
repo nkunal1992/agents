@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import math
 import os
+import platform
 import shutil
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -407,6 +409,13 @@ class SparseUnavailable(SetupError):
     the crawl/search."""
 
 
+def sparse_platform_excluded() -> bool:
+    """Platforms where the pip marker skips fastembed entirely (#302) —
+    its absence there is the expected wheel gap, not a broken install.
+    Keep 1:1 with the marker in pyproject.toml [models]."""
+    return sys.platform == "win32" and platform.machine() == "ARM64"
+
+
 class LocalSparseEmbedder:
     """Learned term-weight sparse vectors via fastembed (ONNX, no torch).
 
@@ -422,10 +431,13 @@ class LocalSparseEmbedder:
             if is_app_control_block(e):
                 raise SetupError(
                     app_control_remediation("fastembed")) from e
-            if getattr(e, "name", None) != "fastembed":
-                # a missing transitive dep (py_rust_stemmers etc.) means
-                # the platform can't build it — degrade honestly, never
-                # tell the user to reinstall a wheel that doesn't exist
+            if getattr(e, "name", None) != "fastembed" or \
+                    sparse_platform_excluded():
+                # a missing transitive dep (py_rust_stemmers etc.) — or
+                # fastembed itself where the marker skips it (#302) —
+                # means the platform can't build it: degrade honestly,
+                # never tell the user to reinstall a wheel that doesn't
+                # exist
                 raise SparseUnavailable(
                     f"sparse leg unavailable: {e.name or e} can't load on "
                     "this platform — dense+rerank legs still used") from e
@@ -574,12 +586,20 @@ def prepare_models(home: Path) -> list[str]:
     # sparse: fastembed owns its cache layout — let it download into our dir
     os.environ.pop("HF_HUB_OFFLINE", None)
     spec = lock["models"]["sparse"]
-    try:
-        from fastembed import SparseTextEmbedding
-        SparseTextEmbedding(spec["repo"], cache_dir=str(models / "fastembed"))
-        out.append(f"prepared {spec['repo']} ({spec['license']})")
-    except Exception as e:
-        raise SetupError(f"couldn't fetch sparse model {spec['repo']}: {e}") from e
+    if sparse_platform_excluded():
+        # marker-skipped at install (#302) — nothing can ever consume this
+        # download on this platform, so don't fetch or fail on it
+        out.append(f"skipped {spec['repo']} — no sparse wheel on this "
+                   "platform (dense+rerank still prepared)")
+    else:
+        try:
+            from fastembed import SparseTextEmbedding
+            SparseTextEmbedding(spec["repo"],
+                                cache_dir=str(models / "fastembed"))
+            out.append(f"prepared {spec['repo']} ({spec['license']})")
+        except Exception as e:
+            raise SetupError(
+                f"couldn't fetch sparse model {spec['repo']}: {e}") from e
 
     # GC: remove model dirs not owned by the current lock — superseded
     # revisions and legacy models (e.g. the old MiniLM stack) otherwise
@@ -641,8 +661,14 @@ def models_complete(home: Path) -> dict:
         out[key] = {"ok": not missing and not wrong_rev,
                     "missing": missing or (["<wrong revision>"]
                                             if wrong_rev else [])}
-    fe = _models_dir(home) / "fastembed"
-    out["sparse"] = {"ok": fe.exists() and any(fe.iterdir()), "missing": []}
+    if sparse_platform_excluded():
+        # pip marker-skips fastembed here (#302) — absent is expected
+        out["sparse"] = {"ok": True, "missing": [],
+                         "mode": "platform-degraded"}
+    else:
+        fe = _models_dir(home) / "fastembed"
+        out["sparse"] = {"ok": fe.exists() and any(fe.iterdir()),
+                         "missing": []}
     return out
 
 

@@ -109,6 +109,26 @@ def test_partial_download_is_retried(monkeypatch, tmp_path):
                for line in out2)
 
 
+def test_prepare_models_skips_sparse_on_excluded_platform(
+        monkeypatch, tmp_path):
+    """#302: win_arm64 marker-skips fastembed at install — prepare must
+    not download a model nothing can load, nor fail on the absent dep."""
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
+    calls = _fake_hf(monkeypatch, lambda d: (
+        (d / "m.onnx").write_bytes(b"x"),
+        (d / "r.onnx").write_bytes(b"x"),
+        (d / "tokenizer.json").write_text("{}"),
+        (d / "LICENSE").write_text("apache")))
+
+    from confluence_knowledge import retrieval
+    monkeypatch.setattr(retrieval, "sparse_platform_excluded",
+                        lambda: True)
+    out = retrieval.prepare_models(tmp_path)
+    assert any("skipped" in line and "org/bm25" in line for line in out)
+    assert "org/bm25" not in {c[0] for c in calls}  # never instantiated
+    assert not (tmp_path / "models" / "fastembed").exists()
+
+
 def test_missing_license_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(tmp_path / "models"))
     _fake_hf(monkeypatch, lambda d: (

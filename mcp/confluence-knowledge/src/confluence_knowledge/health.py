@@ -20,7 +20,13 @@ _DEPS = ("onnxruntime", "tokenizers", "fastembed", "huggingface_hub",
 
 def _dep_ok() -> tuple[bool, list[str]]:
     import importlib.util
+
+    from .retrieval import sparse_platform_excluded
     missing = [m for m in _DEPS if importlib.util.find_spec(m) is None]
+    if sparse_platform_excluded():
+        # pip marker-skips fastembed on this platform (#302) — its absence
+        # is the expected wheel gap, not a missing dep
+        missing = [m for m in missing if m != "fastembed"]
     return not missing, missing
 
 
@@ -36,7 +42,8 @@ def _models_checks(home: Path, cli: str) -> list[dict]:
         out.append({
             "flag": f"model_{key}", "ok": spec["ok"],
             "detail": ("missing: " + ", ".join(spec["missing"])
-                       if spec["missing"] else "present"),
+                       if spec["missing"]
+                       else spec.get("mode", "present")),
             "remediation": None if spec["ok"] else f"{cli} prepare-models"})
     from .retrieval import active_embed_spec, active_provider
     out.append({"flag": "onnx_provider", "ok": True,

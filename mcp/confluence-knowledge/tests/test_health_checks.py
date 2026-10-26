@@ -63,6 +63,31 @@ def test_models_complete_green_when_full(tmp_path, monkeypatch):
         assert _flag(checks, f)["ok"] is True, f
 
 
+def test_sparse_platform_excluded_degrades_checks(tmp_path, monkeypatch):
+    """#302: on win_arm64 the install marker skips fastembed — doctor
+    must show the sparse leg as platform-degraded, not missing/dep-broken,
+    or remediation tells the user to reinstall what can't exist."""
+    import importlib.util
+
+    from confluence_knowledge import health, retrieval
+
+    monkeypatch.setattr(retrieval, "sparse_platform_excluded",
+                        lambda: True)
+    real_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec",
+        lambda m: None if m == "fastembed" else real_spec(m))
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("KNOWLEDGE_MODELS_DIR", str(home / "models"))
+    checks = health.health_checks(home, tmp_path / "work", "sid", "ck")
+    assert _flag(checks, "deps")["ok"] is True
+    sp = _flag(checks, "model_sparse")
+    assert sp["ok"] is True
+    assert sp["detail"] == "platform-degraded"
+    assert sp["remediation"] is None
+
+
 def test_index_corrupt_flagged(tmp_path):
     idx_root = tmp_path / "idx"
     idx_root.mkdir()
