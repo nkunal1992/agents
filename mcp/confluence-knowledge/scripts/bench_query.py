@@ -141,15 +141,25 @@ def main() -> int:
     emb = LocalEmbedder(home)
     models_t["embedder_load_s"] = round(time.monotonic() - t, 2)
     t = time.monotonic()
-    sp = LocalSparseEmbedder(home)
-    models_t["sparse_load_s"] = round(time.monotonic() - t, 2)
+    try:
+        sp = LocalSparseEmbedder(home)
+        models_t["sparse_load_s"] = round(time.monotonic() - t, 2)
+    except retrieval.SparseUnavailable as e:
+        sp = None                       # #302 — no sparse wheel here
+        models_t["sparse_load_s"] = f"skipped: {e}"
     t = time.monotonic()
     rr = LocalReranker(home)
     models_t["reranker_load_s"] = round(time.monotonic() - t, 2)
 
     results = {"models": models_t, "ann": args.ann, "sizes": {}}
-    term_pool = _term_pool(sp)
-    print(f"term pool: {len(term_pool)} real ids", file=sys.stderr)
+    # without a real embedder there are no genuine term ids — a synthetic
+    # pool still gives the index realistic sparse-shaped rows so
+    # cache-build/fusion costs stay honest
+    term_pool = (_term_pool(sp) if sp is not None
+                 else np.arange(1, 50_000, dtype=np.int64))
+    print(f"term pool: {len(term_pool)} "
+          f"{'real' if sp is not None else 'synthetic'} ids",
+          file=sys.stderr)
     for size in [int(x) for x in args.chunks.split(",")]:
         work = Path(tempfile.mkdtemp(prefix=f"qbench-{size}-"))
         dbp = work / "idx.db"
@@ -209,23 +219,23 @@ def main() -> int:
             fts = idx.fts_search(q, active=cache.ids_set)[:30]
             legs["fts_leg"].append(time.monotonic() - t)
 
-            t = time.monotonic()
-            qs = sp.query_embed([q])[0]
-            ssc = np.zeros(len(cache.ids), dtype=np.float32)
-            for term, qw in qs.items():
-                ent = cache.sparse_idx.get(term)
-                if ent is not None:
-                    rows, wts = ent
-                    ssc[rows] += np.float32(
-                        qw * retrieval._bm25_idf(
-                            cache.df, cache.n_docs, term)) * wts
-            nz = np.flatnonzero(ssc)
-            if nz.size:
-                top = nz[np.argsort(-ssc[nz])][:30]
-                sparse_rank = [cache.ids[i] for i in top]
-            else:
-                sparse_rank = []
-            legs["sparse_leg"].append(time.monotonic() - t)
+            sparse_rank = []
+            if sp is not None:
+                t = time.monotonic()
+                qs = sp.query_embed([q])[0]
+                ssc = np.zeros(len(cache.ids), dtype=np.float32)
+                for term, qw in qs.items():
+                    ent = cache.sparse_idx.get(term)
+                    if ent is not None:
+                        rows, wts = ent
+                        ssc[rows] += np.float32(
+                            qw * retrieval._bm25_idf(
+                                cache.df, cache.n_docs, term)) * wts
+                nz = np.flatnonzero(ssc)
+                if nz.size:
+                    top = nz[np.argsort(-ssc[nz])][:30]
+                    sparse_rank = [cache.ids[i] for i in top]
+                legs["sparse_leg"].append(time.monotonic() - t)
 
             t = time.monotonic()
             rrf: dict[str, float] = {}
@@ -248,9 +258,11 @@ def main() -> int:
             "index_build_s": round(build_s, 2),
             "cache_build_s": round(cache_build, 3),
             "dense_mode": dense_mode,
-            "legs_p50_ms": {k: round(_pct(v, 50) * 1000, 1)
+            "legs_p50_ms": {k: (round(_pct(v, 50) * 1000, 1)
+                              if v else None)
                             for k, v in legs.items()},
-            "legs_p95_ms": {k: round(_pct(v, 95) * 1000, 1)
+            "legs_p95_ms": {k: (round(_pct(v, 95) * 1000, 1)
+                              if v else None)
                             for k, v in legs.items()},
         }
         idx.close()
