@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from _wait import respawn_deadline, supervision_tail, watchdog_failure
+
 pytestmark = pytest.mark.skipif(
     os.environ.get("KNOWLEDGE_E2E") != "1",
     reason="e2e sessions run under KNOWLEDGE_E2E=1 (CI e2e leg)")
@@ -120,11 +122,12 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
             assert "connect" in t2
 
         # hard kill — the watchdog (not the IDE) must bring it back.
-        # 90s: cold spawn + import + bind on an AV-scanned runner can
-        # stretch past 60 (matches the http_transport sibling test).
+        # Long window (KNOWLEDGE_E2E_RESPAWN_S overrides): cold spawn +
+        # import + bind has stretched past 90s on congested runners.
+        # A dead watchdog or a dead pid-file watchdog fails fast.
         daemon.kill()
         daemon.wait(timeout=5)
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + respawn_deadline()
         while time.monotonic() < deadline:
             try:
                 meta = _meta(home, timeout=3)
@@ -132,9 +135,16 @@ def test_one_daemon_two_services_survive_kill(tmp_path, monkeypatch):
                     break
             except Exception:  # noqa: BLE001,S110 — endpoint not
                 pass                   # respawned yet — keep polling
+            if watchdog.poll() is not None:
+                pytest.fail(
+                    f"watchdog exited rc={watchdog.returncode} before "
+                    f"respawn finished\n{supervision_tail(home)}")
+            if dead := watchdog_failure(home):
+                pytest.fail(f"{dead}\n{supervision_tail(home)}")
             time.sleep(0.5)
         else:
-            pytest.fail("watchdog never respawned the daemon")
+            pytest.fail("watchdog never respawned the daemon\n"
+                        + supervision_tail(home))
         # every mounted surface still answers post-respawn
         assert "search" in _tools(meta, "confluence-knowledge")
         if t2 is not None:

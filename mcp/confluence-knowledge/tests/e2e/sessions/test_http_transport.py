@@ -21,6 +21,8 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from _wait import respawn_deadline, supervision_tail, watchdog_failure
+
 pytestmark = pytest.mark.skipif(
     os.environ.get("KNOWLEDGE_E2E") != "1",
     reason="e2e sessions run under KNOWLEDGE_E2E=1 (CI e2e leg)")
@@ -139,19 +141,25 @@ def test_daemon_restart_same_url(daemon, workdir):
     # field needs is recovery-on-same-URL, so assert exactly that.
     daemon.kill()
     daemon.wait(timeout=8)
-    # 90s on CI: watchdog detect + cold spawn + fastmcp/uvicorn import +
-    # mount can stretch past 60 on an AV-scanned Windows runner — the
-    # contract is 'respawn happens on the same URL', not 'in 60s'
-    deadline = time.monotonic() + 90
+    # Long window on CI: watchdog detect + cold spawn + fastmcp/uvicorn
+    # import + mount has stretched past 90s on AV-scanned runners — the
+    # contract is 'respawn happens on the same URL', not 'within Ns'.
+    # KNOWLEDGE_E2E_RESPAWN_S overrides for pathological runners; a
+    # provably-dead watchdog fails fast instead of burning the window.
+    deadline = time.monotonic() + respawn_deadline()
     while True:
         try:
             out = asyncio.run(asyncio.wait_for(
                 _call(_url(meta), meta["token"], "status", {}), 5))
             break                                  # a respawn answered
         except Exception:                          # noqa: BLE001 — gap
+            if dead := watchdog_failure(workdir):
+                raise AssertionError(
+                    f"{dead}\n{supervision_tail(workdir)}") from None
             if time.monotonic() > deadline:
                 raise AssertionError(
-                    "watchdog never respawned the daemon") from None
+                    "watchdog never respawned the daemon\n"
+                    + supervision_tail(workdir)) from None
             time.sleep(0.5)
     # same URL + token: the registered IDE entry never changes
     meta2 = json.loads((workdir / "http.json").read_text())
