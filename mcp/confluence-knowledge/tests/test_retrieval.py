@@ -181,3 +181,33 @@ def test_sparse_embedder_missing_on_excluded_platform_degrades(
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(SparseUnavailable):
         LocalSparseEmbedder(tmp_path)
+
+
+def test_load_sparse_or_none_degrades(tmp_path, monkeypatch):
+    """#320: harnesses/eval share the degrade via load_sparse_or_none —
+    None on SparseUnavailable, SetupError still propagates."""
+    import builtins
+
+    import pytest
+
+    from confluence_knowledge import retrieval
+
+    monkeypatch.setattr(retrieval, "sparse_platform_excluded",
+                        lambda: True)
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name == "fastembed":
+            raise ModuleNotFoundError("No module named 'fastembed'",
+                                      name="fastembed")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert retrieval.load_sparse_or_none(tmp_path) is None
+
+    # a hard failure still propagates — never silently degraded
+    def boom(*a, **k):
+        raise retrieval.SetupError("corrupt install")
+    monkeypatch.setattr(retrieval, "LocalSparseEmbedder", boom)
+    with pytest.raises(retrieval.SetupError):
+        retrieval.load_sparse_or_none(tmp_path)

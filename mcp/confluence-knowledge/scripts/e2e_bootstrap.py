@@ -26,7 +26,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import venv
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
@@ -35,7 +34,7 @@ from mcp.client.stdio import stdio_client
 sys.path.insert(0, str(Path(__file__).parent))
 import atexit
 
-from _e2e_common import TOKEN, call, check, serve, stop_shared_daemon, fresh_venv
+from _e2e_common import TOKEN, call, check, fresh_venv, serve, stop_shared_daemon
 
 
 def _embed_dir_name() -> str:
@@ -232,6 +231,11 @@ async def qa_roundtrip(vpy: Path, env: dict) -> None:
 
 
 def main() -> None:
+    # child-process stderr is echoed verbatim in FAIL prints — arbitrary
+    # bytes decoded with errors=replace carry U+FFFD, which still can't
+    # encode on a cp1252 console. Degrade, never crash while reporting.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     use_wheel = "--wheel" in sys.argv
     spec = sys.argv[sys.argv.index("--spec") + 1] \
         if "--spec" in sys.argv else None

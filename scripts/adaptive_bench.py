@@ -61,7 +61,7 @@ def crawl_once(pages_n: int, env_overrides: dict, label: str) -> dict:
     from confluence_knowledge.crawl import Crawler
     from confluence_knowledge.index import Index
     from confluence_knowledge.resources import limits
-    from confluence_knowledge.retrieval import LocalEmbedder, LocalSparseEmbedder
+    from confluence_knowledge.retrieval import LocalEmbedder, load_sparse_or_none
 
     lim = limits()
     print(f"\n--- {label} (threads={lim.threads} "
@@ -74,7 +74,7 @@ def crawl_once(pages_n: int, env_overrides: dict, label: str) -> dict:
         "KNOWLEDGE_MODELS_DIR",
         str(Path.home() / ".knowledge" / "models"))
     emb = LocalEmbedder(tmp)
-    sp = LocalSparseEmbedder(tmp)
+    sp = load_sparse_or_none(tmp)   # #320 — None where excluded
     c = Crawler(client, idx, "datacenter", embedder=emb, sparse=sp)
     job = c.start("1001")
     t0 = time.monotonic()

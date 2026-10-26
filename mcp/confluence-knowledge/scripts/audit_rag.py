@@ -47,7 +47,8 @@ def summarize(rows):
 
 def quality(home, out):
     start = time.perf_counter()
-    emb, sp, rr = r.LocalEmbedder(home), r.LocalSparseEmbedder(home), r.LocalReranker(home)
+    emb, rr = r.LocalEmbedder(home), r.LocalReranker(home)
+    sp = r.load_sparse_or_none(home)   # #320 — None where excluded
     load_s = time.perf_counter() - start
     pages, questions = build_audit_corpus()
     idx = Index(out / "quality.db")
@@ -64,7 +65,8 @@ def quality(home, out):
         emb._tok.enable_truncation(r.EMBED_MAX_TOKENS)
         idx.upsert_page({"page_id": p["id"], "title": p["title"],
                          "url": f"https://audit.invalid/{p['id']}"},
-                        chunks, emb.embed(texts), sp.embed(texts))
+                        chunks, emb.embed(texts),
+                        sp.embed(texts) if sp is not None else None)
     idx.publish({p["id"] for p in pages})
     idx.set_model_id(r.MODEL_MARKER)
     build_s = time.perf_counter() - build
@@ -78,9 +80,10 @@ def quality(home, out):
         q = pair["question"]
         dense = [cid for cid, _ in r._cosine(emb.embed([q])[0], vectors)][:30]
         ft = [cid for cid, _ in idx.fts_search(q, active=set(by_id))]
-        sr = [cid for cid, _ in
-              r._sparse_rank(sp.query_embed([q])[0], sparse,
-                             df_map, n_docs)][:30]
+        sr = ([cid for cid, _ in
+               r._sparse_rank(sp.query_embed([q])[0], sparse,
+                              df_map, n_docs)][:30]
+              if sp is not None else [])
         fused = {}
         for leg in (dense, ft, sr):
             for rank, cid in enumerate(leg):
@@ -122,14 +125,16 @@ def performance(home, out, sizes, samples, words):
     import resource
 
     start = time.perf_counter()
-    emb, sp, rr = r.LocalEmbedder(home), r.LocalSparseEmbedder(home), r.LocalReranker(home)
+    emb, rr = r.LocalEmbedder(home), r.LocalReranker(home)
+    sp = r.load_sparse_or_none(home)   # #320 — None where excluded
     load = time.perf_counter() - start
     templates = [f"Service team-{i} deploys on Thursday. Owner group OPER-{i}. "
                  f"Timeout {100+i} milliseconds. Rollback requires the incident commander."
                  for i in range(100)]
     padding = ["Operators", "verify", "recovery", "procedures", "before", "approving", "the", "change"]
     templates = [" ".join((text.split() + padding * words)[:words]) for text in templates]
-    dense, sparse = emb.embed(templates), sp.embed(templates)
+    dense = emb.embed(templates)
+    sparse = sp.embed(templates) if sp is not None else None
     reports = []
     for size in sizes:
         path = out / f"scale-{size}.db"
@@ -137,7 +142,8 @@ def performance(home, out, sizes, samples, words):
         chunks = [Chunk(templates[i % 100], "", "text", i, f"p:{i}") for i in range(size)]
         idx.upsert_page({"page_id": "p", "title": "Synthetic scale", "url": "https://audit.invalid/p"},
                         chunks, dense[np.arange(size) % 100],
-                        [sparse[i % 100] for i in range(size)])
+                        None if sparse is None
+                        else [sparse[i % 100] for i in range(size)])
         idx.publish({"p"})
         times = []
         stage_times = {}
@@ -153,11 +159,16 @@ def performance(home, out, sizes, samples, words):
             setattr(obj, name, call)
             return original
 
-        originals = [(obj, name, timed(obj, name, label, stage_times)) for obj, name, label in (
-            (idx, "active_chunks", "chunks_sql"), (idx, "vectors_for", "vectors_sql"),
-            (idx, "sparse_for", "sparse_sql"), (idx, "fts_search", "fts"),
-            (emb, "embed", "query_embedding"), (sp, "embed", "query_sparse"),
-            (rr, "score", "reranking"))]
+        timed_objs = [(idx, "active_chunks", "chunks_sql"),
+                      (idx, "vectors_for", "vectors_sql"),
+                      (idx, "sparse_for", "sparse_sql"),
+                      (idx, "fts_search", "fts"),
+                      (emb, "embed", "query_embedding"),
+                      (rr, "score", "reranking")]
+        if sp is not None:
+            timed_objs.append((sp, "embed", "query_sparse"))
+        originals = [(o, n, timed(o, n, l, stage_times))
+                     for o, n, l in timed_objs]
         for i in range(samples + 1):
             tick = time.perf_counter()
             r.retrieve(idx, f"What timeout and owner does service team-{i % 100} have?", emb, rr, sp)

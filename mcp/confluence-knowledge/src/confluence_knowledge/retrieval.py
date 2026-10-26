@@ -481,6 +481,21 @@ class LocalSparseEmbedder:
         return out
 
 
+def load_sparse_or_none(home: Path,
+                        cli: str = "confluence-knowledge"
+                        ) -> LocalSparseEmbedder | None:
+    """Sparse embedder when the platform can run it, else None (#320).
+
+    SparseUnavailable only fires by design (platform-excluded wheels —
+    #287/#302); a broken install on a supported platform still raises
+    SetupError, so catching here can't mask a real fault. Callers pass
+    the None straight to retrieve()/upsert — the degraded path."""
+    try:
+        return LocalSparseEmbedder(home, cli)
+    except SparseUnavailable:
+        return None
+
+
 class LocalReranker:
     """mxbai-rerank-xsmall-v1 via ONNX sequence-classification logits.
 

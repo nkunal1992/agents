@@ -57,7 +57,7 @@ def _build_index(corpus, emb, sp, tmp):
             c.chunk_id = f"{pid}:h:{c.ordinal}"
         texts = [f"{c.heading_path}\n{c.text}" for c in chunks]
         vecs = emb.embed(texts) if texts else None
-        sparse = sp.embed(texts) if texts else None
+        sparse = sp.embed(texts) if (texts and sp is not None) else None
         idx.upsert_page({"page_id": pid, "parent_id": None, "title": title,
                          "url": f"https://x/{pid}", "level": 0,
                          "version": "", "warnings": ""},
@@ -131,7 +131,7 @@ def main() -> int:
     home = Path(os.path.expanduser(os.environ["CONF_KNOWLEDGE_HOME"]))
     emb = retrieval.LocalEmbedder(home)
     rr = retrieval.LocalReranker(home)
-    sp = retrieval.LocalSparseEmbedder(home)
+    sp = retrieval.load_sparse_or_none(home)
     print(f"models loaded from {home}")
 
     if "--index" in args:

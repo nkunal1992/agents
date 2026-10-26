@@ -46,7 +46,7 @@ def cpu_s():
 
 
 from confluence_knowledge.retrieval import (
-    LocalEmbedder, LocalReranker, LocalSparseEmbedder)
+    LocalEmbedder, LocalReranker, load_sparse_or_none)
 
 out = {{"scenario": scenario, "cpus": os.cpu_count()}}
 base = rss_mb()
@@ -61,7 +61,7 @@ huge = ("| col a | col b | col c | value |\n") * 400
 
 if scenario == "warm_all":
     LocalReranker(HOME)
-    LocalSparseEmbedder(HOME)
+    load_sparse_or_none(HOME)   # sparse measured only where it runs #320
     out["rss_all_models_mb"] = round(rss_mb())
 elif scenario.startswith("page"):
     n = int(scenario.split("_")[1])
@@ -105,7 +105,7 @@ elif scenario == "idle_unload":
     import gc, subprocess
     from confluence_knowledge.models import ModelPool
     from confluence_knowledge.retrieval import LocalEmbedder as LE, \
-        LocalReranker as LR, LocalSparseEmbedder as LS
+        LocalReranker as LR
     # ru_maxrss is a high-water mark — use live RSS via ps
     def live_rss():
         return float(subprocess.run(
