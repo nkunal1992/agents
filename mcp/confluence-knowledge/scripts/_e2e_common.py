@@ -195,8 +195,13 @@ def fresh_venv(venv_dir: Path) -> Path:
     upgrade pip>=26.2.2 + certifi>=2026.10.19 inside the venv so the
     first `pip install` cannot chain through the compromised emSign
     intermediates."""
+    import shutil as _sh
     import subprocess as _sp
     import venv as _v
+    # an interrupted earlier run can leave a half-installed pip whose
+    # dist-info makes ensurepip skip the reinstall — always start clean
+    if venv_dir.exists():
+        _sh.rmtree(venv_dir)
     _v.EnvBuilder(with_pip=True).create(venv_dir)
     py = str(venv_bin(venv_dir) / "python")
     cmd = [py, "-m", "pip", "install", "--quiet", "-U",
@@ -207,8 +212,8 @@ def fresh_venv(venv_dir: Path) -> Path:
     try:
         import certifi as _cert
         cmd += ["--cert", _cert.where()]
-    except Exception:
-        pass
+    except Exception:                       # noqa: BLE001,S110 —
+        pass                                # cert pin is best-effort
     _sp.run(cmd, check=True)
     return venv_dir
 

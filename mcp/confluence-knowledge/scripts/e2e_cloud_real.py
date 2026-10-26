@@ -23,7 +23,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import venv
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -122,8 +121,11 @@ async def journey(s, ctx) -> None:
     j = await timed("start_crawl", "start_crawl",
                     {"scope_handle": scope})
     jid = j["job_id"]
-    # long crawl (~180 real pages) — wait_for_crawl caps at 45s per call
-    deadline = time.monotonic() + 2700
+    # the unscoped corpus is ~874 pages — real ONNX embeddings make the
+    # fetch+embed soak take ~1h; scope runs via CK_E2E_ROOT are faster.
+    # wait_for_crawl caps at 45s per call
+    deadline = time.monotonic() + int(
+        os.environ.get("CK_E2E_CRAWL_DEADLINE_S", "14400"))
     while True:
         w = await timed("wait_for_crawl", "wait_for_crawl",
                         {"scope_handle": scope, "job_id": jid,
@@ -131,8 +133,8 @@ async def journey(s, ctx) -> None:
         if w["state"] in ("done", "failed"):
             break
         if time.monotonic() > deadline:
-            sys.exit("crawl did not finish in 45 min — dense corpus "
-                     "is slow by design")
+            sys.exit("crawl did not finish before CK_E2E_CRAWL_DEADLINE_S "
+                     "— dense corpus is slow by design")
     check(w["state"] == "done", "real-cloud crawl completed",
           f"errors={w.get('errors')}")
     print(f"  indexed {w.get('pages_done')} pages", flush=True)
@@ -143,10 +145,8 @@ async def journey(s, ctx) -> None:
                         for k, v in st.items() if k.endswith("_ms")}
         ctx["stats"]["pages/s"] = st.get("pages_per_s")
         ctx["stats"]["battery_saver"] = st.get("battery_saver")
-    min_pages = int(args[args.index("--min-pages") + 1]) \
-        if "--min-pages" in args else 150
-    check(w.get("pages_done", 0) >= min_pages,
-          f"covered most of the subtree (≥{min_pages} expected)",
+    check(w.get("pages_done", 0) >= ctx["min_pages"],
+          f"covered most of the subtree (≥{ctx['min_pages']} expected)",
           w.get("pages_done"))
 
     # ---- canary recall: real reranker scores + real URL citations ----
@@ -289,7 +289,9 @@ def main() -> int:
     url = f"http://127.0.0.1:{meta['port']}/confluence-knowledge/mcp"
     print(f"daemon endpoint: {url}")
 
-    ctx = {"root": f"{site}/wiki/pages/viewpage.action?pageId={root}"}
+    ctx = {"root": f"{site}/wiki/pages/viewpage.action?pageId={root}",
+           "min_pages": int(args[args.index("--min-pages") + 1])
+           if "--min-pages" in args else 150}
     asyncio.run(mcp(url, meta["token"],
                     lambda s: journey(s, ctx)))
     print("\nlatencies:", {k: f"{v:.1f}s" for k, v in ctx["lat"].items()})

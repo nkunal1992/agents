@@ -220,7 +220,10 @@ def cloud_stage(rows: list) -> bool:
     min_p = os.environ.get("CK_E2E_MIN_PAGES")
     if min_p:
         cmd += ["--min-pages", min_p]
-    rc, _out = run(cmd, timeout=3600)
+    # matches e2e_cloud_real's CK_E2E_CRAWL_DEADLINE_S + margin for
+    # boot/install/verify phases around the crawl wait
+    rc, _out = run(cmd, timeout=int(
+        os.environ.get("CK_E2E_CRAWL_DEADLINE_S", "14400")) + 900)
     ok = rc == 0
     rows.append(("cloud:e2e_cloud_real", "PASS" if ok else "FAIL", detail))
     return ok
