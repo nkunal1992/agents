@@ -189,7 +189,24 @@ Env knobs: `KNOWLEDGE_UPDATE_INDEX` (mirror URL template),
 
 ## Maintainers: publishing (gated)
 
-Every release goes through `.github/workflows/publish-pypi.yml`:
+Every release goes through `.github/workflows/publish-pypi.yml`.
+
+**Before tagging**, run the pre-release gate on the release
+machine — it fails loudly on packaging defects, retrieval
+regressions, citation hallucinations, or transport bugs
+(#212):
+
+```bash
+python scripts/pre_release_check.py
+```
+
+It builds each wheel into a fresh venv (module sweep + console
+script + selftest), runs the real-data daemon journey
+(`scripts/e2e_real_data.py`), runs the conversational eval
+(`e2e_conversational_eval.py` — question-intent matrix through
+the real tool surface), and writes `PRE_RELEASE_REPORT.md`.
+A `SKIP` on the cloud leg is fine on machines without
+`~/.config/agents/cloud.env`; a `FAIL` anywhere blocks the tag.
 
 1. Bump `version` in `mcp/<pkg>/pyproject.toml` on a PR and merge to main.
 2. Tag `<pkg>-v<X.Y.Z>rc1` and push. The workflow validates the tag

@@ -31,7 +31,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import venv
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -184,8 +183,9 @@ def http_meta(shared_home: Path, timeout: float = 40) -> dict:
 
 
 async def mcp(url: str, token: str, fn) -> None:
-    from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
+
+    from mcp import ClientSession
     headers = {"Authorization": f"Bearer {token}"}
     async with streamablehttp_client(url, headers=headers) as (r, w, _), \
             ClientSession(r, w) as s:
