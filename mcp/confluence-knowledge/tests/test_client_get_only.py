@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from confluence_knowledge.client import (
+    RULES_DC,
     RULES_V2,
     AccessError,
     ConfluenceClient,
@@ -64,8 +65,22 @@ def test_allowed_endpoints_pass(client):
     for p in ("wiki/api/v2/pages/123",
               "wiki/api/v2/pages/123/direct-children",
               "wiki/api/v2/folders/9/direct-children",
-              "wiki/rest/api/user/current"):
+              "wiki/rest/api/user/current",
+              "wiki/rest/api/search"):           # #270 title lookup
         assert client.get(p).json() == {"ok": True}
+
+
+def test_dc_search_endpoint_allowed():
+    """#270: the DC ruleset accepts rest/api/search under an optional
+    /confluence context path — and still rejects non-GET on it."""
+    transport = httpx.MockTransport(lambda req: httpx.Response(
+        200, json={"ok": True}))
+    c = ConfluenceClient("https://conf.acme.corp/confluence", {},
+                         RULES_DC, session=httpx.Client(transport=transport))
+    assert c.get("rest/api/search").json() == {"ok": True}
+    assert c.get("confluence/rest/api/search").json() == {"ok": True}
+    with pytest.raises(SecurityException, match="strictly read-only"):
+        c.request("POST", "rest/api/search")
 
 
 def test_absolute_url_escape_rejected(client):

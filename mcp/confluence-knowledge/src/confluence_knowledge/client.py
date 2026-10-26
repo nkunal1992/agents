@@ -194,12 +194,14 @@ RULES_V2 = [
     EndpointRule(re.compile(r"wiki/api/v2/pages/\d+/direct-children/?$"), "children"),
     EndpointRule(re.compile(r"wiki/api/v2/folders/\d+/direct-children/?$"), "folder children"),
     EndpointRule(re.compile(r"wiki/rest/api/user/current/?$"), "identity"),
+    EndpointRule(re.compile(r"wiki/rest/api/search/?$"), "title search"),  # #270
 ]
 
 RULES_DC = [
     EndpointRule(re.compile(r"(?:confluence/)?rest/api/content/\d+/?$"), "page body"),
     EndpointRule(re.compile(r"(?:confluence/)?rest/api/content/\d+/child/page/?$"), "children"),
     EndpointRule(re.compile(r"(?:confluence/)?rest/api/user/current/?$"), "identity"),
+    EndpointRule(re.compile(r"(?:confluence/)?rest/api/search/?$"), "title search"),  # #270
 ]
 
 def make_client(profile, token: str, cloud_id: str | None = None) -> ConfluenceClient:

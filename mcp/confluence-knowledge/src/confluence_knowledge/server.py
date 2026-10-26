@@ -457,9 +457,34 @@ def register_token(site: str, env: str = "cloud", email: str = "") -> dict:
                 "error": f"connection check failed — nothing stored: {e}"}
 
 
+def _title_lookup(client, env: str, title: str) -> tuple:
+    """Resolve a page title to (page_id, title, candidates) via CQL
+    search (#270). Fuzzy `title~` recall, then prefer exact-title hits —
+    one match resolves, several return candidates, none returns empty."""
+    esc = title.replace("\\", "\\\\").replace('"', '\\"')
+    api = "wiki/rest/api/search" if env == "cloud" else "rest/api/search"
+    data = client.get(api, params={
+        "cql": f'title~"{esc}" and type=page',
+        "limit": "5", "expand": "content.space"}).json()
+    hits = [r["content"] for r in data.get("results", []) if r.get("content")]
+    want = title.strip().lower()
+    exact = [h for h in hits if (h.get("title") or "").strip().lower() == want]
+    pool = exact or hits
+    if len(pool) == 1:
+        return str(pool[0]["id"]), pool[0].get("title"), []
+    cands = [{"page_id": str(h["id"]), "title": h.get("title"),
+              "space": (h.get("space") or {}).get("key")}
+             for h in pool]
+    return None, None, cands
+
+
 @tool(mcp)
 def connect(root: str) -> dict:
-    """Validate credentials + root readability; bind a scope handle."""
+    """Validate credentials + root readability; bind a scope handle.
+
+    `root` is a numeric pageId, a page URL, or an exact page title
+    (resolved via CQL search — an `ambiguous` result lists candidates
+    to retry with)."""
     _resume_orphaned_crawls()
     dargs = {"root": root}
     out = _daemon_call("connect", dargs, 120)
@@ -477,10 +502,25 @@ def connect(root: str) -> dict:
 
 
     profile = SiteProfile.load(_home())
-    root_id = extract_page_id(root)
     _clients.pop(profile.credential_ref, None)  # re-read the token: setup may have rotated it
     with _state_lock:
         _CREDS_CACHE.pop(profile.credential_ref, None)  # force re-validate
+    try:
+        root_id = extract_page_id(root)
+        resolved_title = None
+    except SetupError as e:
+        # #270: people say titles, not pageIds — resolve via CQL title
+        # search through the same credential/bounds as any connect call
+        root_id, resolved_title, candidates = _title_lookup(
+            _client_for(profile), profile.env, root)
+        if root_id is None and not candidates:
+            raise SetupError(f"{e} — also no page titled {root!r} found") from e
+        if root_id is None:
+            return {"scope_handle": None, "ambiguous": True,
+                    "candidates": candidates,
+                    "note": "several pages match that title — connect "
+                            "again with the URL or pageId of the one "
+                            "you mean"}
     client = _client_for(profile)
     who = client.get("wiki/rest/api/user/current" if profile.env == "cloud"
                      else "rest/api/user/current").json()
@@ -524,6 +564,7 @@ def connect(root: str) -> dict:
         "stale_model": stale,
         "auto_reindex": auto,
         "last_crawl": _last_crawl(idx),
+        "resolved_title": resolved_title,  # title→id lookups say which page won
         "note": ("index was built with an older model — "
                  + (f"re-index started automatically ({auto})"
                     if auto else "run start_crawl once to rebuild it "

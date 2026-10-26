@@ -543,3 +543,105 @@ def test_status_reports_no_daemon_url_locally(wired, monkeypatch):
                         lambda: "http://127.0.0.1:1/")
     out = server.status()
     assert out["daemon"] == "off" and out["paths"]["daemon_url"] == ""
+
+
+# ---- #270: connect by page title ----
+
+class _TitleClient(_FakeClient):
+    """Serves the CQL search endpoint; records every (path, params) call."""
+
+    def __init__(self, results, calls):
+        self._results = results
+        self._calls = calls
+
+    def get(self, path, params=None):
+        if path.endswith("/search"):
+            self._calls.append((path, params))
+            return _Resp({"results": [{"content": c}
+                                      for c in self._results]})
+        return super().get(path, params)
+
+
+def _wire_titles(monkeypatch, results, env="datacenter"):
+    calls = []
+    profile = SiteProfile(env, "https://c", None, "ref")
+    monkeypatch.setattr(SiteProfile, "load", staticmethod(lambda home: profile))
+    monkeypatch.setattr(server, "_client_for",
+                        lambda p: _TitleClient(results, calls))
+    return calls
+
+
+def test_connect_resolves_unique_title(wired, monkeypatch):
+    calls = _wire_titles(monkeypatch, [
+        {"id": "42", "title": "PL Sequencer", "space": {"key": "PL"}}])
+    c = server.connect("PL Sequencer")
+    assert c["root_page_id"] == "42"
+    assert c["resolved_title"] == "PL Sequencer"
+    assert calls[0][0] == "rest/api/search"
+    assert calls[0][1]["cql"] == 'title~"PL Sequencer" and type=page'
+    assert calls[0][1]["limit"] == "5"
+
+
+def test_connect_title_prefers_exact_over_partial(wired, monkeypatch):
+    """A fuzzy CQL hit plus an exact hit resolves to the exact one."""
+    _wire_titles(monkeypatch, [
+        {"id": "1", "title": "PL Sequencer v2", "space": {"key": "PL"}},
+        {"id": "9", "title": "PL Sequencer", "space": {"key": "PL"}}])
+    c = server.connect("PL Sequencer")
+    assert c["root_page_id"] == "9"
+
+
+def test_connect_title_ambiguous_returns_candidates(wired, monkeypatch):
+    """Same title in two spaces — never guess, hand the list back."""
+    _wire_titles(monkeypatch, [
+        {"id": "1", "title": "PL Sequencer", "space": {"key": "A"}},
+        {"id": "2", "title": "PL Sequencer", "space": {"key": "B"}}])
+    r = server.connect("PL Sequencer")
+    assert r["ambiguous"] is True and r["scope_handle"] is None
+    assert {c["page_id"] for c in r["candidates"]} == {"1", "2"}
+    assert {c["space"] for c in r["candidates"]} == {"A", "B"}
+
+
+def test_connect_title_fuzzy_ambiguous_too(wired, monkeypatch):
+    _wire_titles(monkeypatch, [
+        {"id": "1", "title": "Sequencer Alpha", "space": {"key": "A"}},
+        {"id": "2", "title": "Sequencer Beta", "space": {"key": "B"}}])
+    r = server.connect("Sequencer")
+    assert r["ambiguous"] is True and len(r["candidates"]) == 2
+
+
+def test_connect_title_no_match_keeps_helpful_error(wired, monkeypatch):
+    _wire_titles(monkeypatch, [])
+    with pytest.raises(server.SetupError,
+                       match="no page titled 'Missing Page'"):
+        server.connect("Missing Page")
+
+
+def test_connect_title_escapes_cql_quotes(wired, monkeypatch):
+    calls = _wire_titles(monkeypatch, [
+        {"id": "7", "title": 'say "hi"', "space": {"key": "A"}}])
+    server.connect('say "hi"')
+    assert calls[0][1]["cql"] == 'title~"say \\"hi\\"" and type=page'
+
+
+def test_connect_title_uses_cloud_endpoint(wired, monkeypatch):
+    calls = _wire_titles(monkeypatch, [
+        {"id": "42", "title": "PL Sequencer", "space": {"key": "PL"}}],
+        env="cloud")
+    c = server.connect("PL Sequencer")
+    assert calls[0][0] == "wiki/rest/api/search"
+    assert c["root_page_id"] == "42"
+
+
+def test_connect_numeric_id_skips_search(wired, monkeypatch):
+    """Direct IDs must not spend a lookup request."""
+    calls = _wire_titles(monkeypatch, [])
+    server.connect("123")
+    assert calls == []
+
+
+def test_connect_url_skips_search(wired, monkeypatch):
+    """Parseable URLs take the same no-lookup path as IDs."""
+    calls = _wire_titles(monkeypatch, [])
+    server.connect("https://c/pages/123")
+    assert calls == []
