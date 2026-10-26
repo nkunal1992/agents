@@ -79,6 +79,9 @@ def _tcp_ok(port: int) -> bool:
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus-files", type=int, default=12)
     ap.add_argument("--runs", type=int, default=3)

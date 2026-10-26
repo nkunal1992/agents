@@ -36,6 +36,9 @@ def _corpus_texts(n: int) -> list[str]:
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=800)
     ap.add_argument("--batches", default="4,8,16,32,64")

@@ -360,6 +360,9 @@ def _phase_table(name: str, st: dict | None) -> str:
 # -------------------------------- main ------------------------------------
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--workspace", default="/tmp/e2e_real_data_test"
                     if os.name != "nt" else None)

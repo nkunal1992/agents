@@ -136,6 +136,9 @@ def _await_daemon(home: Path, timeout=30) -> None:
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     with tempfile.TemporaryDirectory(prefix="kreal-") as td:
         sandbox = Path(td)
         env = _env(sandbox)

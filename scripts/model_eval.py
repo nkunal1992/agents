@@ -231,6 +231,9 @@ def _corpus_at(step: int) -> tuple[list[str], list[int]]:
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default=None)
     ap.add_argument("--pages", type=int, default=30)

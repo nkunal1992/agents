@@ -865,6 +865,9 @@ async def _run_one(name, fn, spec, profile, pages, seed, models,
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages", type=int, default=200)
     ap.add_argument("--seed", type=int, default=7)

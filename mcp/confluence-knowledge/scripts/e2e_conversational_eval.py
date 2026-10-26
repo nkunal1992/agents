@@ -63,6 +63,10 @@ def _compose_answer(res: dict, gold: list[str]) -> str:
 
 
 def main() -> int:
+    # Windows consoles are cp1252 — replace unencodable glyphs (→ ✓ —)
+    # in stdout rather than crash at the last line after a full eval
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", default=str(REPORT))
     ap.add_argument("--workspace", default=None)

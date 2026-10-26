@@ -136,6 +136,9 @@ def bench_embed_sweep(texts: list[str], batches: list[int]) -> None:
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages", type=int, default=30)
     ap.add_argument("--batch-sweep", default=None,

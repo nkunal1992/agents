@@ -45,6 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=None,
                     help="page id or viewpage URL — defaults to the "

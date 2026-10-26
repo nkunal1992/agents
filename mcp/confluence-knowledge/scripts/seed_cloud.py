@@ -388,6 +388,9 @@ def ensure_space(env) -> str:
 
 
 def main() -> int:
+    # cp1252 consoles can't print arrow/check glyphs — degrade, never crash (#308)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     reseed = "--reseed" in sys.argv
     wipe = "--wipe" in sys.argv
     env = load_env()
