@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-knowledge"
-version = "0.11.1"
+version = "0.12.0"
 description = "Local file/folder indexer + grounded-Q&A MCP service — same engine as confluence-knowledge, no credentials needed"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,7 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
-    "confluence-knowledge~=0.14.1",
+    "confluence-knowledge~=0.15.0",
     "python-docx>=1.1",
     "pypdf>=4.0",
     "python-pptx>=1.0",
@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 models = [
-    "confluence-knowledge[models]~=0.14.1",
+    "confluence-knowledge[models]~=0.15.0",
 ]
 dev = [
     "pytest>=8.0",
