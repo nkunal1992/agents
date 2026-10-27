@@ -76,6 +76,7 @@ check), `prepare-models`, `register`, `update`, `serve`, `clean`.
 | `SP_KNOWLEDGE_WORKDIR` | index location (`~/.sharepoint-knowledge/work`) |
 | `SP_KNOWLEDGE_TOKEN` | pre-baked access token (tests/CI — bypasses MSAL) |
 | `SP_KNOWLEDGE_RERANKER` | `mixedbread-ai/mxbai-rerank-base-v1` for a heavier, stronger reranker |
+| `KNOWLEDGE_COLBERT` | `0` disables the ColBERT late-interaction scorer and uses the cross-encoder for all ranking (default: on — ~7× faster per query) |
 | `SP_KNOWLEDGE_GRAPH_BASE` | Graph base URL override (e2e fake) |
 | `KNOWLEDGE_THREADS` | native inference threads per session (default ≈ cores/4, max 4) |
 | `KNOWLEDGE_BATCH_TOKENS` / `KNOWLEDGE_MAX_BATCH` | inference micro-batch bounds — attention cost (items × longest²) 2.5 M / 4 items |
@@ -248,7 +249,7 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
 | Flag | Means | Fix |
 |---|---|---|
 | `deps` | an install was interrupted — a dep isn't importable | the pinned reinstall doctor prints — `pip install "sharepoint-knowledge[models]==<installed>"` |
-| `model_embed / model_rerank / model_rerank_light / model_sparse` | partial model download (dir exists, locked file missing) | `prepare-models` |
+| `model_embed / model_rerank / model_rerank_light / model_colbert / model_sparse` | partial model download (dir exists, locked file missing) | `prepare-models` |
 | `registration` | no IDE config contains the server | `register --ide auto` |
 | `index:<scope>` | `corrupt` → delete index, re-crawl; `older model` → one `start_crawl` rebuild | `clean` / `start_crawl` |
 | `creds_valid` | token rejected or missing (401) | `setup` again |
@@ -271,8 +272,11 @@ end to end against a local fake Graph server — `E2E BOOTSTRAP OK`.
   published snapshot") — re-run `search` for a fresh one.
 - FTS indexes at most the first 16 whitespace-separated query terms;
   the dense + sparse legs carry longer questions.
-- Evidence scoring below ~0.3 rerank probability is flagged
-  `low_confidence: true`; below ~0.02 nothing is returned at all.
+- Evidence scoring below ~0.85 ColBERT score is flagged
+  `low_confidence: true`; when the top pick fails the cross-encoder's
+  ~0.1 verification floor nothing is returned — abstention, not a
+  best-effort answer on junk. (`KNOWLEDGE_COLBERT=0` reverts to the pure
+  cross-encoder path: ~0.3 flag / ~0.1 floor.)
 - Whole-scope search caps at 100k chunks — connect a narrower scope on
   bigger indexes.
 - The sparse leg is word-piece based: it adds little for CJK content

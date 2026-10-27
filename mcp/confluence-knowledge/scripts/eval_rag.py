@@ -132,6 +132,7 @@ def main() -> int:
     emb = retrieval.LocalEmbedder(home)
     rr = retrieval.LocalReranker(home)
     sp = retrieval.load_sparse_or_none(home)
+    cb = retrieval.load_colbert_or_none(home)   # #329 — None → cross-encoder
     print(f"models loaded from {home}")
 
     if "--index" in args:
@@ -139,6 +140,10 @@ def main() -> int:
         idx = Index(Path(args[args.index("--index") + 1]))
     else:
         idx = _build_index(_load_corpus(), emb, sp, Path(tempfile.mkdtemp()))
+    if cb is not None:
+        # eval indexes never see a server-side publish hook — backfill
+        # explicitly so the eval scores through the real ColBERT path
+        retrieval.backfill_tokvecs(idx, lambda: cb)
     print(f"index: {len(idx.active_chunks())} chunks — "
           f"{len(pairs)} golden pairs")
 
@@ -153,7 +158,8 @@ def main() -> int:
     results, lat = [], []
     for pair in pairs:
         t = time.monotonic()
-        ev = retrieval.retrieve(idx, pair["question"], emb, rr, sp)
+        ev = retrieval.retrieve(idx, pair["question"], emb, rr, sp,
+                                colbert=cb)
         lat.append(time.monotonic() - t)
         results.append({
             "question": pair["question"],

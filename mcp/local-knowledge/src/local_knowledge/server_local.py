@@ -19,6 +19,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import Context, FastMCP
 
+import confluence_knowledge.index as _index_mod
 from confluence_knowledge.client import AccessError, SecurityException
 from confluence_knowledge.feedback import FeedbackStore
 from confluence_knowledge.index import Index, find_covering
@@ -42,6 +43,7 @@ from confluence_knowledge.retrieval import (
     MODEL_MARKER as EMBED_MODEL_ID,
 )
 from confluence_knowledge.retrieval import (
+    backfill_tokvecs,
     check_citations,
     fake_models,
     retrieve,
@@ -72,6 +74,7 @@ _cancel_flags: dict[str, threading.Event] = {}  # job_id → cancel requested
 _EMBEDDER = None
 _RERANKER = None
 _SPARSE = None
+_COLBERT = None
 _models_ready = shared_ready()
 _warm_lock = threading.Lock()
 _warm_started = False
@@ -185,8 +188,8 @@ def _start_stale_watcher() -> None:
 
 
 def _on_models_unloaded() -> None:
-    global _EMBEDDER, _RERANKER, _SPARSE, _warm_started
-    _EMBEDDER = _RERANKER = _SPARSE = None
+    global _EMBEDDER, _RERANKER, _SPARSE, _COLBERT, _warm_started
+    _EMBEDDER = _RERANKER = _SPARSE = _COLBERT = None
     with _warm_lock:
         _warm_started = False
     _models_ready.clear()
@@ -196,6 +199,14 @@ def _on_models_unloaded() -> None:
 
 _pool = shared_pool(home, APP_NAME, busy_fn=_any_worker_alive,
                   on_unload=_on_models_unloaded,)
+
+
+def _colbert():
+    global _COLBERT
+    if _COLBERT is None:
+        fake = fake_models()
+        _COLBERT = fake[3] if fake and len(fake) > 3 else _pool.colbert()
+    return _COLBERT
 
 
 def _embedder():
@@ -241,6 +252,11 @@ def _start_warmup() -> None:
         if _daemon_on():
             return      # models live in the daemon — proxy
                         # warmup just doubles RSS (#196)
+        # ColBERT tokvec backfill rides every publish's idle-time warm
+        # thread (#329) — registered at server boot so test processes
+        # never spin up model sessions or background index writes.
+        _index_mod.POST_PUBLISH = \
+            lambda i: backfill_tokvecs(i, _pool.colbert)
         _warm_started = True
     threading.Thread(target=_warm_models, name="model-warmup",
                      daemon=True).start()
@@ -992,6 +1008,7 @@ def search(scope_handle: str = "", question: str = "") -> dict:
     emb = _embedder()
     t_ret = time.monotonic()
     ev = retrieve(idx, question, emb, _reranker(), sparse=_sparse(),
+                  colbert=_colbert(),
                   allow_chunks=_subtree_allow(s, idx))
     retrieval_ms = round((time.monotonic() - t_ret) * 1000)
     corrections = _feedback_for(s["key"]).match(emb.embed([question])[0])
@@ -1029,6 +1046,8 @@ def search(scope_handle: str = "", question: str = "") -> dict:
     }
     if _pool.sparse_missing:
         resp["sparse"] = _pool.sparse_missing      # degraded leg (#287)
+    if _pool.colbert_missing:
+        resp["colbert"] = _pool.colbert_missing    # optional scorer (#329)
     return resp
 
 

@@ -66,6 +66,15 @@ _ANN_SCOPE_MIN = 100_000   # scopes above this use vec_chunks (ANN) —
                             # the dense cache matrix would cost the RAM
                             # the cap was guarding (#251)
 
+# Post-publish hook (#329 ColBERT tokvec backfill): a module-level
+# callable the warm thread invokes after each publish's cache build —
+# servers register `retrieval.backfill_tokvecs` bound to their model
+# pool. Lazy doc_tokvecs lives outside SCHEMA on purpose: adding it to
+# the gated layout would bump SCHEMA_VERSION and force every existing
+# index to re-crawl; as derived data it can be created + rebuilt lazily
+# (same escape hatch vec_chunks uses).
+POST_PUBLISH = None
+
 _STAGE_TABLES = ("pages_stage", "chunks_stage", "vectors_stage",
                  "sparse_vectors_stage", "chunks_fts_stage")
 # writes that bypass the job system (tests, tools) use this stage owner
@@ -205,6 +214,8 @@ class Index:
         self._building_cache = False
         self._warm_threads: set[threading.Thread] = set()
         self._ann: bool | None = None   # None=untried, True=ready, False=no ext
+        self._closed = False            # set before close() joins warm
+                                        # threads — aborts long warm work
         # strict schema gate (#257): separate IDE installs share the index
         # files — a version-skewed second install must refuse cleanly, not
         # misread a newer layout. Pre-production: no migrations, one rule.
@@ -279,7 +290,10 @@ class Index:
         # a publish's cache-warm thread iterates a registered read conn —
         # closing it mid-query frees the buffer numpy is viewing (the
         # frombuffer zero-copy path) → use-after-free segfault. The build
-        # is one bounded scan; joining is always finite (#257)
+        # is one bounded scan; joining is always finite (#257). The flag
+        # goes up first so longer warm work (e.g. the #329 tokvec
+        # backfill) aborts at its next batch instead of holding the join.
+        self._closed = True
         for t in list(self._warm_threads):
             t.join()
         with self._rlock:
@@ -625,6 +639,118 @@ class Index:
                     out[cid] = dict(zip(idx.tolist(), vals.tolist()))
         return out
 
+    # ---- ColBERT per-token doc vectors (#329) ----
+    # doc_tokvecs is derived data created lazily — deliberately NOT part
+    # of the gated SCHEMA (a new table there would bump schema_version and
+    # force every existing index to re-crawl). Payload is fp16 rows of
+    # COLBERT_DIM; row count = len(blob)/(2*dim) so no header is needed.
+    TOKVEC_DIM = 96
+
+    def _tokvecs_table(self, conn) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='doc_tokvecs'"
+        ).fetchone() is not None
+
+    def _ensure_tokvecs(self) -> None:
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS doc_tokvecs "
+            "(chunk_id TEXT PRIMARY KEY, payload BLOB)")
+
+    @staticmethod
+    def _meta_val(conn, key: str) -> str | None:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def tokvec_sig(self) -> str | None:
+        """Model signature stamped on stored token vectors, or None."""
+        with self._rlock:
+            return self._meta_val(self._read(), "colbert_sig")
+
+    def _tokvecs_current(self, conn, sig: str) -> bool:
+        """Derived rows exist AND were encoded by the running model —
+        a colbert upgrade (repo/revision/dim change) makes stored rows
+        silently incompatible, so a mismatch reads as uncovered."""
+        return (self._tokvecs_table(conn)
+                and self._meta_val(conn, "colbert_sig") == sig)
+
+    def tokvecs_for(self, chunk_ids: list[str],
+                    sig: str) -> dict[str, np.ndarray]:
+        """{chunk_id: fp32 [L,96] token matrix} for ids with coverage —
+        empty when stored rows were written by a different model (`sig`)."""
+        if not chunk_ids:
+            return {}
+        out = {}
+        with self._rlock:
+            conn = self._read()
+            if not self._tokvecs_current(conn, sig):
+                return out
+            step = self._var_batch()
+            for off in range(0, len(chunk_ids), step):
+                part = chunk_ids[off:off + step]
+                q = ",".join("?" * len(part))
+                for cid, blob in conn.execute(
+                        f"SELECT chunk_id,payload FROM doc_tokvecs "  # nosec B608
+                        f"WHERE chunk_id IN ({q})", part):
+                    rows = len(blob) // (2 * self.TOKVEC_DIM)
+                    if rows:
+                        out[cid] = np.frombuffer(
+                            blob, dtype=np.float16).reshape(
+                            rows, self.TOKVEC_DIM).astype(np.float32)
+        return out
+
+    def tokvecs_missing(self, limit: int,
+                        sig: str | None = None) -> list[tuple[str, str]]:
+        """Active chunks lacking usable token vectors — the backfill
+        frontier. With `sig`, rows stamped under a different model
+        signature count as missing so an upgrade re-encodes."""
+        with self._rlock:
+            conn = self._read()
+            if sig is None and not self._tokvecs_table(conn):
+                return conn.execute(
+                    "SELECT chunk_id,text FROM chunks WHERE active=1 "
+                    "ORDER BY rowid LIMIT ?", (limit,)).fetchall()
+            if sig is not None and not self._tokvecs_current(conn, sig):
+                return conn.execute(
+                    "SELECT chunk_id,text FROM chunks WHERE active=1 "
+                    "ORDER BY rowid LIMIT ?", (limit,)).fetchall()
+            return conn.execute(
+                "SELECT c.chunk_id,c.text FROM chunks c WHERE c.active=1 "
+                "AND NOT EXISTS (SELECT 1 FROM doc_tokvecs t WHERE "
+                "t.chunk_id=c.chunk_id) ORDER BY c.rowid LIMIT ?",
+                (limit,)).fetchall()
+
+    def put_tokvecs(self, mats: dict[str, np.ndarray],
+                    sig: str | None = None) -> None:
+        if not mats:
+            return
+        with self.lock, _LockedRetry(self.db):
+            self._ensure_tokvecs()
+            if sig is not None and self.meta_get("colbert_sig") != sig:
+                # model changed — prior rows score against the wrong
+                # projection; drop them so the backfill re-encodes all
+                self.db.execute("DELETE FROM doc_tokvecs")
+                self.db.execute(
+                    "INSERT OR REPLACE INTO meta VALUES ('colbert_sig',?)",
+                    (sig,))
+            self.db.executemany(
+                "INSERT OR REPLACE INTO doc_tokvecs VALUES (?,?)",
+                [(cid, m.astype(np.float16).tobytes())
+                 for cid, m in mats.items() if m.shape[0]])
+            self.db.commit()
+
+    def gc_tokvecs(self) -> int:
+        """Drop rows for chunks no longer active — covers stale rows a
+        backfill raced into the doomed window of a concurrent publish."""
+        with self.lock, _LockedRetry(self.db):
+            if not self._tokvecs_table(self.db):
+                return 0
+            cur = self.db.execute(
+                "DELETE FROM doc_tokvecs WHERE chunk_id NOT IN "
+                "(SELECT chunk_id FROM chunks WHERE active=1)")
+            self.db.commit()
+            return cur.rowcount or 0
+
     def model_id(self) -> str | None:
         return self.meta_get("embed_model")
 
@@ -634,7 +760,9 @@ class Index:
         model change makes the existing vector space invalid."""
         with self.lock, _LockedRetry(self.db):
             for t in ("pages", "chunks", "chunks_fts", "vectors",
-                      "sparse_vectors", "term_stats") + _STAGE_TABLES:
+                      "sparse_vectors", "term_stats",
+                      *(["doc_tokvecs"] if self._tokvecs_table(self.db)
+                        else ())) + _STAGE_TABLES:
                 self.db.execute(f"DELETE FROM {t}")  # nosec B608
             self.db.execute(
                 "DELETE FROM meta WHERE key='embed_model' OR key LIKE 'seen:%'"
@@ -727,6 +855,10 @@ class Index:
                 f"DELETE FROM vectors WHERE chunk_id IN ({doomed_chunks})")  # nosec B608
             self.db.execute(
                 f"DELETE FROM sparse_vectors WHERE chunk_id IN ({doomed_chunks})")  # nosec B608
+            if self._tokvecs_table(self.db):
+                self.db.execute(
+                    f"DELETE FROM doc_tokvecs WHERE chunk_id IN "
+                    f"({doomed_chunks})")  # nosec B608
             self.db.execute(f"DELETE FROM chunks WHERE {doom}")  # nosec B608
             self.db.execute(f"DELETE FROM pages WHERE {doom}")  # nosec B608
             # staged content becomes the live snapshot
@@ -818,7 +950,9 @@ class Index:
                 return 0
             doomed = ("SELECT chunk_id FROM chunks WHERE page_id IN "
                       "(SELECT page_id FROM pages_stage WHERE job_id=?)")
-            for t in ("chunks_fts", "vectors", "sparse_vectors"):
+            for t in ("chunks_fts", "vectors", "sparse_vectors",
+                      *(["doc_tokvecs"] if self._tokvecs_table(self.db)
+                        else ())):
                 self.db.execute(
                     f"DELETE FROM {t} WHERE chunk_id IN ({doomed})",  # nosec B608
                     (job_id,))
@@ -889,6 +1023,14 @@ class Index:
         def _run() -> None:
             try:
                 self.search_cache()
+                # derived-data hook (e.g. ColBERT tokvec backfill, #329)
+                # rides the same idle-time thread — writes need a rw idx
+                fn = POST_PUBLISH
+                if fn is not None and not self._readonly:
+                    try:
+                        fn(self)
+                    except Exception:   # noqa: BLE001,S110 — best-effort
+                        pass
             except Exception:      # noqa: BLE001,S110 — opportunistic warm only
                 pass
             finally:

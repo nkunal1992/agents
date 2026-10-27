@@ -25,6 +25,26 @@
         "README.md"
       ]
     },
+    "colbert": {
+      "repo": "lightonai/answerai-colbert-small-v1-onnx",
+      "revision": "8a08e612a35e9cd6c29a2c6de2e633c933439cc2",
+      "license": "MIT (export) / Apache-2.0 (answerdotai base)",
+      "note": "ColBERT late-interaction scorer (#329): 33M BERT, per-token 96-dim vectors. Doc vecs computed at index time; a query costs one ~ms encode + MaxSim matmuls — replaces the 12-pair cross-encoder pass where coverage exists (cross-encoder remains the fallback + persisted-score-free swap, so no rebuild on change)",
+      "files": [
+        "model_int8.onnx",
+        "tokenizer.json",
+        "config_sentence_transformers.json",
+        "onnx_config.json",
+        "README.md"
+      ],
+      "sha256": {
+        "model_int8.onnx": "c8d5c58f5d5061402055ae08dd20169fe9a32f4c42397ebdaad0438c8f73e6a9",
+        "tokenizer.json": "e3255dcb01454c48cf1eaf937229098b8e8e0412de8f00ceadf09a76b7271a2c",
+        "config_sentence_transformers.json": "dcce63ae6b3b95f8ee1d88dfa58e7592f5a312d03c1c4e0bc8c69c05b5ea9bb7",
+        "onnx_config.json": "dcce63ae6b3b95f8ee1d88dfa58e7592f5a312d03c1c4e0bc8c69c05b5ea9bb7",
+        "README.md": "58029565598c04d172e9d49abeaa232af7148d312bdae5767d40f66c37f4dfd4"
+      }
+    },
     "rerank_light": {
       "repo": "mixedbread-ai/mxbai-rerank-base-v1",
       "revision": "800f24c113213a187e65bde9db00c15a2bb12738",

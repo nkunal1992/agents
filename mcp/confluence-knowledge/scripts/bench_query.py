@@ -159,6 +159,10 @@ def main() -> int:
     t = time.monotonic()
     rr = LocalReranker(home)
     models_t["reranker_load_s"] = round(time.monotonic() - t, 2)
+    t = time.monotonic()
+    cb = retrieval.load_colbert_or_none(home)   # #329 — None → skipped
+    models_t["colbert_load_s"] = (round(time.monotonic() - t, 2)
+                                if cb else "unavailable")
 
     results = {"models": models_t, "ann": args.ann, "sizes": {}}
     # without a real embedder there are no genuine term ids — a synthetic
@@ -181,6 +185,14 @@ def main() -> int:
         cache = idx.search_cache()
         cache_build = time.monotonic() - t
 
+        # ColBERT tokvec coverage — the bench's synthetic index never sees
+        # a server publish hook, so backfill explicitly (#329)
+        tokvec_s = None
+        if cb is not None:
+            t = time.monotonic()
+            retrieval.backfill_tokvecs(idx, lambda: cb)
+            tokvec_s = round(time.monotonic() - t, 2)
+
         # attribute cache-build cost: rerun the build under cProfile —
         # which stage dominates (dense matrix, postings loop, pages)?
         if args.profile_build:
@@ -200,8 +212,10 @@ def main() -> int:
 
         legs: dict[str, list[float]] = {k: [] for k in (
             "embed_query", "dense_leg", "fts_leg", "sparse_leg",
-            "fuse_fetch", "rerank", "retrieve_all")}
+            "fuse_fetch", "rerank", "colbert_score", "retrieve_all")}
         rerank_stats: list[dict] = []          # rr.last per call (#329)
+        colbert_stats: list[dict] = []         # cb.last per call (#329)
+        colbert_used = 0                       # retrieve calls scored by colbert
         dense_mode = "ann" if retrieval.MAX_SEARCHABLE_CHUNKS < size \
             else "matmul"
         for rep in range(args.reps):
@@ -263,14 +277,29 @@ def main() -> int:
             legs["rerank"].append(time.monotonic() - t)
             rerank_stats.append(dict(rr.last))
 
+            if cb is not None:
+                t = time.monotonic()
+                tmats = idx.tokvecs_for(
+                    [c["chunk_id"] for c in cands[:_rerank_max()]],
+                    cb.sig)
+                if len(tmats) == min(_rerank_max(), len(cands)):
+                    cb.score(q, [tmats[c["chunk_id"]]
+                                 for c in cands[:_rerank_max()]])
+                    colbert_stats.append(dict(cb.last))
+                legs["colbert_score"].append(time.monotonic() - t)
+
             t = time.monotonic()
-            retrieve(idx, q, emb, rr, sp)
+            ev = retrieve(idx, q, emb, rr, sp, colbert=cb)
             legs["retrieve_all"].append(time.monotonic() - t)
+            if ev and ev[0].get("scorer") == "colbert":
+                colbert_used += 1
 
         results["sizes"][size] = {
             "index_build_s": round(build_s, 2),
             "cache_build_s": round(cache_build, 3),
+            "tokvec_backfill_s": tokvec_s,
             "dense_mode": dense_mode,
+            "colbert_scored": colbert_used,
             "legs_p50_ms": {k: (round(_pct(v, 50) * 1000, 1)
                               if v else None)
                             for k, v in legs.items()},
@@ -287,6 +316,12 @@ def main() -> int:
                 "tokens_last": ({k: rerank_stats[-1][k]
                                  for k in ("tok_min", "tok_med", "tok_max")}
                                 if rerank_stats else None),
+            },
+            "colbert": {
+                "score_ms_p50": (_pct([s["ms"] for s in colbert_stats], 50)
+                                 if colbert_stats else None),
+                "qtok_last": (colbert_stats[-1].get("qtok")
+                              if colbert_stats else None),
             },
         }
         idx.close()

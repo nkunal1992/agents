@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .resources import limits
-from .retrieval import LocalEmbedder, LocalReranker, LocalSparseEmbedder, SparseUnavailable
+from .retrieval import LocalColbert, LocalEmbedder, LocalReranker, LocalSparseEmbedder, SparseUnavailable
 from .settings import SetupError
 
 
@@ -43,12 +43,15 @@ class ModelPool:
         self._embedder: LocalEmbedder | None = None
         self._reranker: LocalReranker | None = None
         self._sparse: LocalSparseEmbedder | None = None
+        self._colbert: LocalColbert | None = None
         self._sparse_missing: str | None = None   # #287 degrade reason
+        self._colbert_missing: str | None = None  # #329 optional scorer
         # injectable for tests — {kind: factory(home, cli)}
         self._loaders: dict[str, Callable] = {
             "embedder": LocalEmbedder,
             "reranker": LocalReranker,
             "sparse": LocalSparseEmbedder,
+            "colbert": LocalColbert,
         }
         # per-kind creation locks — different models may load in parallel
         # while the same kind still single-loads (#255)
@@ -78,6 +81,13 @@ class ModelPool:
                         raise
                     self._sparse_missing = str(e)
                     obj = None
+                except SetupError as e:
+                    # colbert is an optional scorer — a load fault degrades
+                    # to the cross-encoder rather than failing search (#329)
+                    if kind != "colbert":
+                        raise
+                    self._colbert_missing = str(e)
+                    obj = None
                 setattr(self, attr, obj)
         self._touch()
         return obj
@@ -96,6 +106,18 @@ class ModelPool:
 
     def sparse(self) -> LocalSparseEmbedder | None:
         return self._get("sparse")
+
+    @property
+    def colbert_missing(self) -> str | None:
+        """Why the ColBERT scorer degraded to the cross-encoder (#329).
+        None when loaded or never attempted."""
+        return self._colbert_missing
+
+    def colbert(self) -> LocalColbert | None:
+        from .retrieval import colbert_disabled
+        if colbert_disabled():
+            return None
+        return self._get("colbert")
 
     @property
     def ready(self) -> bool:
@@ -149,12 +171,14 @@ class ModelPool:
             return False
         with self._lock:
             if (self._embedder is None and self._reranker is None
-                    and self._sparse is None):
+                    and self._sparse is None and self._colbert is None):
                 return False
             if self._clock() - self._last_use < idle_s:
                 return False
-            self._embedder = self._reranker = self._sparse = None
+            self._embedder = self._reranker = self._sparse = \
+                self._colbert = None
             self._sparse_missing = None     # retry — a reinstall may heal it
+            self._colbert_missing = None
             self._ready.clear()
             with self._warm_lock:
                 self._warm_started = False

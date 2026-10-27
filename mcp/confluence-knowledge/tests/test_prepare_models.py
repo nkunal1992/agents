@@ -24,6 +24,8 @@ FAKE_LOCK = {"models": {
                "files": ["r.onnx", "tokenizer.json"]},
     "rerank_light": {"repo": "org/rl", "revision": "r2b", "license": "MIT",
                      "files": ["r.onnx", "tokenizer.json"]},
+    "colbert": {"repo": "org/colb", "revision": "r4", "license": "MIT",
+                "files": ["m.onnx", "tokenizer.json"]},
     "sparse": {"repo": "org/bm25", "revision": "r3", "license": "Apache-2.0"},
 }}
 
@@ -77,7 +79,7 @@ def test_prepare_models_downloads_locked_files(monkeypatch, tmp_path):
 
     from confluence_knowledge import retrieval
     out = retrieval.prepare_models(tmp_path)
-    assert len(out) == 4  # embed + 2 rerankers via snapshot + sparse
+    assert len(out) == 5  # embed + 2 rerankers + colbert via snapshot + sparse
     repos = {c[0] for c in calls}
     assert "org/emb" in repos and "org/rer" in repos and "org/bm25" in repos
     for _, kw in calls:
@@ -95,7 +97,7 @@ def test_model_card_license_accepted(monkeypatch, tmp_path):
 
     from confluence_knowledge import retrieval
     out = retrieval.prepare_models(tmp_path)
-    assert len(out) == 4
+    assert len(out) == 5
 
 
 def test_partial_download_is_retried(monkeypatch, tmp_path):

@@ -17,11 +17,13 @@ Backend layout (all under <home>/models/):
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import platform
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -127,6 +129,35 @@ MIN_RERANK_SCORE = 0.1   # noise floor — mxbai-xsmall scores junk 0.02-0.06,
                          # between the bands (golden-set abstention regressed
                          # when the old 0.02 floor met the new reranker)
 LOW_CONFIDENCE_SCORE = 0.3  # below this the hit is surfaced but flagged
+# ColBERT MaxSim normalised per query token — a different scale from the
+# sigmoid floor (junk compresses high because every token best-matches
+# SOMETHING; separation is relative). Calibrated on the eval golden set
+# (#329); KNOWLEDGE_COLBERT_MIN/LOW tune without a rebuild.
+COLBERT_MIN_SCORE = 0.62   # sanity guard inside a verified set — the
+                           # calibrated noise floor is the top-1 sigmoid
+                           # check in retrieve(), not this band
+COLBERT_LOW_SCORE = 0.85   # weak tail of a verified set gets flagged —
+                           # real evidence sits ~0.9+, marginal ~0.8-0.85
+COLBERT_REPO = "lightonai/answerai-colbert-small-v1-onnx"  # MIT export /
+                                                         # Apache-2.0 base
+COLBERT_ONNX = "model_int8.onnx"
+COLBERT_DIM = 96
+
+
+def _colbert_min() -> float:
+    try:
+        return float(os.environ.get("KNOWLEDGE_COLBERT_MIN",
+                                    str(COLBERT_MIN_SCORE)))
+    except ValueError:
+        return COLBERT_MIN_SCORE
+
+
+def _colbert_low() -> float:
+    try:
+        return float(os.environ.get("KNOWLEDGE_COLBERT_LOW",
+                                    str(COLBERT_LOW_SCORE)))
+    except ValueError:
+        return COLBERT_LOW_SCORE
 MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
 # Chunking is token-aware at CHUNK_TOKENS; the raised caps below are the
 # safety margin for row-atomic chunks that must exceed the budget (a single
@@ -564,6 +595,187 @@ class LocalReranker:
         return out  # sigmoid → 0..1 relevance
 
 
+class ColbertUnavailable(SetupError):
+    """The late-interaction scorer can't load (#329) — missing int8
+    artifacts or a native-load block. Callers degrade to the
+    cross-encoder; the search still answers."""
+
+
+class LocalColbert:
+    """answerai-colbert-small-v1 INT8 ONNX — late interaction (#329).
+
+    Doc token vectors are encoded once at index time (doc_tokvecs, fp16
+    [L,96]); a query costs one tiny encode + MaxSim matmuls — tens of ms
+    vs ~420ms for the 12-pair cross-encoder pass it replaces. The
+    encoding contract (markers, length caps, punctuation skiplist) rides
+    the artifact's own config_sentence_transformers.json so an export
+    swap can't silently drift the pipeline. Scores are per-query-token
+    mean max-sim → ~[0,1]; `KNOWLEDGE_COLBERT=0` disables.
+    """
+
+    def __init__(self, home: Path, cli: str = "confluence-knowledge"):
+        repo = COLBERT_REPO
+        try:
+            dest = _require(_model_home(home, repo), repo, cli,
+                            [COLBERT_ONNX, "tokenizer.json",
+                             "config_sentence_transformers.json"])
+        except SetupError as e:
+            raise ColbertUnavailable(str(e)) from e
+        try:
+            cfg = json.loads(
+                (dest / "config_sentence_transformers.json").read_text(
+                    encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise ColbertUnavailable(
+                f"colbert config unreadable under '{repo}' — refetch via "
+                f"`{cli} prepare-models`") from e
+        # doc encodes are background batch work; query encodes are
+        # foreground bursts — the foreground thread profile serves both
+        self._sess = _ort_session(dest / COLBERT_ONNX, cli,
+                                  threads=min(16, _phys_cores()))
+        self._tok = _tokenizer(dest)
+        self._tok.no_padding()
+        self._qmark = int(cfg.get("query_prefix_id", 1))
+        self._dmark = int(cfg.get("document_prefix_id", 2))
+        self._q_len = int(cfg.get("query_length", 32))
+        self._d_len = int(cfg.get("document_length", 300))
+        self._dim = int(cfg.get("embedding_dim", COLBERT_DIM))
+        self._cls = self._tok.token_to_id("[CLS]")
+        self._sep = self._tok.token_to_id("[SEP]")
+        if self._cls is None or self._sep is None:
+            raise ColbertUnavailable(
+                f"colbert tokenizer under '{repo}' lacks [CLS]/[SEP] — "
+                "artifact mismatch, refetch via prepare-models")
+        skip = {self._cls, self._sep, self._qmark, self._dmark,
+                int(cfg.get("pad_token_id", 0))}
+        for w in cfg.get("skiplist_words", []):
+            skip.update(self._tok.encode(w, add_special_tokens=False).ids)
+        self._skip = skip
+        self._in_names = {i.name for i in self._sess.get_inputs()}
+        self._out_name = self._sess.get_outputs()[0].name
+        # signature stamped on persisted token vectors — a repo/revision/
+        # dim change makes stored rows silently incompatible (#329)
+        rev = _load_lock()["models"].get("colbert", {}).get("revision", "?")
+        self.sig = f"{repo}@{rev}:{self._dim}"
+        self.last: dict = {}            # call stats — see score() (#329)
+
+    def _encode(self, texts: list[str], marker: int, cap: int
+                ) -> list[tuple[np.ndarray, list[int]]]:
+        """Per-token fp32 mats + their token ids — [(L_i,dim), ids]."""
+        seqs: list[list[int]] = []
+        for t in texts:
+            core = self._tok.encode(t, add_special_tokens=False).ids
+            seqs.append([self._cls, marker] + core[:cap - 3] + [self._sep])
+        lens = [len(s) for s in seqs]
+        out: list[tuple[np.ndarray, list[int]]] = [None] * len(seqs)
+        lim = limits()
+        for batch in plan_batches(lens, lim.batch_tokens, lim.max_batch):
+            maxlen = max(lens[i] for i in batch)
+            ids = np.zeros((len(batch), maxlen), dtype=np.int64)
+            mask = np.zeros((len(batch), maxlen), dtype=np.int64)
+            for j, i in enumerate(batch):
+                ids[j, :lens[i]] = seqs[i]
+                mask[j, :lens[i]] = 1
+            feeds = {"input_ids": ids, "attention_mask": mask}
+            if "token_type_ids" in self._in_names:
+                feeds["token_type_ids"] = np.zeros_like(ids)
+            emb = self._sess.run([self._out_name], feeds)[0]
+            for j, i in enumerate(batch):
+                m = emb[j, :lens[i]].astype(np.float32)
+                n = np.linalg.norm(m, axis=1, keepdims=True)
+                out[i] = (m / (n + 1e-9), seqs[i])
+        return out
+
+    def encode_query(self, text: str) -> np.ndarray:
+        """[Lq,96] fp32 — every query token participates (no skiplist)."""
+        return self._encode([text], self._qmark, self._q_len)[0][0]
+
+    def encode_docs(self, texts: list[str]) -> list[np.ndarray]:
+        """[L_i,96] mats for persistence — markers/special/punctuation
+        rows dropped per the export's skiplist."""
+        out = []
+        for mat, ids in self._encode(texts, self._dmark, self._d_len):
+            keep = [i for i, t in enumerate(ids) if t not in self._skip]
+            out.append(mat[keep].astype(np.float16)
+                       if keep else np.zeros((0, self._dim), np.float16))
+        return out
+
+    def score(self, query: str | np.ndarray,
+              doc_mats: list[np.ndarray]) -> np.ndarray:
+        """MaxSim per doc normalised by query length → ~[0,1]."""
+        q = (self.encode_query(query) if isinstance(query, str)
+             else np.asarray(query, dtype=np.float32))
+        t0 = time.monotonic()
+        out = np.zeros(len(doc_mats), dtype=np.float32)
+        for i, dm in enumerate(doc_mats):
+            if dm.shape[0]:
+                out[i] = (q @ dm.astype(np.float32).T).max(axis=1).sum()
+        out /= max(1, q.shape[0])
+        self.last = {"docs": len(doc_mats), "qtok": int(q.shape[0]),
+                     "ms": round((time.monotonic() - t0) * 1000, 1)}
+        return out
+
+
+def colbert_disabled() -> bool:
+    return os.environ.get("KNOWLEDGE_COLBERT", "1").strip().lower() in \
+        ("0", "false", "off", "no")
+
+
+def load_colbert_or_none(home: Path,
+                         cli: str = "confluence-knowledge"
+                         ) -> LocalColbert | None:
+    """Colbert scorer when artifacts exist, else None (#329) — mirrors
+    load_sparse_or_none: degrade to the cross-encoder, never crash."""
+    if colbert_disabled():
+        return None
+    try:
+        return LocalColbert(home, cli)
+    except (ColbertUnavailable, SetupError):
+        return None
+
+
+def backfill_tokvecs(index: Index, colbert_factory,
+                     batch: int = 48) -> int:
+    """Encode active chunks missing token vectors (#329).
+
+    Runs on index.POST_PUBLISH's idle-time thread; the cross-encoder
+    covers whatever coverage hasn't arrived yet. `colbert_factory` is a
+    callable so the model loads lazily on the first backfill rather
+    than at warm-up. One pass per index at a time — concurrent
+    publishes re-check the live missing set per iteration, so a second
+    caller just exits."""
+    lock = getattr(index, "_tokvec_lock", None)
+    if lock is None:
+        lock = index._tokvec_lock = threading.Lock()
+    if not lock.acquire(blocking=False):
+        return 0
+    try:
+        index.gc_tokvecs()
+        enc = None
+        n = 0
+        while True:
+            # abort between batches — a closing/torn-down index must not
+            # hold Index.close()'s warm-thread join (#257/#329)
+            if index._closed or index._readonly or \
+                    not index._path.exists():
+                return n
+            if enc is None:
+                enc = colbert_factory()
+            if enc is None:                # degraded — cross-encoder covers
+                return n
+            # sig-aware: rows under a different model count as missing
+            # so a colbert upgrade re-encodes on the next publish
+            missing = index.tokvecs_missing(batch, enc.sig)
+            if not missing:
+                return n
+            mats = enc.encode_docs([t for _c, t in missing])
+            index.put_tokvecs({c: m for (c, _t), m in zip(missing, mats)},
+                              sig=enc.sig)
+            n += len(missing)
+    finally:
+        lock.release()
+
+
 def prepare_models(home: Path) -> list[str]:
     """Download pinned ONNX artifacts once (public; no document text sent)."""
     from huggingface_hub import snapshot_download
@@ -578,7 +790,7 @@ def prepare_models(home: Path) -> list[str]:
     # The dense role fetches the ACTIVE spec — embed (arctic-xs default)
     # or embed_large (KNOWLEDGE_EMBED_MODEL=nomic) — not both (#249).
     embed_key = active_embed_spec()["lock_key"]
-    for key in (embed_key, "rerank", "rerank_light"):
+    for key in (embed_key, "rerank", "rerank_light", "colbert"):
         spec = lock["models"][key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         if dest.exists():
@@ -643,7 +855,8 @@ def prepare_models(home: Path) -> list[str]:
     # is deliberately NOT owned: leaving it means every arctic→nomic
     # switcher carries a stale 137M dir forever; opting back re-downloads.
     owned = {lock["models"][k]["repo"].split("/")[-1]
-             for k in (embed_key, "rerank", "rerank_light")} | {"fastembed"}
+             for k in (embed_key, "rerank", "rerank_light", "colbert")} \
+        | {"fastembed"}
     for d in models.iterdir():
         if d.is_dir() and d.name not in owned:
             shutil.rmtree(d, ignore_errors=True)
@@ -682,11 +895,12 @@ def models_complete(home: Path) -> dict:
         # test-only mode — report ok with a label so status/doctor don't
         # block on model files that will never be downloaded
         return {k: {"ok": True, "missing": [], "mode": "fake-embeddings"}
-                for k in ("embed", "rerank", "rerank_light", "sparse")}
+                for k in ("embed", "rerank", "rerank_light", "sparse",
+                          "colbert")}
     lock = _load_lock()["models"]
     embed_key = active_embed_spec()["lock_key"]
     out = {}
-    for key in (embed_key, "rerank", "rerank_light"):
+    for key in (embed_key, "rerank", "rerank_light", "colbert"):
         spec = lock[key]
         dest = _models_dir(home) / spec["repo"].split("/")[-1]
         missing = [f for f in spec["files"] if not (dest / f).exists()]
@@ -790,7 +1004,8 @@ def _bm25_idf(df: dict[int, int] | None, n_docs: int, t: int) -> float:
 def retrieve(index: Index, query: str, embedder: LocalEmbedder,
              reranker: LocalReranker | None = None,
              sparse: LocalSparseEmbedder | None = None,
-             allow_chunks: set[str] | None = None) -> list[dict]:
+             allow_chunks: set[str] | None = None,
+             colbert: LocalColbert | None = None) -> list[dict]:
     """Dense + sparse + FTS → RRF fuse → rerank → bounded evidence.
 
     Ranks over the index's per-snapshot search cache (dense matrix +
@@ -883,22 +1098,62 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     by_id = {c["chunk_id"]: c for c in index.chunks_by_ids(fused)}
     candidates = [by_id[c] for c in fused if c in by_id]
 
-    if reranker is not None and candidates:
+    if (reranker is not None or colbert is not None) and candidates:
         scored = candidates[:_rerank_max()]
-        scores = reranker.score(query, [c["text"] for c in scored])
-        order = np.argsort(-scores)[:TOP_K_EVIDENCE]
-        evidence = []
-        for i in order:
-            if scores[i] < MIN_RERANK_SCORE:
-                # below the noise floor the reranker is only ranking "least
+        # ColBERT late interaction (#329): MaxSim over persisted token
+        # vectors — only when EVERY scored candidate has coverage; a
+        # mixed score scale can't compare, so partial coverage falls
+        # back to the cross-encoder for the whole call.
+        tmats = (index.tokvecs_for([c["chunk_id"] for c in scored],
+                                   colbert.sig)
+                 if colbert is not None else {})
+        if colbert is not None and len(tmats) == len(scored):
+            cscores = colbert.score(
+                query, [tmats[c["chunk_id"]] for c in scored])
+            order = np.argsort(-cscores)
+            # MaxSim scores aren't a calibrated floor — junk compresses
+            # high because every token best-matches SOMETHING, and the
+            # real/junk bands overlap (measured on the golden set). The
+            # noise floor therefore stays on the cross-encoder, verified
+            # against the top late-interaction pick only — one pair ≈
+            # ~35ms vs ~35ms×12 for the full pass.
+            verified = (
+                reranker.score(query, [scored[int(order[0])]["text"]])[0]
+                >= MIN_RERANK_SCORE
+            ) if reranker is not None else True
+            evidence = []
+            for i in order[:TOP_K_EVIDENCE]:
+                # below the noise floor the scorer is only ranking "least
                 # bad" — surfacing it would ground the answer on junk
-                continue
-            c = dict(scored[i])
-            c["rerank_score"] = float(scores[i])
-            # borderline matches are surfaced but flagged — the agent can
-            # caveat instead of answering on silently-weak evidence
-            c["low_confidence"] = bool(scores[i] < LOW_CONFIDENCE_SCORE)
-            evidence.append(c)
+                if not verified or cscores[i] < _colbert_min():
+                    continue
+                c = dict(scored[i])
+                c["rerank_score"] = float(cscores[i])
+                c["scorer"] = "colbert"
+                # borderline matches are surfaced but flagged — the agent
+                # can caveat instead of answering on silently-weak evidence
+                c["low_confidence"] = bool(cscores[i] < _colbert_low())
+                evidence.append(c)
+        elif reranker is not None:
+            scores = reranker.score(query, [c["text"] for c in scored])
+            order = np.argsort(-scores)[:TOP_K_EVIDENCE]
+            evidence = []
+            for i in order:
+                if scores[i] < MIN_RERANK_SCORE:
+                    # below the noise floor the reranker is only ranking
+                    # "least bad" — surfacing it would ground the answer
+                    # on junk
+                    continue
+                c = dict(scored[i])
+                c["rerank_score"] = float(scores[i])
+                c["scorer"] = "cross-encoder"
+                # borderline matches are surfaced but flagged — the agent
+                # can caveat instead of answering on silently-weak evidence
+                c["low_confidence"] = bool(scores[i] < LOW_CONFIDENCE_SCORE)
+                evidence.append(c)
+        else:
+            evidence = [dict(c, rerank_score=None)
+                        for c in candidates[:TOP_K_EVIDENCE]]
     else:
         evidence = [dict(c, rerank_score=None) for c in candidates[:TOP_K_EVIDENCE]]
 

@@ -113,7 +113,9 @@ def _mini_rag(home: Path) -> dict:
         LocalReranker,
         LocalSparseEmbedder,
         SparseUnavailable,
+        backfill_tokvecs,
         check_citations,
+        load_colbert_or_none,
         retrieve,
     )
     with tempfile.TemporaryDirectory() as td:
@@ -124,6 +126,7 @@ def _mini_rag(home: Path) -> dict:
             sparse = LocalSparseEmbedder(home)
         except SparseUnavailable:
             pass                    # platform wheel gap — dense+rerank
+        colbert = load_colbert_or_none(home)   # #329 — None → cross-encoder
         for doc in MINI_DOCS:
             chunks, _ = extract_chunks(doc["html"])
             for c in chunks:
@@ -136,8 +139,10 @@ def _mini_rag(home: Path) -> dict:
                     "url": f"selftest://{doc['page_id']}", "version": 1}
             idx.upsert_page(page, chunks, vecs, sparse=sp_vecs)
         idx.publish({d["page_id"] for d in MINI_DOCS})
+        if colbert is not None:
+            backfill_tokvecs(idx, lambda: colbert)
         ev = retrieve(idx, MINI_QUERY, emb, LocalReranker(home),
-                      sparse=sparse)
+                      sparse=sparse, colbert=colbert)
         idx.close()
     if not ev:
         return {"stage": "mini_rag", "ok": False, "detail": "no evidence"}

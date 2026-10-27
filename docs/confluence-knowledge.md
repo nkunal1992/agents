@@ -30,9 +30,11 @@ answer with [Source: Page Title](url) on every claim
   non-GET request with a `SecurityException` before it reaches the network,
   and every path is checked against a read-only endpoint allowlist. The agent
   profile itself has no shell/edit/fetch tools — only the MCP operations.
-- **Local retrieval, always.** Embeddings (`nomic-embed-text-v1.5`, quantized ONNX) and reranking
-  (`mxbai-rerank-xsmall-v1`, quantized ONNX) run on your machine — MIT/Apache-2.0 licensed, pinned
-  revisions. No document text ever goes to a cloud embedding API.
+- **Local retrieval, always.** Embeddings (`nomic-embed-text-v1.5`, quantized ONNX), the ColBERT
+  late-interaction scorer (`answerai-colbert-small-v1`, INT8 ONNX — ranks candidates ~7× faster than
+  a cross-encoder pass) and the cross-encoder verifier (`mxbai-rerank-xsmall-v1`, quantized ONNX)
+  run on your machine — MIT/Apache-2.0 licensed, pinned revisions. No document text ever goes to a
+  cloud embedding API.
 - **One caveat to know:** the final answer is written by Copilot using the
   retrieved passages, so those passages do reach your company's approved
   Copilot model — exactly like pasting the doc excerpt into a chat. The crawl,
@@ -197,7 +199,7 @@ Env knobs: `KNOWLEDGE_UPDATE_INDEX` (mirror URL template),
 | Flag | Means | Fix |
 |---|---|---|
 | `deps` | an install was interrupted — a dep isn't importable | the pinned reinstall doctor prints — `pip install "confluence-knowledge[models]==<installed>"` |
-| `model_embed / model_rerank / model_rerank_light / model_sparse` | partial model download (dir exists, locked file missing) | `prepare-models` |
+| `model_embed / model_rerank / model_rerank_light / model_colbert / model_sparse` | partial model download (dir exists, locked file missing) | `prepare-models` |
 | `registration` | no IDE config contains the server | `register --ide auto` |
 | `index:<scope>` | `corrupt` → delete index, re-crawl; `older model` → one `start_crawl` rebuild | `clean` / `start_crawl` |
 | `creds_valid` | token rejected or missing (401) | `setup` again |
@@ -276,7 +278,9 @@ The server is designed to stay out of the way on a developer laptop:
   `KNOWLEDGE_BATCH_TOKENS` (default 2.5 M) and `KNOWLEDGE_MAX_BATCH`
   (default 4 — measured: −0.4 GB worst-case spike at identical
   throughput vs 16) — a 2048-token page now peaks ≈ +1 GB per run
-  instead of padding a whole batch to it.
+  instead of padding a whole batch to it. The cross-encoder has its own
+  `KNOWLEDGE_RERANK_BATCH_TOKENS` budget (default 8 M) sized so the
+  12-candidate production window fits one ONNX run at any chunk length.
 - **Capped threads**: each inference session uses `KNOWLEDGE_THREADS`
   (default ≈ cores/4, max 4); busy-wait spinning is off.
 - **Lowered OS priority**: the process runs at nice +10 (POSIX) /
@@ -346,7 +350,10 @@ The server is designed to stay out of the way on a developer laptop:
   upfront). `connect` also starts the rebuild automatically —
   `CONF_KNOWLEDGE_AUTO_REINDEX=0` opts out. The reranker is deliberately
   not fingerprinted: it only scores at query time, so reranker upgrades
-  never force a rebuild.
+  never force a rebuild. ColBERT document vectors *are* persisted, so
+  they're stamped with a model signature (`repo@revision:dim`) — an
+  upgrade makes stored rows read as uncovered, queries fall back to the
+  cross-encoder, and the next publish re-encodes them; no re-crawl.
 - **Cancelling**: `cancel_crawl` stops a running crawl within seconds and
   marks it `cancelled` — a terminal state that never auto-resumes. The
   previously published snapshot is untouched; `start_crawl` re-runs and
@@ -393,8 +400,12 @@ The server is designed to stay out of the way on a developer laptop:
   published snapshot") — re-run `search` for a fresh one.
 - FTS indexes at most the first 16 whitespace-separated query terms;
   the dense + sparse legs carry longer questions.
-- Evidence scoring below ~0.3 rerank probability is flagged
-  `low_confidence: true`; below ~0.02 nothing is returned at all.
+- Evidence scoring below ~0.85 ColBERT score is flagged
+  `low_confidence: true`; when the top pick fails the cross-encoder's
+  ~0.1 verification floor nothing is returned at all — abstention, not
+  a best-effort answer on junk. (When late-interaction coverage is
+  absent the pure cross-encoder path applies its own ~0.3 flag / ~0.1
+  floor.) `KNOWLEDGE_COLBERT=0` disables the scorer entirely.
 - Whole-scope search caps at 100k chunks — connect a narrower scope on
   bigger indexes.
 - The sparse leg is word-piece based: it adds little for CJK content
