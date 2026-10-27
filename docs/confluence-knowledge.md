@@ -403,9 +403,13 @@ The server is designed to stay out of the way on a developer laptop:
 - Evidence scoring below ~0.85 ColBERT score is flagged
   `low_confidence: true`; when the top pick fails the cross-encoder's
   ~0.1 verification floor nothing is returned at all — abstention, not
-  a best-effort answer on junk. (When late-interaction coverage is
-  absent the pure cross-encoder path applies its own ~0.3 flag / ~0.1
-  floor.) `KNOWLEDGE_COLBERT=0` disables the scorer entirely.
+  a best-effort answer on junk. Evidence membership is the union of the
+  ColBERT top-8 and the fused retrievers' top-8 (displayed in fused
+  rank order) — token-wise scoring alone can push fused-agreement hits
+  below the cut in keyword-dense corpora. (When late-interaction
+  coverage is absent the pure cross-encoder path applies its own ~0.3
+  flag / ~0.1 floor.) `KNOWLEDGE_COLBERT=0` disables the scorer
+  entirely.
 - Whole-scope search caps at 100k chunks — connect a narrower scope on
   bigger indexes.
 - The sparse leg is word-piece based: it adds little for CJK content

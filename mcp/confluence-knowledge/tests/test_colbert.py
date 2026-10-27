@@ -153,13 +153,17 @@ def test_colbert_orders_and_marks_scorer(tmp_path):
     idx = _index(tmp_path)
     idx.put_tokvecs({"c1": _mat(0.70), "c2": _mat(0.95), "c3": _mat(0.90)},
                     sig=SIG)
+    # union evidence is displayed in fused rank order (#336)
+    fused = [e["chunk_id"] for e in
+             retrieve(idx, "vpn releases", FakeEmbedder())]
     ev = retrieve(idx, "vpn releases", FakeEmbedder(), Verifier(0.9),
                   colbert=FakeColbert())
-    assert [e["chunk_id"] for e in ev] == ["c2", "c3", "c1"]
+    assert [e["chunk_id"] for e in ev] == fused[:8]
     assert all(e["scorer"] == "colbert" for e in ev)
+    by_id = {e["chunk_id"]: e for e in ev}
     # c1 is above the sanity floor but under the weak-tail mark
-    assert ev[-1]["low_confidence"] is True
-    assert ev[0]["low_confidence"] is False
+    assert by_id["c1"]["low_confidence"] is True
+    assert by_id["c2"]["low_confidence"] is False
 
 
 def test_colbert_abstains_when_top_pick_fails_floor(tmp_path):
@@ -188,7 +192,35 @@ def test_colbert_without_reranker_uses_own_floor(tmp_path):
                     sig=SIG)
     ev = retrieve(idx, "vpn releases", FakeEmbedder(), reranker=None,
                   colbert=FakeColbert())
-    assert [e["chunk_id"] for e in ev] == ["c1", "c3"]   # 0.40 < min floor
+    # 0.40 < min floor drops c2; the union keeps the rest in fused order
+    assert {e["chunk_id"] for e in ev} == {"c1", "c3"}
+
+
+def test_union_keeps_fused_hits_colbert_ranked_out(tmp_path):
+    """#336: MaxSim can push a fused-top-8 hit below the evidence cut in
+    keyword-dense corpora (discriminating tokens get diluted). The union
+    membership keeps fused-top-8 items even when colbert ranks them
+    last — while colbert's own deep-fused picks still enter."""
+    bodies = [(str(i), f"T{i}", f"topic{i} filler shared words here")
+              for i in range(10)]
+    idx = _index(tmp_path, bodies)
+    emb = FakeEmbedder()
+    top8 = [e["chunk_id"] for e in
+            retrieve(idx, "topic1", emb)]          # fused top-8, no scorer
+    deep = [f"c{i}" for i in range(10) if f"c{i}" not in top8]
+    assert len(top8) == 8 and len(deep) == 2
+    # colbert loves the two fused-deepest chunks and hates the fused-top-2
+    mats = {top8[0]: _mat(0.63), top8[1]: _mat(0.64),
+            deep[0]: _mat(0.99), deep[1]: _mat(0.98)}
+    for cid in top8[2:]:
+        mats[cid] = _mat(0.90)
+    idx.put_tokvecs(mats, sig=SIG)
+    ev = retrieve(idx, "topic1", emb, Verifier(0.9), colbert=FakeColbert())
+    ids = [e["chunk_id"] for e in ev]
+    # fused-top-2 rescued by the union although colbert ranked them last
+    assert ids[:8] == top8
+    # colbert's deep picks still enter evidence via its own top-8
+    assert set(ids[8:]) == set(deep)
 
 
 def test_no_scorers_still_returns_top_candidates(tmp_path):

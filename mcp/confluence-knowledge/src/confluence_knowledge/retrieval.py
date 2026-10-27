@@ -1111,17 +1111,23 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     candidates = [by_id[c] for c in fused if c in by_id]
 
     if (reranker is not None or colbert is not None) and candidates:
+        # ColBERT scores the whole fused pool — extra rows are ~free
+        # (stored mats + matmul); the cross-encoder is bounded by the
+        # per-pair cost, so its pool always stays capped at
+        # _rerank_max(), including when it covers a partial-coverage
+        # fallback.
+        pool = candidates if colbert is not None else []
         scored = candidates[:_rerank_max()]
         # ColBERT late interaction (#329): MaxSim over persisted token
         # vectors — only when EVERY scored candidate has coverage; a
         # mixed score scale can't compare, so partial coverage falls
         # back to the cross-encoder for the whole call.
-        tmats = (index.tokvecs_for([c["chunk_id"] for c in scored],
+        tmats = (index.tokvecs_for([c["chunk_id"] for c in pool],
                                    colbert.sig)
                  if colbert is not None else {})
-        if colbert is not None and len(tmats) == len(scored):
+        if colbert is not None and pool and len(tmats) == len(pool):
             cscores = colbert.score(
-                query, [tmats[c["chunk_id"]] for c in scored])
+                query, [tmats[c["chunk_id"]] for c in pool])
             order = np.argsort(-cscores)
             # MaxSim scores aren't a calibrated floor — junk compresses
             # high because every token best-matches SOMETHING, and the
@@ -1130,16 +1136,24 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
             # against the top late-interaction pick only — one pair ≈
             # ~35ms vs ~35ms×12 for the full pass.
             verified = (
-                reranker.score(query, [scored[int(order[0])]["text"]])[0]
+                reranker.score(query, [pool[int(order[0])]["text"]])[0]
                 >= MIN_RERANK_SCORE
             ) if reranker is not None else True
+            # Evidence membership is the UNION of colbert's top-K and the
+            # fusion legs' top-K (#336): token-wise MaxSim dilutes the
+            # discriminating tokens of fact-binding questions ("which team
+            # owns service-2") in keyword-dense corpora — the fused hits
+            # that dense+FTS agreed on stay in the window. Display order
+            # follows the fused rank: multi-leg consensus first.
+            picks = {int(i) for i in order[:TOP_K_EVIDENCE]}
+            picks.update(range(min(TOP_K_EVIDENCE, len(pool))))
             evidence = []
-            for i in order[:TOP_K_EVIDENCE]:
+            for i in sorted(picks):
                 # below the noise floor the scorer is only ranking "least
                 # bad" — surfacing it would ground the answer on junk
                 if not verified or cscores[i] < _colbert_min():
                     continue
-                c = dict(scored[i])
+                c = dict(pool[i])
                 c["rerank_score"] = float(cscores[i])
                 c["scorer"] = "colbert"
                 # borderline matches are surfaced but flagged — the agent
