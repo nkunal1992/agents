@@ -651,10 +651,21 @@ class Index:
             "SELECT 1 FROM sqlite_master WHERE name='doc_tokvecs'"
         ).fetchone() is not None
 
-    def _ensure_tokvecs(self) -> None:
-        self.db.execute(
+    def _ensure_tokvecs(self, conn=None) -> None:
+        (conn or self.db).execute(
             "CREATE TABLE IF NOT EXISTS doc_tokvecs "
             "(chunk_id TEXT PRIMARY KEY, payload BLOB)")
+
+    def _open_rw_conn(self) -> sqlite3.Connection:
+        """Dedicated r/w connection for warm-thread work (#329). POST_PUBLISH
+        hooks MUST NOT write on self.db — teardown paths that close self.db
+        directly (bypassing close()'s warm-thread join) free the handle
+        mid-execute → use-after-free segfault (hit twice in the suite). A
+        private conn pins its lifetime to the thread that closes it in
+        `finally`; Index.close() joins the warm thread first, so the file
+        is always fully released for Windows deletion."""
+        return sqlite3.connect(self._path, timeout=30,
+                               check_same_thread=False)
 
     @staticmethod
     def _meta_val(conn, key: str) -> str | None:
@@ -721,34 +732,38 @@ class Index:
                 (limit,)).fetchall()
 
     def put_tokvecs(self, mats: dict[str, np.ndarray],
-                    sig: str | None = None) -> None:
+                    sig: str | None = None,
+                    conn: sqlite3.Connection | None = None) -> None:
         if not mats:
             return
-        with self.lock, _LockedRetry(self.db):
-            self._ensure_tokvecs()
-            if sig is not None and self.meta_get("colbert_sig") != sig:
+        db = conn or self.db
+        with self.lock, _LockedRetry(db):
+            self._ensure_tokvecs(db)
+            if sig is not None and \
+                    self._meta_val(db, "colbert_sig") != sig:
                 # model changed — prior rows score against the wrong
                 # projection; drop them so the backfill re-encodes all
-                self.db.execute("DELETE FROM doc_tokvecs")
-                self.db.execute(
+                db.execute("DELETE FROM doc_tokvecs")
+                db.execute(
                     "INSERT OR REPLACE INTO meta VALUES ('colbert_sig',?)",
                     (sig,))
-            self.db.executemany(
+            db.executemany(
                 "INSERT OR REPLACE INTO doc_tokvecs VALUES (?,?)",
                 [(cid, m.astype(np.float16).tobytes())
                  for cid, m in mats.items() if m.shape[0]])
-            self.db.commit()
+            db.commit()
 
-    def gc_tokvecs(self) -> int:
+    def gc_tokvecs(self, conn: sqlite3.Connection | None = None) -> int:
         """Drop rows for chunks no longer active — covers stale rows a
         backfill raced into the doomed window of a concurrent publish."""
-        with self.lock, _LockedRetry(self.db):
-            if not self._tokvecs_table(self.db):
+        db = conn or self.db
+        with self.lock, _LockedRetry(db):
+            if not self._tokvecs_table(db):
                 return 0
-            cur = self.db.execute(
+            cur = db.execute(
                 "DELETE FROM doc_tokvecs WHERE chunk_id NOT IN "
                 "(SELECT chunk_id FROM chunks WHERE active=1)")
-            self.db.commit()
+            db.commit()
             return cur.rowcount or 0
 
     def model_id(self) -> str | None:
@@ -1022,17 +1037,21 @@ class Index:
         check, so a stale build can never displace a fresher snapshot."""
         def _run() -> None:
             try:
-                self.search_cache()
+                try:
+                    self.search_cache()
+                except Exception:  # noqa: BLE001,S110 — opportunistic
+                    pass           # warm only — and the hook must still run
                 # derived-data hook (e.g. ColBERT tokvec backfill, #329)
                 # rides the same idle-time thread — writes need a rw idx
+                # AND must use their own conn, never self.db (see
+                # _open_rw_conn — a direct db.close() teardown can't wait)
                 fn = POST_PUBLISH
-                if fn is not None and not self._readonly:
+                if fn is not None and not self._readonly and \
+                        not self._closed:
                     try:
                         fn(self)
                     except Exception:   # noqa: BLE001,S110 — best-effort
                         pass
-            except Exception:      # noqa: BLE001,S110 — opportunistic warm only
-                pass
             finally:
                 with self._rlock:
                     self._warm_threads.discard(

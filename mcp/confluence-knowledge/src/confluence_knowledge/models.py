@@ -114,9 +114,12 @@ class ModelPool:
         return self._colbert_missing
 
     def colbert(self) -> LocalColbert | None:
-        from .retrieval import colbert_disabled
+        from .retrieval import colbert_disabled, fake_models
         if colbert_disabled():
             return None
+        fake = fake_models()
+        if fake:
+            return fake[3]
         return self._get("colbert")
 
     @property

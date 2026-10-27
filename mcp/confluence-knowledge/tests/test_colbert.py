@@ -199,6 +199,33 @@ def test_no_scorers_still_returns_top_candidates(tmp_path):
 
 # ---- post-publish hook --------------------------------------------------
 
+def test_direct_db_close_during_backfill_no_segfault(tmp_path):
+    """CI segfault (#329): teardowns close idx.db directly, bypassing
+    Index.close()'s warm-thread join — a POST_PUBLISH backfill writing
+    on self.db mid-close is use-after-free. The backfill's dedicated
+    writer keeps its work off the shared handle."""
+    import confluence_knowledge.index as index_mod
+
+    idx = _index(tmp_path)
+    cb = FakeColbert()
+    old = index_mod.POST_PUBLISH
+    # tiny batch stretches the backfill across the close
+    index_mod.POST_PUBLISH = lambda i: backfill_tokvecs(
+        i, lambda: cb, batch=1)
+    try:
+        idx.publish({"1", "2", "3"})
+        idx.db.close()          # the crash vector — direct close
+    finally:
+        index_mod.POST_PUBLISH = old
+    for t in list(idx._warm_threads):
+        t.join(timeout=10)
+    # either outcome is correct — the backfill may win or legitimately
+    # lose the race to the close; the contract is: no segfault and the
+    # index file stays valid
+    idx2 = Index(tmp_path / "s.db")
+    assert idx2.stats()["pages"] == 3
+
+
 def test_post_publish_hook_runs_on_warm_thread(tmp_path, monkeypatch):
     import confluence_knowledge.index as index_mod
 

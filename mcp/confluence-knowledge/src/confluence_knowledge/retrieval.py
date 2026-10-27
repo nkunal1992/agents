@@ -749,8 +749,13 @@ def backfill_tokvecs(index: Index, colbert_factory,
         lock = index._tokvec_lock = threading.Lock()
     if not lock.acquire(blocking=False):
         return 0
+    # Writes MUST go through a dedicated connection owned by this thread —
+    # teardown paths that close index.db directly (bypassing Index.close's
+    # warm-thread join) would free the shared handle mid-execute (#329 —
+    # segfaulted the suite twice).
+    wdb = None
+    swept = False
     try:
-        index.gc_tokvecs()
         enc = None
         n = 0
         while True:
@@ -768,11 +773,18 @@ def backfill_tokvecs(index: Index, colbert_factory,
             missing = index.tokvecs_missing(batch, enc.sig)
             if not missing:
                 return n
+            if wdb is None:
+                wdb = index._open_rw_conn()
+            if not swept:
+                index.gc_tokvecs(conn=wdb)
+                swept = True
             mats = enc.encode_docs([t for _c, t in missing])
             index.put_tokvecs({c: m for (c, _t), m in zip(missing, mats)},
-                              sig=enc.sig)
+                              sig=enc.sig, conn=wdb)
             n += len(missing)
     finally:
+        if wdb is not None:
+            wdb.close()
         lock.release()
 
 
@@ -1267,12 +1279,63 @@ class HashReranker:
         return out
 
 
+class HashColbert:
+    """Late-interaction stub — per-token one-hot hash vectors + cosine
+    MaxSim (#329). A shared word lands on an identical row in both mats,
+    so a query token's best doc match is exactly 1.0 when the word is
+    present → mean-MaxSim = matched-token fraction. Same lexical
+    semantics as HashReranker; keeps fake-embeddings runs off the real
+    ONNX artifact AND off machine-dependent scoring."""
+
+    sig = "hash-fake:96"
+    dim = 96
+
+    def __init__(self, *_a, **_k):
+        self.last: dict = {}
+
+    def _tokvec(self, tok: str) -> np.ndarray:
+        import hashlib
+        h = int.from_bytes(
+            hashlib.sha256(tok.encode()).digest()[:4], "big")
+        v = np.zeros(self.dim, np.float32)
+        v[h % self.dim] = 1.0
+        return v
+
+    def encode_docs(self, texts: list[str]) -> list[np.ndarray]:
+        out = []
+        for t in texts:
+            toks = t.lower().split()
+            m = (np.stack([self._tokvec(w) for w in toks]) if toks
+                 else np.zeros((0, self.dim), np.float32))
+            out.append(m.astype(np.float16))
+        return out
+
+    def encode_query(self, text: str) -> np.ndarray:
+        return self.encode_docs([text])[0].astype(np.float32)
+
+    def score(self, query, doc_mats: list[np.ndarray]) -> np.ndarray:
+        import time as _t
+        q = (self.encode_query(query) if isinstance(query, str)
+             else np.asarray(query, np.float32))
+        t0 = _t.monotonic()
+        out = np.zeros(len(doc_mats), np.float32)
+        for i, dm in enumerate(doc_mats):
+            if dm.shape[0]:
+                out[i] = (q @ dm.astype(np.float32).T).max(axis=1).sum()
+        out /= max(1, q.shape[0])
+        self.last = {"docs": len(doc_mats), "qtok": int(q.shape[0]),
+                     "ms": round((_t.monotonic() - t0) * 1000, 1)}
+        return out
+
+
 _FAKE = None
 
 
-def fake_models() -> tuple[HashEmbedder, HashReranker, HashSparse] | None:
-    """(embedder, reranker, sparse) stubs, or None when the env flag is
-    unset. Callers hold the singleton — model lifecycle is a no-op."""
+def fake_models() -> tuple[HashEmbedder, HashReranker, HashSparse,
+                           HashColbert] | None:
+    """(embedder, reranker, sparse, colbert) stubs, or None when the env
+    flag is unset. Callers hold the singleton — model lifecycle is a
+    no-op."""
     global _FAKE
     import os
     if os.environ.get("KNOWLEDGE_FAKE_EMBEDDINGS") != "1":
@@ -1282,5 +1345,6 @@ def fake_models() -> tuple[HashEmbedder, HashReranker, HashSparse] | None:
         logging.getLogger(__name__).warning(
             "KNOWLEDGE_FAKE_EMBEDDINGS=1 — hash stubs replacing ONNX "
             "models; test-only mode, answers are lexical")
-        _FAKE = (HashEmbedder(), HashReranker(), HashSparse())
+        _FAKE = (HashEmbedder(), HashReranker(), HashSparse(),
+                 HashColbert())
     return _FAKE

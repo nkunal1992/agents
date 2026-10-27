@@ -205,7 +205,7 @@ def _colbert():
     global _COLBERT
     if _COLBERT is None:
         fake = fake_models()
-        _COLBERT = fake[3] if fake and len(fake) > 3 else _pool.colbert()
+        _COLBERT = fake[3] if fake else _pool.colbert()
     return _COLBERT
 
 
