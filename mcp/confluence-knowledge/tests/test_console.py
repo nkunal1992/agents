@@ -6,7 +6,8 @@ from confluence_knowledge.settings import reconfigure_console
 
 
 def _cp1252_stream():
-    return io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    return io.TextIOWrapper(io.BytesIO(), encoding="cp1252",
+                            newline="\n")   # byte-asserts stay platform-agnostic
 
 
 def test_reconfigure_console_survives_arrow_and_check(monkeypatch):
