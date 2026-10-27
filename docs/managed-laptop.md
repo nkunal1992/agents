@@ -42,6 +42,7 @@ surfaces the flags below under **Windows managed-environment checks**.
 | PAC/WPAD-only proxy (`AutoConfigURL`) | `urllib.getproxies()` sees nothing — external calls (PyPI, HF, Confluence) fail while the browser works fine | doctor `pac_proxy` flag → set explicit `HTTPS_PROXY` |
 | Controlled Folder Access, block mode | writes to Documents/Desktop/Pictures denied for unapproved apps | doctor reads `EnableControlledFolderAccess` and hard-fails when state lives under a protected folder |
 | Temporary/mandatory profile | profile dir discarded on logout → full re-crawl every login | doctor `temp_profile` flag → point workdir at a persistent local dir |
+| `subprocess.run(timeout=…)` post-kill re-`communicate()` | tool shim (Git-for-Windows under ARM64 emulation) times out, gets killed, then a surviving grandchild keeps the pipe handles open → the post-kill wait blocks **forever** — `register_token` hung 90s+ in `ensure_gitignore` (#322) | `_git_root()` walks parents for `.git` instead of `git rev-parse`; unavoidable child calls go through `_run_bounded` — `communicate(timeout)` → `kill` → `wait(timeout)` → abandon, `stdin=DEVNULL`, and `capture=False` opens no pipes when only the exit code matters |
 | DNS filtering (Zscaler/Umbrella sinkholes) | `huggingface.co`/`pypi.org` NXDOMAIN → model downloads and updates fail | `win_managed_sim.py` DNS probe surfaces it; install-time failure message names the domain |
 
 ## Doctor flags
