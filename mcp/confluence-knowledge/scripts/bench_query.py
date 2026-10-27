@@ -68,8 +68,11 @@ def _build_index(path: Path, n_chunks: int, term_pool, chunks_per_page: int = 8,
     rng = np.random.default_rng(seed)
     idx = Index(path)
     n_pages = math.ceil(n_chunks / chunks_per_page)
+    # ~345 words ≈ CHUNK_TOKENS(448) per chunk — 60-word chunks made the
+    # rerank leg ~36× cheaper than the real corpus and hid the
+    # batch_tokens split (#329)
     with idx.db:
-        t_rows = rng.integers(0, len(_WORDS), size=(n_chunks, 60))
+        t_rows = rng.integers(0, len(_WORDS), size=(n_chunks, 345))
         for p in range(n_pages):
             pid = f"page-{p:05d}"
             idx.db.execute(
@@ -124,7 +127,13 @@ def main() -> int:
 
     from confluence_knowledge import retrieval
     from confluence_knowledge.index import Index
-    from confluence_knowledge.retrieval import LocalEmbedder, LocalReranker, LocalSparseEmbedder, retrieve
+    from confluence_knowledge.retrieval import (
+        LocalEmbedder,
+        LocalReranker,
+        LocalSparseEmbedder,
+        _rerank_max,
+        retrieve,
+    )
     from confluence_knowledge.settings import shared_home
 
     if args.ann:
@@ -192,6 +201,7 @@ def main() -> int:
         legs: dict[str, list[float]] = {k: [] for k in (
             "embed_query", "dense_leg", "fts_leg", "sparse_leg",
             "fuse_fetch", "rerank", "retrieve_all")}
+        rerank_stats: list[dict] = []          # rr.last per call (#329)
         dense_mode = "ann" if retrieval.MAX_SEARCHABLE_CHUNKS < size \
             else "matmul"
         for rep in range(args.reps):
@@ -247,8 +257,11 @@ def main() -> int:
             legs["fuse_fetch"].append(time.monotonic() - t)
 
             t = time.monotonic()
-            rr.score(q, [c["text"] for c in cands[:25]])
+            # production reranks only the top rerank_max(=12) of the
+            # fused set — bench measured 25 and inflated the leg (#329)
+            rr.score(q, [c["text"] for c in cands[:_rerank_max()]])
             legs["rerank"].append(time.monotonic() - t)
+            rerank_stats.append(dict(rr.last))
 
             t = time.monotonic()
             retrieve(idx, q, emb, rr, sp)
@@ -264,6 +277,17 @@ def main() -> int:
             "legs_p95_ms": {k: (round(_pct(v, 95) * 1000, 1)
                               if v else None)
                             for k, v in legs.items()},
+            # rerank internals: ONNX runs per call + token shape —
+            # the batch-split and length profile behind the leg (#329)
+            "rerank": {
+                "runs_p50": (_pct([s["runs"] for s in rerank_stats], 50)
+                             if rerank_stats else None),
+                "batch_sizes_last": (rerank_stats[-1]["batch_sizes"]
+                                     if rerank_stats else None),
+                "tokens_last": ({k: rerank_stats[-1][k]
+                                 for k in ("tok_min", "tok_med", "tok_max")}
+                                if rerank_stats else None),
+            },
         }
         idx.close()
         if not args.keep:

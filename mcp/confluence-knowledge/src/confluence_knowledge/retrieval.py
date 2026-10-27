@@ -22,12 +22,13 @@ import os
 import platform
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 
 from .index import Index
-from .resources import limits, plan_batches
+from .resources import _int_env, _phys_cores, limits, plan_batches
 from .settings import SetupError, app_control_remediation, is_app_control_block
 
 SPARSE_MODEL = "Qdrant/bm25"                            # MIT — via fastembed
@@ -129,9 +130,16 @@ LOW_CONFIDENCE_SCORE = 0.3  # below this the hit is surfaced but flagged
 MAX_SEARCHABLE_CHUNKS = 100_000  # whole-index search is O(n) in RAM
 # Chunking is token-aware at CHUNK_TOKENS; the raised caps below are the
 # safety margin for row-atomic chunks that must exceed the budget (a single
-# huge table row) — 2048 stays far under the models' 8k context, bounding
-# worst-case cross-encoder cost (measured: no p50 change at real chunk sizes).
-RERANK_MAX_TOKENS = 2048
+# huge table row) — 1024 still leaves headroom over the 448+query shape and
+# halves worst-case cross-encoder cost per pair vs 2048 (#329).
+RERANK_MAX_TOKENS = 1024
+def _rerank_batch_tokens() -> int:
+    """Rerank-stage attention budget, read live — 12 pairs × ~578 tokens
+    fits ONE ONNX run; the generic 2.5M batch_tokens splits the common
+    12×470 shape 11+1 into a second forward pass (#329).
+    KNOWLEDGE_RERANK_BATCH_TOKENS overrides."""
+    return _int_env("KNOWLEDGE_RERANK_BATCH_TOKENS",
+                    4_000_000, 500_000, 32_000_000)
 CHUNK_TOKENS = 448       # token-aware split target — leaves room for
                          # heading path + page title inside the embed input
 
@@ -216,7 +224,7 @@ def active_provider() -> str:
     return _pick_providers(ort)[0]
 
 
-def _ort_session(onnx_path: Path, cli: str):
+def _ort_session(onnx_path: Path, cli: str, threads: int | None = None):
     try:
         import onnxruntime as ort
     except ImportError as e:
@@ -227,25 +235,25 @@ def _ort_session(onnx_path: Path, cli: str):
     try:
         return ort.InferenceSession(
             str(onnx_path), providers=_pick_providers(ort),
-            sess_options=_ort_opts(ort))
+            sess_options=_ort_opts(ort, threads))
     except (OSError, RuntimeError) as e:
         if is_app_control_block(e):
             raise SetupError(app_control_remediation("onnxruntime")) from e
         raise
 
 
-def _ort_opts(ort):
+def _ort_opts(ort, threads: int | None = None):
     """Session options for a respectful background process.
 
-    Threads are capped at ~cores/4 per session (default) — two ORT
-    sessions plus fastembed per server process, times one process per
-    IDE window, used to oversubscribe every core. Spinning is disabled
+    Threads are capped at ~two-thirds physical cores per session (default)
+    — two ORT sessions plus fastembed per server process, times one process
+    per IDE window, used to oversubscribe every core. Spinning is disabled
     (ORT workers otherwise busy-wait between runs: audible fan), and the
     CPU memory arena is off so a transient peak isn't held for the
     process lifetime."""
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    so.intra_op_num_threads = limits().threads
+    so.intra_op_num_threads = threads or limits().threads
     so.inter_op_num_threads = 1
     so.log_severity_level = 3  # errors only
     for key in ("session.intra_op.allow_spinning",
@@ -511,11 +519,15 @@ class LocalReranker:
                                                      RERANK_REPO))
         dest = _require(_model_home(home, repo), repo, cli,
                         [RERANK_ONNX, "tokenizer.json"])
-        self._sess = _ort_session(dest / RERANK_ONNX, cli)
+        # rerank is foreground query latency (unlike background embed) —
+        # its session takes all physical cores for the ~ms burst (#329)
+        self._sess = _ort_session(dest / RERANK_ONNX, cli,
+                                  threads=min(16, _phys_cores()))
         self._tok = _tokenizer(dest)
         self._tok.no_padding()
         self._tok.enable_truncation(RERANK_MAX_TOKENS)
         self.repo = repo
+        self.last: dict = {}            # call stats — see score() (#329)
 
     def score(self, query: str, docs: list[str]) -> np.ndarray:
         """Micro-batched like the embedder — 25 pairs padded to a
@@ -525,10 +537,12 @@ class LocalReranker:
         pairs = [[query, d] for d in docs]
         enc = self._tok.encode_batch(pairs, add_special_tokens=True)
         lim = limits()
+        lens = [len(e.ids) for e in enc]
+        batches = plan_batches(lens, _rerank_batch_tokens(), lim.max_batch)
         out = np.empty(len(enc), dtype=np.float32)
-        for batch in plan_batches([len(e.ids) for e in enc],
-                                  lim.batch_tokens, lim.max_batch):
-            maxlen = max(len(enc[i].ids) for i in batch)
+        t0 = time.monotonic()
+        for batch in batches:
+            maxlen = max(lens[i] for i in batch)
             ids = np.zeros((len(batch), maxlen), dtype=np.int64)
             mask = np.zeros((len(batch), maxlen), dtype=np.int64)
             for j, i in enumerate(batch):
@@ -540,6 +554,13 @@ class LocalReranker:
             s = logits.reshape(-1).astype(np.float32)
             for j, i in enumerate(batch):
                 out[i] = 1.0 / (1.0 + np.exp(-s[j]))
+        # call stats — bench_query/doctor read the batch-split and token
+        # shape behind a rerank leg without re-deriving them (#329)
+        self.last = {"pairs": len(enc), "runs": len(batches),
+                     "batch_sizes": [len(b) for b in batches],
+                     "tok_min": min(lens), "tok_med":
+                     sorted(lens)[len(lens) // 2], "tok_max": max(lens),
+                     "ms": round((time.monotonic() - t0) * 1000, 1)}
         return out  # sigmoid → 0..1 relevance
 
 

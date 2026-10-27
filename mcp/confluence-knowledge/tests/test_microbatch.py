@@ -92,7 +92,9 @@ def test_embed_empty_input():
 
 
 def test_rerank_micro_batches_and_order(monkeypatch):
-    monkeypatch.setenv("KNOWLEDGE_BATCH_TOKENS", "100000")
+    # rerank honours its OWN stage budget (KNOWLEDGE_RERANK_BATCH_TOKENS,
+    # #329) — the generic BATCH_TOKENS knob no longer applies here
+    monkeypatch.setenv("KNOWLEDGE_RERANK_BATCH_TOKENS", "100000")
     monkeypatch.setenv("KNOWLEDGE_MAX_BATCH", "2")
     sess, tok = _FakeSess(), _FakeTok()
     rr = _reranker(sess, tok)
