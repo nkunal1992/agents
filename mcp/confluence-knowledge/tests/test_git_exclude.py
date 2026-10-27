@@ -74,3 +74,50 @@ def test_registration_guards_workspace_mcp(tmp_path):
     _git(repo, "add", ".")
     assert not any("mcp.json" in f for f in
                    _git(repo, "diff", "--cached", "--name-only").stdout.split())
+
+
+def test_git_root_plain_repo(tmp_path):
+    from confluence_knowledge.settings import _git_root
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    nested = repo / "a" / "b"
+    nested.mkdir(parents=True)
+    assert _git_root(nested) == (repo.resolve(), repo.resolve() / ".git")
+
+
+def test_git_root_worktree_pointer(tmp_path):
+    from confluence_knowledge.settings import _git_root
+    real_gd = tmp_path / "meta" / "worktrees" / "wt1"
+    real_gd.mkdir(parents=True)
+    wt = tmp_path / "wt-checkout"
+    wt.mkdir()
+    (wt / ".git").write_text(f"gitdir: {real_gd}\n", encoding="utf-8")
+    assert _git_root(wt) == (wt.resolve(), real_gd.resolve())
+
+
+def test_git_root_no_repo(tmp_path):
+    from confluence_knowledge.settings import _git_root
+    assert _git_root(tmp_path) is None
+
+
+def test_run_bounded_hanging_child_returns_none(tmp_path):
+    """#322: a child that never exits must NOT hang the caller —
+    subprocess.run(timeout) re-communicates post-kill and can block
+    forever; the bounded runner abandons instead."""
+    import sys
+    import time
+
+    from confluence_knowledge.settings import _run_bounded
+    t = time.monotonic()
+    r = _run_bounded([sys.executable, "-c",
+                      "import time; time.sleep(120)"], timeout=0.5)
+    assert r is None
+    assert time.monotonic() - t < 20    # kill + bounded wait, not forever
+
+
+def test_run_bounded_normal_child(tmp_path):
+    import sys
+
+    from confluence_knowledge.settings import _run_bounded
+    r = _run_bounded([sys.executable, "-c", "print('hi')"], timeout=15)
+    assert r is not None and r.returncode == 0 and "hi" in r.stdout

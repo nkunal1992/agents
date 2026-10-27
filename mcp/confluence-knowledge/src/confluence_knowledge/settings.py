@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,29 +122,49 @@ def ensure_gitignore(path: Path, entries: list[str],
     _assert_not_tracked(path, protected)
 
 
+def _git_root(path: Path) -> tuple[Path, Path] | None:
+    """Nearest repo ancestor as (toplevel, git_dir) — no subprocess.
+
+    `git` can be absent, AppLocker-blocked or hung under emulation, and
+    killing its shim leaves a grandchild holding the pipe handles —
+    `subprocess.run(timeout=…)` then blocks forever on the post-kill
+    re-communicate (#322, seen live on win_arm64). A parent walk covers
+    plain repos (`.git` dir) and worktrees (`.git` file → `gitdir:`
+    pointer) without touching a shell.
+    """
+    here = path.resolve()
+    for parent in (here, *here.parents):
+        marker = parent / ".git"
+        try:
+            if marker.is_dir():
+                return parent, marker
+            if marker.is_file():
+                for line in marker.read_text(
+                        encoding="utf-8", errors="replace").splitlines():
+                    if line.startswith("gitdir:"):
+                        gd = Path(line[7:].strip())
+                        return parent, (gd if gd.is_absolute()
+                                        else (parent / gd).resolve())
+                return None          # malformed pointer — not a repo
+        except OSError:
+            return None              # unreadable marker — treat as none
+    return None
+
+
 def _git_info_exclude(path: Path, entries: list[str]) -> None:
     """Mirror ignore entries into .git/info/exclude — the fail-safe layer.
 
     A no-op outside git repos, and resilient to worktrees (`.git` as a
-    file) via `git rev-parse`. Entries are repo-root-relative patterns —
-    a nested workdir's entries carry their path prefix.
+    file) via the pointer in it — no `git` shell-out (#322). Entries
+    are repo-root-relative patterns — a nested workdir's entries carry
+    their path prefix.
     """
-    import subprocess
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--git-dir",
-             "--show-toplevel"],
-            check=False, capture_output=True, timeout=10, text=True)
-        if r.returncode != 0:
-            return
-        lines = r.stdout.splitlines()
-        git_dir, top = Path(lines[0]), Path(lines[1])
-        if not git_dir.is_absolute():
-            git_dir = (path / git_dir).resolve()
-    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+    found = _git_root(path)
+    if found is None:
         return
+    top, git_dir = found
     try:
-        prefix = path.resolve().relative_to(top.resolve())
+        prefix = path.resolve().relative_to(top)
     except ValueError:
         return                      # path outside the worktree
     rel = []                        # repo-root-relative patterns; git
@@ -161,17 +182,38 @@ def _git_info_exclude(path: Path, entries: list[str]) -> None:
                 existing.add(e)
 
 
-def _assert_not_tracked(workdir: Path, protected: tuple[str, ...]) -> None:
-    import subprocess
-
-    for rel in protected:
+def _run_bounded(argv: list[str], timeout: float
+                 ) -> subprocess.CompletedProcess | None:
+    """subprocess.run(timeout=…) can hang FOREVER after the timeout:
+    it kills the child then re-communicates unconditionally — a
+    shim-spawned grandchild still holding the pipes (Git-for-Windows
+    under ARM64 emulation, #322) makes that wait never return.
+    communicate → on expiry kill + bounded wait + abandon the pipes."""
+    try:
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return None                        # absent/blocked binary
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
         try:
-            r = subprocess.run(
-                ["git", "-C", str(workdir), "ls-files", "--error-unmatch", rel],
-                check=False, capture_output=True, timeout=10,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return  # not a git repo / git absent — nothing tracked
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass                           # zombie — abandon it
+        return None
+    return subprocess.CompletedProcess(argv, p.returncode, out, "")
+
+
+def _assert_not_tracked(workdir: Path, protected: tuple[str, ...]) -> None:
+    for rel in protected:
+        r = _run_bounded(
+            ["git", "-C", str(workdir), "ls-files",
+             "--error-unmatch", rel], 10)
+        if r is None:
+            return  # git absent/blocked/hung — nothing provable
         if r.returncode == 0:
             raise SetupError(
                 f"{rel} is already tracked by git — refusing to write secrets/cache there. "
