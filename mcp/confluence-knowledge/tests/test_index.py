@@ -89,6 +89,10 @@ def test_search_cache_builds_off_writer_lock(tmp_path, monkeypatch):
                     [types.SimpleNamespace(chunk_id="p:1", heading_path="",
                                            kind="p", ordinal=0, text="hi")],
                     None)
+    # publish() warms the cache on a daemon thread — stub it so the
+    # probed call below is deterministically the builder; otherwise the
+    # warm can win and vectors_for never runs under the spy (#rc5 flake)
+    monkeypatch.setattr(Index, "_warm_search_cache", lambda self: None)
     idx.publish({"p"})
     held_during_build = []
 
