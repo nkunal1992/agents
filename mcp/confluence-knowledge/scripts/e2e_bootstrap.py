@@ -34,7 +34,7 @@ from mcp.client.stdio import stdio_client
 sys.path.insert(0, str(Path(__file__).parent))
 import atexit
 
-from _e2e_common import TOKEN, call, check, fresh_venv, serve, stop_shared_daemon
+from _e2e_common import TOKEN, call, check, fresh_venv, pip_install, serve, stop_shared_daemon
 
 
 def _embed_dir_name() -> str:
@@ -107,8 +107,7 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool = False,
         src_spec = f"{wheels[-1]}[models]"
     else:
         src_spec = f"{service_src}[models]"
-    run([str(vpy), "-m", "pip", "install", src_spec], env,
-        f"venv + pip install {src_spec}")
+    pip_install(vpy, [src_spec], env, f"venv + pip install {src_spec}")
 
     # 3. models — reuse a cache dir if provided, else download for real
     cache = os.environ.get("CK_MODEL_CACHE")

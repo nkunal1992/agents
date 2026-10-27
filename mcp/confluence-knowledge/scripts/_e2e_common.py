@@ -218,6 +218,36 @@ def fresh_venv(venv_dir: Path) -> Path:
     return venv_dir
 
 
+def pip_install(vpy: Path, args, env: dict, ok_msg: str,
+                attempts: int = 6, delay_s: float = 20.0):
+    """pip install that tolerates PyPI index-propagation lag — a
+    just-published release can still hit a stale CDN edge for ~30-90s
+    after the wait-probe already saw it (#334: verify-published failed
+    twice this way). Retries ONLY on the index-resolution signature;
+    real failures (build error, hash mismatch) fail on attempt 1."""
+    import re as _re
+    import subprocess as _sp
+    argv = [str(vpy), "-m", "pip", "install", *map(str, args)]
+    p = None
+    for n in range(1, attempts + 1):
+        p = _sp.run(argv, check=False, env=env, capture_output=True,
+                    text=True, encoding="utf-8", errors="replace",
+                    timeout=900)
+        if p.returncode == 0:
+            print("PASS", ok_msg)
+            return p
+        out = p.stdout + p.stderr
+        if n == attempts or not _re.search(
+                r"Could not find a version that satisfies"
+                r"|No matching distribution found", out):
+            break
+        print(f"  pip index miss {n}/{attempts} — retry in {delay_s:.0f}s",
+              flush=True)
+        time.sleep(delay_s)
+    check(False, f"pip install {' '.join(map(str, args))}",
+          (p.stdout + p.stderr)[-2000:] if p else "no output")
+
+
 # --- shared MCP-client helpers (call/check used by both smoke and bootstrap) ---
 
 import json as _json

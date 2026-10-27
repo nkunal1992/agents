@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]
                     / "confluence-knowledge" / "scripts"))
 import atexit
 
-from _e2e_common import call, check, fresh_venv, stop_shared_daemon
+from _e2e_common import call, check, fresh_venv, pip_install, stop_shared_daemon
 
 
 def _embed_dir_name() -> str:
@@ -120,8 +120,8 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
     else:
         eng = engine_spec or str(REPO_SVC.parents[0] / "confluence-knowledge")
         eng_install = f"{eng}[models,files]" if engine_spec else str(eng)
-        run([str(vpy), "-m", "pip", "install", eng_install], env,
-            f"engine install {Path(str(eng)).name}")
+        pip_install(vpy, [eng_install], env,
+                    f"engine install {Path(str(eng)).name}")
         no_deps = engine_spec is not None
     if spec:
         src_spec = spec
@@ -136,8 +136,8 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
         # engine pinned outside the index (e.g. an rc wheel that ~= specs
         # won't accept): install the service with --no-deps, then its
         # non-engine requirements from the installed metadata
-        run([str(vpy), "-m", "pip", "install", "--no-deps", src_spec], env,
-            f"venv + pip install --no-deps {src_spec}")
+        pip_install(vpy, ["--no-deps", src_spec], env,
+                    f"venv + pip install --no-deps {src_spec}")
         import json as _json
         out = run(
             [str(vpy), "-c",
@@ -148,11 +148,9 @@ def bootstrap(sandbox: Path, service_src: Path, use_wheel: bool,
         reqs = [r for r in _json.loads(out)
                 if "confluence-knowledge" not in r and "extra ==" not in r]
         if reqs:
-            run([str(vpy), "-m", "pip", "install"] + reqs, env,
-                f"service deps {len(reqs)}")
+            pip_install(vpy, reqs, env, f"service deps {len(reqs)}")
     else:
-        run([str(vpy), "-m", "pip", "install", src_spec], env,
-            f"venv + pip install {src_spec}")
+        pip_install(vpy, [src_spec], env, f"venv + pip install {src_spec}")
 
     cache = os.environ.get("CK_MODEL_CACHE")
     models_dir = Path(env["HOME"]) / ".knowledge" / "models"

@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import atexit
 
-from _e2e_common import check, serve, stop_shared_daemon, fresh_venv
+from _e2e_common import check, serve, stop_shared_daemon, fresh_venv, pip_install
 
 
 def _embed_dir_name() -> str:
@@ -75,8 +75,7 @@ def main() -> None:
     atexit.register(stop_shared_daemon, cli, env)
     spec = sys.argv[sys.argv.index("--spec") + 1] \
         if "--spec" in sys.argv else str(REPO_SVC) + "[models]"
-    run([str(vpy), "-m", "pip", "install", spec], env,
-        "install")
+    pip_install(vpy, [spec], env, "install")
 
     cache = os.environ.get("CK_MODEL_CACHE")
     cache = os.path.expanduser(cache) if cache else None

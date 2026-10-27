@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]
                     / "confluence-knowledge" / "scripts"))
 import atexit
 
-from _e2e_common import check, fresh_venv, stop_shared_daemon
+from _e2e_common import check, fresh_venv, pip_install, stop_shared_daemon
 
 
 def _embed_dir_name() -> str:
@@ -81,20 +81,17 @@ def main() -> None:
     else:
         eng = engine_spec or str(REPO_SVC.parent / "confluence-knowledge")
         eng_install = f"{eng}[models,files]" if engine_spec else str(eng)
-        run([str(vpy), "-m", "pip", "install", eng_install], env,
-            "engine install")
+        pip_install(vpy, [eng_install], env, "engine install")
     if engine_spec and engine_spec != "index":
-        run([str(vpy), "-m", "pip", "install", "--no-deps", spec], env,
-            "service install (no-deps)")
+        pip_install(vpy, ["--no-deps", spec], env,
+                    "service install (no-deps)")
         import importlib.metadata as _md
         reqs = [r for r in (_md.requires("sharepoint-knowledge") or [])
                 if "confluence-knowledge" not in r and "extra ==" not in r]
         if reqs:
-            run([str(vpy), "-m", "pip", "install"] + reqs, env,
-                "service deps")
+            pip_install(vpy, reqs, env, "service deps")
     else:
-        run([str(vpy), "-m", "pip", "install", spec], env,
-            "install")
+        pip_install(vpy, [spec], env, "install")
 
     cache = os.environ.get("CK_MODEL_CACHE")
     # #206 — models live in the SHARED store under the sandboxed HOME
