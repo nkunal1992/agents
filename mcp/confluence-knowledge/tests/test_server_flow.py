@@ -711,7 +711,11 @@ def test_stale_watcher_defers_exit_while_crawl_runs(wired, monkeypatch):
     exits = []
     monkeypatch.setattr(server.os, "_exit", lambda c: exits.append(c))
     server._start_stale_watcher()
-    time.sleep(0.15)
+    # wait for a tick to actually land — a fixed sleep races thread
+    # startup on a loaded runner
+    deadline = time.monotonic() + 5
+    while not server._STALE_CODE and time.monotonic() < deadline:
+        time.sleep(0.02)
     assert exits == [] and server._STALE_CODE is True
 
 
@@ -729,9 +733,14 @@ def test_stale_watcher_disabled_by_env(wired, monkeypatch):
     monkeypatch.setattr(server, "_WATCHER_STARTED", None)
     server._start_stale_watcher()
     assert server._WATCHER_STARTED is None       # never armed
-    time.sleep(0.06)     # earlier generations drain on their last tick
-    assert not any(t.name == "stale-watcher" and t.is_alive()
-                   for t in threading.enumerate())
+    # earlier generations drain on their last tick — poll, don't guess:
+    # 60ms is not enough on a loaded runner (rc6 macos-3.13 flake)
+    deadline = time.monotonic() + 5
+    while any(t.name == "stale-watcher" and t.is_alive()
+              for t in threading.enumerate()):
+        if time.monotonic() > deadline:
+            raise AssertionError("stale-watcher thread still alive")
+        time.sleep(0.05)
 
 
 def test_status_reports_stale_code(wired, monkeypatch):
