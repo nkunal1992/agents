@@ -1140,13 +1140,15 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
                 >= MIN_RERANK_SCORE
             ) if reranker is not None else True
             # Evidence membership is the UNION of colbert's top-K and the
-            # fusion legs' top-K (#336): token-wise MaxSim dilutes the
-            # discriminating tokens of fact-binding questions ("which team
-            # owns service-2") in keyword-dense corpora — the fused hits
-            # that dense+FTS agreed on stay in the window. Display order
-            # follows the fused rank: multi-leg consensus first.
+            # fused pool the cross-encoder would have seen (#336):
+            # token-wise MaxSim dilutes the discriminating tokens of
+            # fact-binding questions ("which team owns service-2") in
+            # keyword-dense corpora, so every fused-top-_rerank_max hit
+            # stays in the window — the same candidate window the CE
+            # path ranked. Display order follows the fused rank:
+            # multi-leg consensus first.
             picks = {int(i) for i in order[:TOP_K_EVIDENCE]}
-            picks.update(range(min(TOP_K_EVIDENCE, len(pool))))
+            picks.update(range(min(_rerank_max(), len(pool))))
             evidence = []
             for i in sorted(picks):
                 # below the noise floor the scorer is only ranking "least

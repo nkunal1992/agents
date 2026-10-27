@@ -393,7 +393,8 @@ def main() -> None:
     args = ap.parse_args()
     tree = build_tree(args.pages, args.seed)
     cfg = Hostility(enabled=args.hostile, clean_latency=args.clean_latency)
-    srv, base, _log = serve(tree, cfg, log_file=args.log_file)
+    srv, base, _log = serve(tree, cfg, port=args.port,
+                            log_file=args.log_file)
     if args.profile_file:
         with open(args.profile_file, "w") as f:
             json.dump({"base_url": base, "token": TOKEN}, f)

@@ -197,10 +197,11 @@ def test_colbert_without_reranker_uses_own_floor(tmp_path):
 
 
 def test_union_keeps_fused_hits_colbert_ranked_out(tmp_path):
-    """#336: MaxSim can push a fused-top-8 hit below the evidence cut in
+    """#336: MaxSim can push a fused-top hit below the evidence cut in
     keyword-dense corpora (discriminating tokens get diluted). The union
-    membership keeps fused-top-8 items even when colbert ranks them
-    last — while colbert's own deep-fused picks still enter."""
+    membership keeps every item in the cross-encoder's fused window
+    (top _rerank_max) even when colbert ranks them last — while
+    colbert's own deep-fused picks still enter via its top-8."""
     bodies = [(str(i), f"T{i}", f"topic{i} filler shared words here")
               for i in range(10)]
     idx = _index(tmp_path, bodies)
