@@ -182,17 +182,21 @@ def _git_info_exclude(path: Path, entries: list[str]) -> None:
                 existing.add(e)
 
 
-def _run_bounded(argv: list[str], timeout: float
+def _run_bounded(argv: list[str], timeout: float, *, capture: bool = False
                  ) -> subprocess.CompletedProcess | None:
     """subprocess.run(timeout=…) can hang FOREVER after the timeout:
     it kills the child then re-communicates unconditionally — a
     shim-spawned grandchild still holding the pipes (Git-for-Windows
     under ARM64 emulation, #322) makes that wait never return.
-    communicate → on expiry kill + bounded wait + abandon the pipes."""
+    communicate → on expiry kill + bounded wait + abandon. When the
+    caller only needs the exit status, capture=False opens no pipes at
+    all — a grandchild then has nothing to hold and the kill is clean."""
     try:
         p = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True)
+                             stdout=subprocess.PIPE if capture
+                             else subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, text=True,
+                             errors="replace")
     except OSError:
         return None                        # absent/blocked binary
     try:
@@ -204,7 +208,7 @@ def _run_bounded(argv: list[str], timeout: float
         except subprocess.TimeoutExpired:
             pass                           # zombie — abandon it
         return None
-    return subprocess.CompletedProcess(argv, p.returncode, out, "")
+    return subprocess.CompletedProcess(argv, p.returncode, out or "", "")
 
 
 def _assert_not_tracked(workdir: Path, protected: tuple[str, ...]) -> None:

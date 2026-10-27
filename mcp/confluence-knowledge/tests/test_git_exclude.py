@@ -119,5 +119,6 @@ def test_run_bounded_normal_child(tmp_path):
     import sys
 
     from confluence_knowledge.settings import _run_bounded
-    r = _run_bounded([sys.executable, "-c", "print('hi')"], timeout=15)
+    r = _run_bounded([sys.executable, "-c", "print('hi')"], timeout=15,
+                     capture=True)
     assert r is not None and r.returncode == 0 and "hi" in r.stdout
