@@ -1013,6 +1013,24 @@ def _bm25_idf(df: dict[int, int] | None, n_docs: int, t: int) -> float:
     return math.log((n_docs - d + 0.5) / (d + 0.5) + 1.0)
 
 
+def _identifier_terms(query: str) -> list[str]:
+    """Query terms shaped like identifiers (#338): a letter+digit mix or
+    an internal -/_/. join — 'service-8', 'ERR-1042', 'v2.3.1',
+    'cfg_path'. Bare numbers and plain words are excluded — they flood
+    rather than identify."""
+    out = []
+    for w in query.split()[:16]:
+        w = w.strip("\"'<>?.,!;:()[]{}*")
+        if len(w) < 2:
+            continue
+        letter = any(c.isalpha() for c in w)
+        digit = any(c.isdigit() for c in w)
+        joined = any(p in w.strip("-_.") for p in "-_.")
+        if (letter and digit) or (letter and joined):
+            out.append(w)
+    return out
+
+
 def retrieve(index: Index, query: str, embedder: LocalEmbedder,
              reranker: LocalReranker | None = None,
              sparse: LocalSparseEmbedder | None = None,
@@ -1105,6 +1123,18 @@ def retrieve(index: Index, query: str, embedder: LocalEmbedder,
     for leg in (dense_rank, fts_rank, sparse_rank):
         for rank, cid in enumerate(leg):
             rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (60 + rank + 1)
+    # identifier leg (#338): entity-shaped query terms phrase-match with
+    # df≈1, but inside the general OR query their bm25 share drowns under
+    # docs matching 4-5 common terms — the page naming the entity can
+    # miss the fused pool entirely. A dedicated identifier-only pass
+    # re-ranks just those docs; each carries a two-leg contribution —
+    # a literal entity match is as strong a signal as dense+FTS agreeing.
+    idents = _identifier_terms(query)
+    if idents:
+        for rank, (cid, _s) in enumerate(
+                index.fts_search(" ".join(idents), limit=10,
+                                 active=fts_active)):
+            rrf[cid] = rrf.get(cid, 0.0) + 2.0 / (60 + rank + 1)
     fused = sorted(rrf, key=lambda c: -rrf[c])[:TOP_K_RETRIEVE]
     # chunk text is fetched only for fused candidates
     by_id = {c["chunk_id"]: c for c in index.chunks_by_ids(fused)}

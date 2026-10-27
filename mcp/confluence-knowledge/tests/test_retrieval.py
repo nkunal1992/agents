@@ -81,6 +81,57 @@ def test_rerank_max_env_bound():
             os.environ["KNOWLEDGE_RERANK_MAX"] = old
 
 
+def test_identifier_leg_queries_fts_separately(tmp_path, monkeypatch):
+    """#338: identifier-shaped terms get a dedicated identifier-only FTS
+    pass; queries without identifiers cost nothing extra."""
+    idx = _index(tmp_path)
+    calls = []
+    orig = idx.fts_search
+    def spy(q, limit=30, active=None):
+        calls.append((q, limit))
+        return orig(q, limit, active)
+    monkeypatch.setattr(idx, "fts_search", spy)
+
+    retrieve(idx, "who owns service-42x", FakeEmbedder())
+    assert len(calls) == 2
+    assert calls[1] == ("service-42x", 10)
+
+    calls.clear()
+    retrieve(idx, "who owns the service", FakeEmbedder())
+    assert len(calls) == 1            # no identifier → no extra pass
+
+
+def test_identifier_hit_rides_into_fused_pool(tmp_path):
+    """#338: a doc whose only query link is the identifier phrase is
+    rescued into the evidence window even when common-term matches
+    would bury it — the measured scale-test failure."""
+    idx = Index(tmp_path / "s.db")
+    emb = FakeEmbedder()
+    # 12 filler docs all rich in the query's common vocabulary
+    for i in range(12):
+        body = ("team owns service and the freeze window — review "
+                "approval rollback board pipeline signoff handover") \
+               + f" filler{i}"
+        idx.upsert_page({"page_id": str(i), "title": f"F{i}",
+                         "url": f"/p/{i}", "level": 0, "version": "1",
+                         "content_hash": "h", "warnings": []},
+                        [Chunk(body, "", "text", 0, f"c{i}")],
+                        emb.embed([body]))
+    # the needle: carries the identifier but almost no query vocabulary
+    body = "unrelated prose entirely zzz " \
+           "the freeze owner for service-42x is team-9"
+    idx.upsert_page({"page_id": "n", "title": "Needle",
+                     "url": "/p/needle", "level": 0, "version": "1",
+                     "content_hash": "h", "warnings": []},
+                    [Chunk(body, "", "text", 0, "cn")],
+                    emb.embed([body]))
+    idx.publish({str(i) for i in range(12)} | {"n"})
+    ev = retrieve(idx, "which team owns service-42x and the freeze window",
+                  FakeEmbedder())
+    ids = [e["page_id"] for e in ev]
+    assert "n" in ids[:4]          # identifier leg lifts it to the top
+
+
 def test_citation_check(tmp_path):
     ev = retrieve(_index(tmp_path), "vpn approval", FakeEmbedder())
     cid = ev[0]["chunk_id"]
