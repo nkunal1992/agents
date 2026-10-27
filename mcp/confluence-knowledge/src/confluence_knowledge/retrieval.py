@@ -1283,9 +1283,11 @@ class HashColbert:
     """Late-interaction stub — per-token one-hot hash vectors + cosine
     MaxSim (#329). A shared word lands on an identical row in both mats,
     so a query token's best doc match is exactly 1.0 when the word is
-    present → mean-MaxSim = matched-token fraction. Same lexical
-    semantics as HashReranker; keeps fake-embeddings runs off the real
-    ONNX artifact AND off machine-dependent scoring."""
+    present. Scores are mapped onto the real MaxSim band — any overlap
+    lands at ≥0.7 (over COLBERT_MIN like the real scorer's relevant
+    hits) and zero overlap stays 0 — so fake-embeddings runs keep the
+    same abstention semantics as the real models AND stay off the ONNX
+    artifact entirely."""
 
     sig = "hash-fake:96"
     dim = 96
@@ -1320,9 +1322,12 @@ class HashColbert:
         t0 = _t.monotonic()
         out = np.zeros(len(doc_mats), np.float32)
         for i, dm in enumerate(doc_mats):
-            if dm.shape[0]:
-                out[i] = (q @ dm.astype(np.float32).T).max(axis=1).sum()
-        out /= max(1, q.shape[0])
+            if not dm.shape[0]:
+                continue
+            sims = (q @ dm.astype(np.float32).T).max(axis=1)
+            matched = int((sims > 0.5).sum())
+            if matched:
+                out[i] = 0.7 + 0.29 * matched / max(1, q.shape[0])
         self.last = {"docs": len(doc_mats), "qtok": int(q.shape[0]),
                      "ms": round((_t.monotonic() - t0) * 1000, 1)}
         return out
