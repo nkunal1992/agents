@@ -16,71 +16,215 @@ style: |
   section.divider { color: #ffffff; text-align: center; }
   section.divider h1 { font-size: 60px; color: #ffffff; margin-bottom: 0.2em; }
   section.divider p { font-size: 30px; }
-  section.divider.java   { background: linear-gradient(135deg, #e66100 0%, #8f3c00 100%); }
-  section.divider.jira   { background: linear-gradient(135deg, #0052cc 0%, #003380 100%); }
   section.divider.c2r    { background: linear-gradient(135deg, #613583 0%, #3c1f52 100%); }
   section.divider.cve    { background: linear-gradient(135deg, #a51d2d 0%, #5e1220 100%); }
+  section.divider.java   { background: linear-gradient(135deg, #e66100 0%, #8f3c00 100%); }
+  section.divider.jira   { background: linear-gradient(135deg, #0052cc 0%, #003380 100%); }
 
-  section.java-body  h2 { color: #b14e00; }
-  section.jira-body  h2 { color: #0052cc; }
   section.c2r-body   h2 { color: #613583; }
   section.cve-body   h2 { color: #a51d2d; }
-  section.java-body  h2::before { content: "java-modernizer — "; font-size: 0.55em; color: #999; display: block; }
-  section.jira-body  h2::before { content: "jira-ticket-writer — "; font-size: 0.55em; color: #999; display: block; }
+  section.java-body  h2 { color: #b14e00; }
+  section.jira-body  h2 { color: #0052cc; }
   section.c2r-body   h2::before { content: "code-to-requirements — "; font-size: 0.55em; color: #999; display: block; }
   section.cve-body   h2::before { content: "cve-remediator — "; font-size: 0.55em; color: #999; display: block; }
+  section.java-body  h2::before { content: "java-modernizer — "; font-size: 0.55em; color: #999; display: block; }
+  section.jira-body  h2::before { content: "jira-ticket-writer — "; font-size: 0.55em; color: #999; display: block; }
+
 ---
 
 <!-- _class: lead -->
 
-# Four Copilot Agents for Everyday Engineering
+# Raising Quality with Four Copilot Agents
 
-**java-modernizer** · **jira-ticket-writer** · **code-to-requirements** · **cve-remediator**
+**code-to-requirements** · **cve-remediator** · **java-modernizer** · **jira-ticket-writer**
 
-Reusable GitHub Copilot agents that take over the tedious, high-stakes
-parts of our workflow — safely, and with a human in the loop.
+How our team uses reusable Copilot agents to improve the quality of our
+code, our specs, our tickets, and our security posture.
+
+---
+
+## Where quality leaks in daily work
+
+- **Legacy code** — untestable classes mean defects hide until production
+- **Specs** — undocumented logic makes audits and rebuilds guesswork
+- **Tickets** — vague write-ups produce weak reviews and weak QA
+- **Vulnerabilities** — risky upgrades get postponed; suppressions rot
+
+> Quality isn't one big fix — it's a hundred small leaks.
+> Each agent plugs a different one.
 
 ---
 
 ## What these actually are
 
-- Each agent is **one Markdown file** — a tuned prompt with a name, a tool
-  allow-list, and guardrails
-- Drop it into any repo's `.github/agents/` folder → it appears in the
-  **Copilot Chat agent dropdown**
-- Optional companion files add slash commands (`/cve-fix`, `/jira-ticket`,
-  `/c2r`) and handoff buttons between agents
-- Works in **VS Code and JetBrains**; org-wide rollout via the `.github` repo
+- Each agent is **one Markdown file** — a tuned prompt with a tool
+  allow-list and guardrails
+- Drop into `.github/agents/` → appears in the **Copilot Chat dropdown**
+- Optional slash commands (`/c2r`, `/cve-fix`, `/jira-ticket`) and
+  handoff buttons between agents
+- **VS Code + JetBrains**; org-wide rollout via the `.github` repo
 
-> No servers, no services, no credentials — they run inside the Copilot
-> chat we already have.
+> Same contract in all four: **they propose, a human approves.**
 
 ---
 
-## The four at a glance
+## The four — and the quality lever each one pulls
 
-| Agent | You give it | You get back |
-|---|---|---|
-| **java-modernizer** | Your current code change | A prioritized, mentor-style modernization plan — applies only what you approve |
-| **jira-ticket-writer** | A diff, commit, or branch | A complete, paste-ready JIRA ticket with acceptance criteria |
-| **code-to-requirements** | A starting point + the output files | An audit-ready functional spec (`.adoc`) that could rebuild the logic |
-| **cve-remediator** | A scan log or CVE IDs | Smallest-safe fixes, whitelist cleanup, verified — plus a PR write-up |
-
-Different jobs, same personality: **evidence over guesses, approval before writes.**
+| Agent | Quality lever |
+|---|---|
+| **code-to-requirements** | Spec accuracy — docs that can be verified, not just written |
+| **cve-remediator** | Security posture — real fixes, un-hidden risks, less regression |
+| **java-modernizer** | Code quality — testability and maintainability on every change |
+| **jira-ticket-writer** | Communication quality — tickets that describe the actual code |
 
 ---
 
-## Shared design principles
+<!-- _class: divider c2r -->
 
-All four follow the same contract — worth naming once, up front:
+# 📐 code-to-requirements
 
-- **Report first, edit later.** Nothing is written until you approve it
-- **Honesty over completeness.** Unknowns are labelled (`UNRESOLVED`,
-  *inferred*, *unverified*) — never papered over
-- **Evidence.** File:line, diff stats, advisory IDs, source citations
-- **Enterprise-safe.** Secrets are never echoed; internal package names
-  never leave the network; read-only where possible
-- **Repo-agnostic.** They discover your conventions — no hardcoded paths
+*Quality lever:* specs an auditor can trust — because every rule was
+proven against the code.
+
+---
+
+<!-- _class: c2r-body -->
+
+## The quality problem
+
+- Legacy systems ship **no spec** — requirements live only in code
+- Hand-written specs drift from reality and can't be verified
+- Audits, migrations, rebuilds inherit every guess the writer made
+
+> A wrong spec is worse than no spec — everyone downstream builds on it.
+
+---
+
+<!-- _class: c2r-body -->
+
+## How it works — backward slicing
+
+```
+output files  ◀───  every assignment feeding each field  ◀───  inputs
+   (sinks)         through intermediates, across modules      (sources)
+```
+
+- Exhaustive: every branch, negative path, pre-condition, sequential
+  override, and **silent input** (configs, env vars, DB lookups, flags)
+- Then abstracted into input-only **"shall"** rules — a pure black-box spec
+
+**Verification loop:** each transformation is dry-run against synthetic
+input → output; the spec is corrected where they disagree.
+
+---
+
+<!-- _class: c2r-body -->
+
+## Why the output is *trustworthy*
+
+- **Human gates** — approve the plan, the data dictionary, and a "golden
+  sample" output before it runs autonomously; Gate 3 stops on ambiguity
+- **Immutable IDs** (`INP-001`/`TRNS-003`/`FLAG-001`) — never renumbered,
+  so audits trace rules forever
+- **Evidence separation** — the `.adoc` is pure spec; file:line proof
+  stays in the internal state file
+- **Resumable** — checkpointed state; a 12-output run survives restarts
+
+> ✦ **The quality bar:** untraceable = `[STATUS: UNRESOLVED]`,
+> never guessed.
+
+---
+
+<!-- _class: c2r-body -->
+
+## How the team uses it
+
+- **Before a rebuild/migration** — extract the spec first; the new team
+  builds from truth, not archaeology
+- **For audits** — formal "shall" language + stable IDs = evidence-ready
+- **Spec → tests** — one-click handoff to the test-writer agent; the
+  verification appendix becomes real tests
+- **Re-verify** — `/c2r-verify` re-checks an existing spec after code
+  changes; discrepancies get listed and fixed
+
+> Quality compounds: a verified spec → better tests → fewer regressions.
+
+---
+
+<!-- _class: divider cve -->
+
+# 🛡️ cve-remediator
+
+*Quality lever:* fixes that are small, proven, and honest — plus a
+whitelist that stops hiding real risk.
+
+---
+
+<!-- _class: cve-body -->
+
+## The quality problem
+
+- Scan fails the build → someone owns a pile of CVEs
+- Upgrade too far → regressions; too little → still vulnerable
+- Suppression files silently rot — entries hide CVEs that became fixable
+  months ago
+
+> The real quality risk isn't the CVE list — it's the *stale* list.
+
+---
+
+<!-- _class: cve-body -->
+
+## How it works — evidence over memory
+
+```
+scan log / URL / file / CVE IDs  →  normalize every finding
+→ find each version's true source (POM property, catalog, lockfile)
+→ advisory lookup: OSV → GHSA → NVD
+→ smallest fixing version: patch → minor → major
+→ confirm it resolves through OUR mirror (Nexus/Artifactory)
+→ REPORT → you approve → apply → verify → PR write-up
+```
+
+- Transitives fixed via the **lowest direct parent**, not blind overrides
+- `all safe` = patch/minor only — never majors, never new suppressions
+
+---
+
+<!-- _class: cve-body -->
+
+## The whitelist audit — quality nobody was checking
+
+Every run, every suppression, every ecosystem (`.trivyignore`, `.snyk`,
+OWASP XML, CI flags…) gets a verdict:
+
+| Verdict | Team action |
+|---|---|
+| Remove now — already fixed / package gone | delete |
+| Remove with upgrade | upgrade + delete together |
+| Decision — major required | keep; breaking changes shown |
+| Keep — no fix | keep; justification + expiry added |
+| Over-broad / hygiene | narrowed, dated, justified |
+
+> ✦ The whitelist becomes a living document — nothing hides
+> what a fix already solved.
+
+---
+
+<!-- _class: cve-body -->
+
+## How the team uses it
+
+- **Every failed security scan** → paste the log → `all safe`
+- **Quarterly hygiene** → run with no input = whitelist-only audit
+- **Enterprise-safe by design** — internal package names never leave the
+  network; credentials never printed; unverifiable items labelled
+  *unverified*
+- **Hand-off included** — paste-ready commit message + PR description +
+  a CI re-scan checklist
+
+> ✦ Measurable: fewer open CVEs, fewer stale suppressions,
+> less regression risk per fix.
 
 ---
 
@@ -88,21 +232,21 @@ All four follow the same contract — worth naming once, up front:
 
 # ☕ java-modernizer
 
-A senior architect who reviews *only the code you're already changing* —
-and teaches while it works.
+*Quality lever:* testability and maintainability — every touched change
+leaves the code better.
 
 ---
 
 <!-- _class: java-body -->
 
-## The problem
+## The quality problem
 
-- Legacy Java codebases: heavily coupled, barely unit-testable
-- "Modernize the codebase" projects die — too big, too risky, no tests
-- Meanwhile, the codebase gets older every sprint
+- Legacy Java: heavily coupled, barely unit-testable → defects hide
+- "Modernize the codebase" projects die — too big, too risky
+- Codebases age every sprint while the big fix never comes
 
-> The realistic path isn't a rewrite. It's making the code you're
-> *touching anyway* a little better each time.
+> The realistic path: make the code you're *touching anyway* better
+> each time — compound interest, not a rewrite.
 
 ---
 
@@ -111,56 +255,36 @@ and teaches while it works.
 ## How it works — six disciplined phases
 
 ```
-1. Establish the change set     staged/unstaged → unpushed commits → or ask
-2. Detect the environment       JDK level · JUnit version · Spring/CDI/Guice?
-3. Map collaborators            exactly one hop out from each changed class
-4. Assess the gaps              testability first, then SOLID, coupling,
-                                patterns-with-a-purpose, error handling
-5. Produce the report           prioritized findings, quick wins first
-6. Implement                    only the items you pick — mechanical,
-                                behavior-preserving refactors
+1. Change set        staged/unstaged → unpushed commits → or ask
+2. Environment       JDK level · JUnit · DI framework — nothing invented
+3. Collaborators     exactly one hop out from each changed class
+4. Gap assessment    TESTABILITY FIRST → SOLID → coupling →
+                     patterns-with-a-purpose → error handling
+5. Report            effort + risk + rationale per finding, quick wins first
+6. Implement         only items you pick — mechanical, provably-safe
 ```
 
-It **never recommends APIs above your detected Java version**, and never
-prescribes adding a framework you don't already have.
+Never suggests APIs above your JDK, never prescribes a framework you
+don't have, never expands scope past the touched code.
 
 ---
 
 <!-- _class: java-body -->
 
-## What the report looks like
+## How the team uses it — quality on every commit
 
-Each finding, numbered:
+- **Testability first** — it finds why a class can't be tested (deps
+  `new`ed in constructors, static calls) and injects a seam — unlocking
+  the unit tests the codebase never had
+- **Characterization tests** — before risky moves, it pins current
+  behavior so a "safe" refactor can't silently change it
+- **Mentor effect** — every finding explains *why*; the team's judgment
+  improves alongside the code
+- **Report → approve → apply** — smallest behavior-preserving change,
+  then it runs the build
 
-| Field | Example |
-|---|---|
-| *Where* | `OrderService.java:87` — `new PriceCalculator()` in constructor |
-| *Gap* | Hidden dependency — can't unit-test without real config |
-| *Recommendation* | Extract interface, inject via constructor |
-| *Effort / Risk* | S · low |
-| *Why it helps* | Makes `OrderService` testable without a database |
-
-Plus: **suggested order** (quick wins first), and **"noted for later"** —
-real issues outside this change's blast radius, one line each.
-
-> Rule baked in: only recommend what intersects the touched code.
-> The developer has a change to ship — no scope creep.
-
----
-
-<!-- _class: java-body -->
-
-## Why it's safe in untested code
-
-- **Behavior preservation is paramount** — a "safe" refactor that changes
-  behavior is worse than the debt it fixes
-- Before any risky move, it proposes a **characterization test** (pin
-  current behavior) or a thinner seam first
-- Won't touch code unprompted — you select items, it applies the
-  *smallest* provably-safe change
-- If something can't be done incrementally, it says so instead of forcing it
-
-**Try it:** commit a legacy change → "modernize"
+> ✦ Measurable: more unit-testable classes, fewer hidden
+> dependencies, less coupling per release.
 
 ---
 
@@ -168,278 +292,112 @@ real issues outside this change's blast radius, one line each.
 
 # 🎫 jira-ticket-writer
 
-Turns your finished work into a complete JIRA ticket — describing what the
-code *actually does*.
+*Quality lever:* tickets that describe what the code actually does —
+better reviews, better QA, honest scope.
 
 ---
 
 <!-- _class: jira-body -->
 
-## The problem
+## The quality problem
 
-- The work is done; now someone has to write it up
-- Hand-written tickets describe vague intent, not the actual change
-- Quality varies wildly across the team — reviewers and QA pay for it
+- Work is done; the ticket is an afterthought
+- Vague intent-based tickets → weak reviews, wrong QA focus, reopened
+  issues
+- Ticket quality varies wildly across the team
+
+> Bad tickets don't just annoy — they degrade every downstream step:
+> review, testing, and audit traceability.
 
 ---
 
 <!-- _class: jira-body -->
 
-## Point it at any scope
+## What you get — paste-ready, evidence-based
 
-| You type | What it diffs |
+Point it at a diff — worktree, commit, range, or whole branch:
+
+- **Suggested fields** — Type, Priority, Components, Epic, Story points,
+  each *with its stated basis*
+- **Description** in Jira wiki markup — Background · What changed
+  (grouped) · Implementation notes · **How to test / QA** · Acceptance
+  criteria · Rollback notes · Links (SHAs, branch, detected ticket key)
+- Iterate in one word: `cloud` (Markdown) · `split` (separate tickets) ·
+  field overrides
+
+Bug-shaped diffs get *Steps to reproduce / Expected / Actual*.
+
+---
+
+<!-- _class: jira-body -->
+
+## How the team uses it — quality of communication
+
+- **Every finished change** → ticket draft before touching JIRA —
+  consistent quality regardless of who writes it
+- **Describes what the code does** — inferred intent is labelled
+  *inferred*; missing business context gets asked, not invented
+- **QA gets real test steps** — derived from the actual diff, not memory
+- **Secret scan before writing** — credentials/PII in the diff are
+  flagged and excluded
+- **Read-only** — never calls JIRA, never edits files; output is text
+
+> ✦ Measurable: fewer clarification round-trips, fewer
+> reopened tickets, traceable commit-to-ticket links.
+
+---
+
+## How the team uses them — the daily pattern
+
+```
+Write/change code
+   ├─ legacy Java diff → java-modernizer   (leave it better + testable)
+   ├─ work finished    → jira-ticket-writer (accurate ticket for JIRA)
+   ├─ scan fails       → cve-remediator     (smallest verified fix)
+   └─ undocumented code→ code-to-requirements (audit-ready spec)
+```
+
+Handoffs chain them: ticket → **code-reviewer** · spec → **test-writer** ·
+CVE changes → **code-reviewer**. One repo file each — every repo, same
+workflow.
+
+---
+
+## The compounding quality loop
+
+- Verified **specs** → generated tests → caught regressions
+- Accurate **tickets** → sharper reviews → better QA coverage
+- Testable **code** → real unit tests → defects found pre-merge
+- Honest **CVE posture** → real exposure visible → fixes actually land
+
+> Each agent improves an artifact the *next* step depends on —
+> quality upstream is quality everywhere.
+
+---
+
+## The guardrails ARE the quality story
+
+| Promise | How it's enforced |
 |---|---|
-| *(nothing)* or `/jira-ticket` | staged + unstaged changes |
-| `commit abc123` | that one commit |
-| `abc123..HEAD` · "since abc123" | the committed range |
-| "since abc123 **including worktree**" | commits + uncommitted on top |
-| "this branch" | merge-base vs default branch — whole branch |
+| Human approves before writes | Gates (C2R) · report-then-wait (CVE) · pick-items (modernizer) · never-writes (tickets) |
+| Honest about unknowns | `UNRESOLVED` · *inferred* · *unverified* — labels, not guesses |
+| Evidence | file:line · diff stats · advisory IDs · citation trails |
+| Enterprise-safe | secret scans · privacy gate · mirror checks · read-only where possible |
 
-Confirms scope first (`14 files changed, +312/−87`) — an empty diff gets
-"nothing to ticket," not a hallucinated ticket.
+> Trust is what makes these usable at all — the guardrails are the feature.
 
 ---
 
-<!-- _class: jira-body -->
-
-## What you get — paste-ready
-
-- **Suggested fields** — Type, Priority, Components, Labels, Epic,
-  Fix version, Story points — *each with its stated basis*
-- **Summary** — one imperative line, repo prefix convention
-- **Description** in Jira wiki markup: Background · What changed (grouped
-  feature/fix/refactor/test) · Implementation notes · How to test/QA ·
-  Acceptance criteria · Rollback notes · Links (SHAs, branch, ticket key
-  detected from branch name)
-- Bug-shaped diffs get *Steps to reproduce / Expected / Actual*
-
-Iterate with one word: `cloud` → Markdown version · `split` → separate
-tickets for mixed work · `type: Bug, priority: High` → field overrides.
-
----
-
-<!-- _class: jira-body -->
-
-## Why you can trust it with a diff
-
-- **Never calls JIRA** — output is text to paste; no credentials, no
-  permissions, nothing to configure
-- **Read-only by design** — shell access is whitelisted to `git status /
-  diff / show / log / merge-base`; cannot edit files
-- **Secret scan before writing** — keys, tokens, PII in the diff are
-  flagged and excluded; file names only
-- **Honest** — describes what the code does; inferred intent is labelled
-  *inferred* and it asks for business context instead of inventing it
-
-> A smaller accurate ticket beats a padded one.
-
----
-
-<!-- _class: divider c2r -->
-
-# 📐 code-to-requirements
-
-Reverse-engineers code into an audit-ready Functional Requirement
-Document — a spec complete enough to rebuild from.
-
----
-
-<!-- _class: c2r-body -->
-
-## The problem
-
-- Legacy systems with **no spec** — the requirements live only in code
-- Audits, migrations, rebuilds all demand a functional document
-- Writing one by hand: months of reading code and tracing edge cases
-
-> The code already *is* the spec — it's just written in the wrong
-> language and nobody extracted it.
-
----
-
-<!-- _class: c2r-body -->
-
-## The core idea — backward slicing
-
-```
-output files  ◀───  trace every assignment that feeds each field  ◀───  inputs
-   (sinks)              through intermediates, across modules          (sources)
-```
-
-- Start from **what the code produces**; walk backward until every output
-  field resolves to a source or a constant
-- **Exhaustive**: every branch, negative path, pre-condition, sequential
-  override (later assignments win)
-- **Silent inputs count too**: configs, env vars, DB lookups, feature
-  flags — each catalogued with its exact source entity
-- Then **abstracted**: rules expressed only in input fields and config
-  constants — a pure black-box spec
-
----
-
-<!-- _class: c2r-body -->
-
-## You're in control — three gates, then autopilot
-
-```
-recon scan → GATE 0: approve the Strategic Plan
-             (sinks/sources found, slicing map, blockers)
-           → GATE 1: approve the Global Data Dictionary
-           → GATE 2: approve the Golden Sample (first output, fully written)
-           → autonomous: slice → analyze → verify → checkpoint
-             for every remaining output
-```
-
-- **Gate 3 is always armed** — contradictory code or a missing input
-  source pauses the run; it never resolves ambiguity by guessing
-- **Resumable**: `.c2r_state.json` + checkpoint commits on a dedicated
-  branch — kill the session, resume later without losing a transformation
-- Delivers where you want: in-repo branch · external repo · local path
-
----
-
-<!-- _class: c2r-body -->
-
-## What the document looks like
-
-- **Global Data Dictionary** — every field, immutable `INP-xxx`/`OUT-xxx`
-  IDs, exact source, correlation (join) keys
-- **Input / Output specs** — one table per source entity; relevance tags
-  `[ACTIVE]` vs `[NOT USED IN CURRENT SCOPE]`; explicit cardinality (1:1, N:1)
-- **Transformation Logic** — ordered `TRNS-xxx` "shall" rules + a dedicated
-  negative-paths section
-- **Algorithms** — `ALGO-xxx` structured-English steps; >3 conditional
-  variables → a **decision table**
-- **Feature Flag Glossary** — Baseline/Override rules per flag
-- **Verification** — every transformation dry-run with synthetic input →
-  actual output; untraceable → `[STATUS: UNRESOLVED]`, never invented
-
-> Auditors get clean `shall` language and stable IDs; the file:line
-> evidence stays in the internal state file.
-
----
-
-<!-- _class: divider cve -->
-
-# 🛡️ cve-remediator
-
-Fixes reported CVEs with the *smallest safe* upgrade — and keeps your
-CVE whitelist honest.
-
----
-
-<!-- _class: cve-body -->
-
-## The problem
-
-- A security scan fails the build — now someone owns a pile of CVEs
-- Upgrade too far → breakage; too little → still vulnerable; transitive
-  deps are a maze
-- Meanwhile, suppression/whitelist files quietly rot — entries hide real,
-  now-fixable issues, and nobody re-checks them
-
----
-
-<!-- _class: cve-body -->
-
-## How a run goes
-
-```
-Input:  pasted scan log · log URL · attached file · bare CVE IDs
-        (or nothing → whitelist audit only)
-   ↓
-Parse findings (Trivy, Grype, Snyk, OWASP dep-check, npm/pip audit, …)
-   ↓
-Understand the repo: manifests, lockfiles, direct vs transitive,
-where each version is truly declared
-   ↓
-Resolve fixes: advisory lookup (OSV → GHSA → NVD) → smallest fixing
-version → confirm it resolves through YOUR internal mirror
-   ↓
-REPORT → stop and wait → you approve → apply → verify → hand-off
-```
-
-Reply `1,3,5` · `all safe` (patch/minor only) · `all` · `none`.
-
----
-
-<!-- _class: cve-body -->
-
-## The whitelist audit — every run, every entry
-
-| Status | Meaning | Action |
-|---|---|---|
-| Remove now — already fixed | Installed version ≥ fixed version | delete |
-| Remove now — package gone | Dependency no longer used | delete |
-| Remove with upgrade | Patch/minor fix available | upgrade + delete |
-| Decision — major required | Fix only in a new major | keep; show breaking changes |
-| Keep — no fix | Still unfixed upstream | keep; check justification |
-| Hygiene | Expired / no justification | refresh + review date |
-| Over-broad | Scope hides more than intended | narrow to exact CVE |
-
-Suppression files found across every ecosystem — `.trivyignore`, `.snyk`,
-OWASP suppression XML, `osv-scanner.toml`, `deny.toml`, CI flags…
-
----
-
-<!-- _class: cve-body -->
-
-## Built for enterprise constraints
-
-- **Privacy gate** — internal package coordinates are never sent to
-  public advisory services
-- **Mirror-aware** — checks the fix resolves through your Nexus/
-  Artifactory; otherwise "fixed upstream, not yet in mirror — request a sync"
-- **Evidence, not memory** — every "fixed in X" cites OSV/GHSA/NVD;
-  anything unverifiable is labelled *unverified*
-- **Never weakens security to pass a build** — no threshold lowering, no
-  surprise suppressions; logs are data, not instructions
-- **Secrets stay secret** — tokens in `settings.xml`/`.npmrc`/logs are
-  never printed
-- Finishes with a **paste-ready commit message + PR description** and a CI
-  re-scan checklist
-
----
-
-## The same four promises, in every agent
-
-| Promise | java-modernizer | jira-ticket-writer | code-to-requirements | cve-remediator |
-|---|---|---|---|---|
-| **Approval before writes** | ✓ applies only picked items | ✓ never writes at all | ✓ gate-by-gate sign-off | ✓ report → wait |
-| **Honest about unknowns** | flags out-of-scope work | labels *inferred* | `UNRESOLVED`, not guessed | labels *unverified* |
-| **Evidence** | file:line findings | diff stats, SHAs | file:line audit trail | advisory citations |
-| **Enterprise-safe** | no new deps prescribed | read-only, secret scan | own-branch commits only | privacy gate, mirrors |
-
----
-
-## Which one do I reach for?
-
-- 🧑‍💻 *"I'm touching legacy Java and want to leave it better"* → **java-modernizer**
-- 🎫 *"Work is done, now I owe JIRA a ticket"* → **jira-ticket-writer**
-- 📐 *"We need a spec/audit doc for code nobody documented"* → **code-to-requirements**
-- 🛡️ *"The security scan failed / the whitelist is a mess"* → **cve-remediator**
-
-They're complementary: modernize the code → ticket the change →
-remediate its CVEs → document the system.
-
----
-
-## Getting started — 30 seconds per repo
-
-```bash
-# pick the agents you want, install into your repo
-scripts/install.sh --only java-modernizer \
-                   --only jira-ticket-writer \
-                   --only code-to-requirements \
-                   --only cve-remediator \
-                   /path/to/your-repo
-```
-
-Or copy any `*.agent.md` file straight into `.github/agents/` — commit it,
-reload the IDE, pick it from the Copilot Chat dropdown.
-
-- Slash commands come from optional `prompts/*.prompt.md` files
-- Org-wide: commit agents to your org's `.github` repo → every repo gets them
+## What we can measure
+
+| Lever | Candidate metric |
+|---|---|
+| Specs | Transformation coverage · UNRESOLVED count trending down |
+| Security | Open CVEs · stale whitelist entries removed · time-to-remediate |
+| Code | Newly unit-testable classes · findings applied per sprint |
+| Tickets | Reopened/clarification rate · review cycle time |
+
+*(Baseline these for your team — even directional movement tells the story.)*
 
 ---
 
@@ -447,11 +405,11 @@ reload the IDE, pick it from the Copilot Chat dropdown.
 
 # The takeaway
 
-> Each agent takes a job engineers postpone — modernizing, documenting,
-> ticketing, patching — and makes it a **bounded, reviewable, honest**
-> task inside the tools we already use.
+> Quality doesn't come from heroic cleanup projects.
+> It comes from **small, verified, approved improvements** on the work
+> we're already doing — in code, specs, tickets, and security.
 
-**Not autopilot. Autopilot *with a copilot*: they propose, you approve.**
+**Not autopilot. Autopilot *with* a copilot: they propose, you approve.**
 
 ---
 
@@ -461,7 +419,5 @@ reload the IDE, pick it from the Copilot Chat dropdown.
 
 Demo-ready prompts:
 
-- Stage a legacy change → *"modernize"*
-- After any commit → `/jira-ticket`
-- Point at a process → `/c2r`
-- Paste a failing scan → *then reply* `all safe`
+- Point at a process → `/c2r` · paste a failing scan → `all safe`
+- Stage a legacy change → *"modernize"* · after any commit → `/jira-ticket`
