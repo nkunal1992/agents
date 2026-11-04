@@ -4,62 +4,22 @@ One theme: **each agent makes the quality of our work better, and a human
 always approves before anything changes.**
 
 Talk like you're explaining to a colleague, not reading a spec.
-~15 minutes + questions. Agents in alphabetical order, same as the slides.
+~15 minutes + questions. Same order as the slides: java-modernizer →
+jira-ticket-writer → code-to-requirements → cve-remediator.
 
 ---
 
 ## Opening (30 seconds)
 
 - "Quality doesn't usually fail in one big way. It leaks in small ones —
-  code nobody can test, specs nobody wrote, tickets nobody understood,
+  code nobody can test, tickets nobody understood, specs nobody wrote,
   security fixes nobody wanted to touch."
 - "We built four Copilot agents. Each one plugs a different leak."
 - "The rule in all four: **the agent proposes, a human approves.**"
 
 ---
 
-## 1. code-to-requirements 📐
-
-- **What it is, in one line:** "It reads code and writes the requirements
-  document the code never had."
-- **Analogy:** "Like tasting a finished dish and writing down the exact
-  recipe — so exact that another kitchen could cook the same dish."
-- **Why quality improves:** "Today, rebuilding or auditing a system means
-  *guessing* what the old code does. This agent writes down what the code
-  *actually* does — and it checks every rule against the real code before
-  writing it."
-- **The honesty bit:** "If it can't figure something out, it writes
-  `UNRESOLVED` — it never fills gaps with a guess. An honest 'we don't
-  know' is worth more than a confident wrong answer."
-- **How the team uses it:** "Before a rebuild or an audit — get the real
-  spec first. Then we can even generate tests straight from that spec."
-- **One-line closer:** "The code already knows the rules. This just
-  writes them down — and proves them."
-
----
-
-## 2. cve-remediator 🛡️
-
-- **What it is, in one line:** "When a security scan finds vulnerable
-  libraries, it fixes them — carefully."
-- **Analogy:** "Like a pharmacist: the *smallest dose* that cures,
-  checking the medicine is actually in stock before prescribing."
-- **Why quality improves:** "Fixing a vulnerability usually means
-  upgrading a library — and big upgrades break things. This agent picks
-  the *smallest safe upgrade*, checks it's verified, and proves it works
-  in our build. Smaller change = less risk."
-- **The hidden gem:** "Every project keeps a 'do not report' list for
-  security warnings. Those lists go stale — they keep hiding problems
-  that were fixed long ago. This agent reviews that list *every single
-  run* and cleans it up."
-- **How the team uses it:** "A scan fails → paste the log → it reports →
-  we say 'all safe' → it applies the low-risk fixes, runs our tests, and
-  writes the pull request notes for us."
-- **One-line closer:** "Real exposure goes down. Nothing hides."
-
----
-
-## 3. java-modernizer ☕
+## 1. java-modernizer ☕
 
 - **What it is, in one line:** "A senior architect looking over your
   shoulder, suggesting small improvements to the code you're already
@@ -80,7 +40,7 @@ Talk like you're explaining to a colleague, not reading a spec.
 
 ---
 
-## 4. jira-ticket-writer 🎫
+## 2. jira-ticket-writer 🎫
 
 - **What it is, in one line:** "You finished the work — it writes the
   JIRA ticket."
@@ -100,16 +60,71 @@ Talk like you're explaining to a colleague, not reading a spec.
 
 ---
 
+## 3. code-to-requirements 📐
+
+- **What it is, in one line:** "It reads code and writes the requirements
+  document the code never had."
+- **Analogy:** "Like tasting a finished dish and writing down the exact
+  recipe — so exact that another kitchen could cook the same dish."
+- **Why quality improves:** "Today, rebuilding or auditing a system means
+  *guessing* what the old code does. This agent writes down what the code
+  *actually* does — and it checks every rule against the real code before
+  writing it."
+- **The honesty bit:** "If it can't figure something out, it writes
+  `UNRESOLVED` — it never fills gaps with a guess. An honest 'we don't
+  know' is worth more than a confident wrong answer."
+- **How the team uses it:** "Before a rebuild or an audit — get the real
+  spec first. Then we can even generate tests straight from that spec."
+- **One-line closer:** "The code already knows the rules. This just
+  writes them down — and proves them."
+
+---
+
+## 4. cve-remediator 🛡️
+
+- **What it is, in one line:** "When a security scan finds vulnerable
+  libraries, it fixes them — carefully."
+- **Analogy:** "Like a pharmacist: the *smallest dose* that cures,
+  checking the medicine is actually in stock before prescribing."
+- **Why quality improves:** "Fixing a vulnerability usually means
+  upgrading a library — and big upgrades break things. This agent picks
+  the *smallest safe upgrade*, checks it's verified, and proves it works
+  in our build. Smaller change = less risk."
+- **The hidden gem:** "Every project keeps a 'do not report' list for
+  security warnings. Those lists go stale — they keep hiding problems
+  that were fixed long ago. This agent reviews that list *every single
+  run* and cleans it up."
+- **How the team uses it:** "A scan fails → paste the log → it reports →
+  we say 'all safe' → it applies the low-risk fixes, runs our tests, and
+  writes the pull request notes for us."
+- **One-line closer:** "Real exposure goes down. Nothing hides."
+
+---
+
 ## How it fits our day (one line per step)
 
 - Old Java code? → **modernizer** before you commit
 - Work finished? → **ticket-writer** before you open JIRA
-- Security scan failed? → **cve-remediator**
 - No documentation? → **code-to-requirements**
+- Security scan failed? → **cve-remediator**
 
 "Each agent makes one artifact better — and every artifact feeds the
 next step. Better specs make better tests. Better tickets make better
 reviews. Better reviews catch more bugs."
+
+---
+
+## How to use them (45 seconds)
+
+- **Setup:** "One file per agent — copy it into your repo's
+  `.github/agents/` folder, reload the IDE, done. Thirty seconds."
+- **Start it:** "Open Copilot Chat → pick the agent from the dropdown —
+  it's a normal conversation from there."
+- **Shortcuts:** "Some agents have slash commands — `/jira-ticket`,
+  `/cve-fix`, `/c2r` — so common jobs are one word."
+- **Team rollout:** "Commit the files so the whole team gets them — or
+  put them in the org's `.github` repo and *every* repo gets them."
+- **Where:** "VS Code and JetBrains — same agents, same behavior."
 
 ---
 
