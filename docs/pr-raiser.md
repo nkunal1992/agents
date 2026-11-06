@@ -93,17 +93,32 @@ contents against the actual diff — real verification instead of attestation.
 one of these stores; afterwards the lookup finds it silently and never asks
 again:
 
+Lookup order at fetch time: `JIRA_TOKEN` env → `git credential fill` →
+Python `keyring` → `~/.netrc` → password-manager CLIs if you use one.
+Pick any store; whichever resolves first is used silently:
+
 ```bash
-# 1. env var (add to your shell profile for persistence)
+# 1. git credential store — usually preconfigured (osxkeychain/wincred/libsecret)
+printf 'protocol=https\nhost=<jira-host>\nusername=<user>\npassword=<pat>\n\n' \
+  | git credential approve
+
+# 2. OS keychain — secret never touches a file or command line
+security add-generic-password -s jira-pat -a "$USER" -w     # macOS, prompts interactively
+secret-tool store --label="JIRA PAT" service jira-pat       # Linux
+# Windows: git credential (above) lands in Credential Manager via wincred;
+# or `keyring set_password jira pat` with the Python keyring package
+
+# 3. env var (add to your shell profile for persistence)
 export JIRA_TOKEN=<personal-access-token>            # JIRA Server/DC: Bearer PAT
 export JIRA_USER=<you@corp> JIRA_TOKEN=<api-token>   # Jira Cloud: basic auth
 
-# 2. OS keychain (most secure — the secret never touches a file or command line)
-security add-generic-password -s jira-pat -a "$USER" -w     # macOS, prompts interactively
-secret-tool store --label="JIRA PAT" service jira-pat       # Linux
-
-# 3. ~/.netrc — append:  machine <jira-host> login <user> password <pat>
+# 4. ~/.netrc — append:  machine <jira-host> login <user> password <pat>
+# 5. password-manager CLI — `op read` (1Password) / `bw get password` (Bitwarden)
 ```
+
+Note: `cmdkey` alone is NOT a working store — it can create/list Windows
+credentials but cannot return the secret; retrieval needs `git credential`
+or `keyring` (both read Credential Manager).
 
 The agent never runs a store/write itself — it emits the command for you to
 run once (never-mutate rule). Without persistence configured it asks for

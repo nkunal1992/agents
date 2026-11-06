@@ -141,20 +141,30 @@ the interview format back.
 
    **Token lookup — in order, silently:**
    1. `JIRA_TOKEN` env var
-   2. OS keychain — macOS `security find-generic-password -s jira-pat -w` ·
-      Linux `secret-tool lookup service jira-pat` · Windows `cmdkey` entry
-   3. `~/.netrc` — `curl -n` picks it up automatically
+   2. `git credential fill` — helper-agnostic and usually preconfigured
+      (osxkeychain on macOS, wincred on Windows, libsecret on Linux):
+      `printf 'protocol=https\nhost=<jira-host>\n\n' | git credential fill`
+   3. Python `keyring` — `python -c "import keyring;
+      print(keyring.get_password('jira','pat'))"` — reads macOS Keychain /
+      Secret Service / Windows Credential Manager transparently
+      (never `cmdkey` — it lists but cannot return the secret)
+   4. `~/.netrc` — `curl -n` picks it up automatically
    Found → fetch immediately, no asking. Not found → ask for the PAT once,
    fetch, and move on — a single optional line ("I can store it so this
    isn't asked again — say the word") is the most you volunteer. Only if
    the user wants persistence do you walk them through storing it — and
    you EMIT the command for the USER to run (you never mutate — storing is
    their act):
+   - `git credential` store: `printf 'protocol=https\nhost=<host>\n
+      username=<user>\npassword=<pat>\n\n' | git credential approve` —
+      lands in whichever helper is configured (osxkeychain/wincred/…)
    - macOS: `security add-generic-password -s jira-pat -a "$USER" -w`
      (prompts for the secret interactively — never on the command line)
    - Linux: `secret-tool store --label="JIRA PAT" service jira-pat`
    - `~/.netrc`: append `machine <jira-host> login <user> password <pat>`
    - env: add `export JIRA_TOKEN=...` to their shell profile
+   - Password-manager CLI, if they already use one:
+     `op item create`/`bw` — read via `op read`/`bw get password`
 
    Compare the
    fetched summary+description against the real diff scope — do the named
@@ -271,9 +281,10 @@ curl -u <user>:<pass> -H "Content-Type: application/json" -X POST \
 Only these commands: `git status`, `git log`, `git diff`, `git show`,
 `git merge-base`, `git rev-parse`, `git cat-file`, `git branch`, `git fetch`
 (solely to freshen refs for the up-to-date check — nothing else), `ls`,
-`find`, file reads, and read-only credential lookups (`security
-find-generic-password`, `secret-tool lookup`, `cmdkey /list`, `printenv
-JIRA_TOKEN`) — plus ONE scoped exception: `curl` is permitted **only** for
+`find`, file reads, and read-only credential lookups (`git credential
+fill`, `security find-generic-password`, `secret-tool lookup`, `keyring`
+reads, `op read`/`bw get`, `printenv JIRA_TOKEN`) — plus ONE scoped
+exception: `curl` is permitted **only** for
 the JIRA REST GET on the user-supplied ticket URL (read-only fetch for
 content verification; credentials come from `$JIRA_TOKEN`/keychain/netrc).
 No other network calls — no Bitbucket, no other curl, no token on any other
