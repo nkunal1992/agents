@@ -13,8 +13,10 @@ process checklist embedded in the PR itself.
   whether the private-build commit is actually inside the PR's range are
   checked in git, not taken on faith. User-only facts are recorded verbatim —
   never guessed.
-- **Read-only**: cannot edit files; shell access is whitelisted to read-only
-  git. The change assessment states and recommends — it never fixes.
+- **Never mutates**: cannot edit files, commit, merge, rebase, or push — and
+  never creates or merges the PR itself (no CLI, no API). Raising the PR is
+  your act; the agent produces the content. Shell access is whitelisted to
+  read-only git plus `git fetch` for ref freshness.
 - **Honest gating**: unanswered or failed checks render as `⚠` blockers in the
   draft — a padded ✅ is never produced.
 
@@ -36,7 +38,7 @@ Answer these in one reply — the agent re-asks only what comes back blank:
 
 | # | Question | Verified how |
 |---|---|---|
-| 0 | Merge-target branch | `git merge-base` — required to compute the diff |
+| 0 | Merge-target branch | `git merge-base` — required to compute the diff; the branch must then be *on top of* the target (`git merge-base --is-ancestor <target> HEAD` vs the freshest ref) — a behind/diverged branch stops the run with the missing commits and a sync instruction until you rebase and confirm |
 | 1 | Private build ID **+ the commit it was triggered from** | SHA must be inside the PR's commit range — the classic wrong-build catch |
 | 2 | Base build ID **+ its commit** | SHA must exist in the repo |
 | 3 | Any diff in **binaries and XMLs** between base and private builds with the feature flag **disabled**? | User attestation — the agent can't reach your build system |
@@ -54,9 +56,10 @@ Answer these in one reply — the agent re-asks only what comes back blank:
 ## Process checklist  | Check | Evidence | Status | — ✅ git-verified · ✍ attested · ⚠ blocker
 ```
 
-If a gate fails — no JIRA key in any commit, MustFix without the log update,
-private build triggered outside the PR range, missing build info — the draft
-is still produced but headed `⚠ BLOCKERS — do not raise yet:` with the list.
+If a gate fails — branch behind the merge target, no JIRA key in any commit,
+MustFix without the log update, private build triggered outside the PR range,
+missing build info — the draft is still produced but headed `⚠ BLOCKERS —
+do not raise yet:` with the list.
 
 ### Follow-up replies
 

@@ -15,8 +15,9 @@ Raise a pull request for the current branch.
 
 ${input:target:Merge-target branch (e.g. release/10.5) — ask me if blank}
 
-Follow the pr-raiser flow: establish the scope vs the merge base, collect the
-traceability checklist (private/base builds + commits, binary/XML diff,
+Follow the pr-raiser flow: establish the scope vs the merge base, verify the
+branch is on top of the target (ask me to rebase first if it isn't), collect
+the traceability checklist (private/base builds + commits, binary/XML diff,
 MustFix, pct-documentation, JIRA), assess the change read-only, then emit the
 PR title and paste-ready description with the process checklist table. Flag
 any blockers — do not smooth them over.
