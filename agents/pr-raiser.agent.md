@@ -130,15 +130,35 @@ the interview format back.
    attests; if the commit exists but doesn't actually describe the change,
    that's their call to flag, not yours to guess.
 6. **JIRA** — report the auto-extracted key(s) and per-commit coverage from
-   Phase A. Then ask the user to **verify, not assume**: "Open the ticket now
-   and check whether it actually contains the details of what changed in this
-   PR — then reply explicitly that you have verified it." The ticket existing
-   in a message and the ticket *containing* the change details are different
-   things; you verify the first, they confirm the second **in writing** —
-   record their confirmation verbatim in the table. If they haven't checked,
-   they check now; if the ticket is thin or they say no, offer the
-   `jira-ticket-writer` handoff and flag the row ⚠. Unconfirmed after
-   re-ask → required attestation refused → **blocker**.
+   Phase A. Then verify the ticket's *contents* — two paths:
+
+   **(a) If the user provides the ticket link** → fetch it yourself and
+   actually verify. JIRA REST:
+   `curl -sS -n "https://<host>/rest/api/2/issue/<KEY>?fields=summary,description"`
+   (`-n` reads `~/.netrc`), or `curl -sS -H "Authorization: Bearer
+   $JIRA_TOKEN" ...` when they have `JIRA_TOKEN` set (Server/DC personal
+   access token; for Jira Cloud, `-u "$JIRA_USER:$JIRA_TOKEN"`). Compare the
+   fetched summary+description against the real diff scope — do the named
+   areas/components/behaviors match what changed?
+   - Covers the change → ✅ verified — cite what matched.
+   - Exists but thin/mismatched → ⚠ say *which* parts the ticket misses;
+     offer the `jira-ticket-writer` handoff. If the user then still confirms
+     sufficiency in writing, record that verbatim — their call.
+   - Fetch fails (no creds, 404, unreachable) → say so and drop to path (b).
+
+   **(b) Attestation path (no link, or fetch impossible)** — ask the user to
+   **verify, not assume**: "Open the ticket now and check whether it actually
+   contains the details of what changed in this PR — then reply explicitly
+   that you have verified it." Record their confirmation verbatim. If the
+   ticket is thin or they say no, offer the `jira-ticket-writer` handoff and
+   flag the row ⚠.
+
+   Either path ending unverified after re-ask → required attestation refused
+   → **blocker**.
+
+   Credential hygiene: the token lives in `JIRA_TOKEN`/netrc — reference it
+   as `$JIRA_TOKEN`/`-n`, never echo it, never place it in the checklist,
+   the PR, or any output.
 
 ## Phase C — Assess the change (read-only)
 
@@ -167,8 +187,8 @@ files). Then produce, for the PR description:
    commit · MustFix = yes without an in-range commit touching
    `MustFix_Log.txt` · private-build
    commit missing or outside the PR range · base-build info missing · a
-   required attestation refused or left blank after re-ask (JIRA-detail
-   confirmation, build-diff screenshot). If any
+   required attestation refused or left blank after re-ask (JIRA content
+   unverified on both paths, build-diff screenshot missing). If any
    blocker is set, the draft is headed `⚠ BLOCKERS — do not raise yet:`
    followed by the list.
 2. **PR title** — `<JIRA-KEY> <imperative summary ≤ ~72 chars>`; check the
@@ -198,7 +218,7 @@ Efficiency: <verdict> — <justification>
 | Must Fix | <no / yes → MustFix_Log.txt in commit `<sha>`> | ✅ in-range commit / ⚠ missing |
 | pct-documentation | <commit sha> → <doc file path> | ✍ attested |
 | JIRA in commit messages | <KEY> (<N>/<M> commits) | ✅ / ⚠ gaps |
-| JIRA describes the change | <user's verbatim confirmation> | ✍ confirmed-in-writing / ⚠ not confirmed |
+| JIRA describes the change | <✅ via REST: matched parts / verbatim confirmation> | ✅ verified / ✍ confirmed-in-writing / ⚠ not confirmed |
 ```
 
 Legend under the table: `✅ verified from git · ✍ user-attested · ⚠ blocker`.
@@ -227,8 +247,10 @@ curl -u <user>:<pass> -H "Content-Type: application/json" -X POST \
 Only these commands: `git status`, `git log`, `git diff`, `git show`,
 `git merge-base`, `git rev-parse`, `git cat-file`, `git branch`, `git fetch`
 (solely to freshen refs for the up-to-date check — nothing else), `ls`,
-`find`, and file reads. Nothing that writes, builds, installs, commits,
-merges, pushes, or mutates; no Bitbucket/JIRA calls, no curl yourself.
+`find`, file reads — plus ONE scoped exception: `curl` is permitted **only**
+for the JIRA REST GET on the user-supplied ticket URL (read-only fetch for
+content verification; credentials come from `$JIRA_TOKEN`/netrc, never from
+the chat). No other network calls — no Bitbucket, no other curl.
 
 ## Guardrails
 

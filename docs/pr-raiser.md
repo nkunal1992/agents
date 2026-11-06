@@ -46,7 +46,7 @@ Volunteering several answers at once is fine; blanks/refusals get re-asked:
 | 3 | Any diff in **binaries and XMLs** between base and private builds with the feature flag **disabled**? | User attestation — **screenshot of the comparison required for both `yes` and `no`** (`yes` additionally needs the differing paths/report). Refused after re-ask → blocker |
 | 4 | Must Fix items? If yes, is `MustFix_Log.txt` updated? | A **commit inside `git log <target>..HEAD`** must touch it — verified per-commit with the SHA cited. An update elsewhere (other branch/repo, uncommitted) does not clear the gate: the log update travels with the merge |
 | 5 | pct-documentation commit ID **+ the file path** where the change is captured | User attestation (different repo) |
-| 6 | Open the JIRA ticket and **confirm in writing** you verified it contains the change details | Keys auto-verified in commit messages; your verbatim confirmation is recorded in the table. Unconfirmed after re-ask → blocker |
+| 6 | Provide the ticket link **or** open it yourself and confirm in writing | With a link the agent **fetches it via JIRA REST and verifies the contents against the diff** (needs `JIRA_TOKEN` or `~/.netrc` — see setup below); without one, your verbatim written confirmation is recorded. Unverified after re-ask → blocker |
 
 ## What you get
 
@@ -81,6 +81,23 @@ curl -u <user>:<pass> -H "Content-Type: application/json" -X POST \
   "https://<bb-host>/rest/api/1.0/projects/<PROJ>/repos/<REPO>/pull-requests" \
   -d '{"title":"…","description":"…","fromRef":{"id":"refs/heads/<src>"},"toRef":{"id":"refs/heads/<dst>"}}'
 ```
+
+### Optional: JIRA content verification setup
+
+With a ticket link, the agent can fetch the ticket via `GET
+<host>/rest/api/2/issue/<KEY>?fields=summary,description` and compare its
+contents against the actual diff — real verification instead of attestation.
+Configure one of:
+
+```bash
+export JIRA_TOKEN=<personal-access-token>     # JIRA Server/DC: Bearer PAT
+export JIRA_USER=<you@corp> JIRA_TOKEN=<api-token>   # Jira Cloud: basic auth
+# or: credentials in ~/.netrc (curl -n)
+```
+
+The token is read from the environment — it never enters the chat, the
+checklist, or the PR. Fetch unavailable (no creds, unreachable host, 404) →
+the agent falls back to your written confirmation; nothing else changes.
 
 ## Customizing for your team
 
