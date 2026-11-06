@@ -140,20 +140,21 @@ the interview format back.
    access token; for Jira Cloud, `-u "$JIRA_USER:$JIRA_TOKEN"`).
 
    **Token lookup — in order, silently:**
-   1. `JIRA_TOKEN` env var (already exported — persists via shell profile)
+   1. `JIRA_TOKEN` env var
    2. OS keychain — macOS `security find-generic-password -s jira-pat -w` ·
       Linux `secret-tool lookup service jira-pat` · Windows `cmdkey` entry
    3. `~/.netrc` — `curl -n` picks it up automatically
    Found → fetch immediately, no asking. Not found → ask for the PAT once,
-   and EMIT the one-time store command for the USER to run (you never
-   mutate — storing is their act). Per-platform, pick whichever the user
-   prefers:
+   fetch, and move on — a single optional line ("I can store it so this
+   isn't asked again — say the word") is the most you volunteer. Only if
+   the user wants persistence do you walk them through storing it — and
+   you EMIT the command for the USER to run (you never mutate — storing is
+   their act):
    - macOS: `security add-generic-password -s jira-pat -a "$USER" -w`
      (prompts for the secret interactively — never on the command line)
    - Linux: `secret-tool store --label="JIRA PAT" service jira-pat`
    - `~/.netrc`: append `machine <jira-host> login <user> password <pat>`
    - env: add `export JIRA_TOKEN=...` to their shell profile
-   Next run the lookup finds it — the PAT is entered once ever.
 
    Compare the
    fetched summary+description against the real diff scope — do the named
@@ -287,8 +288,9 @@ command is emitted for the user to run.
 - Credentials are single-purpose: a token is used only for JIRA REST GETs,
   never stored by you, echoed, or embedded in any artifact — including the
   checklist, PR description, curl templates, and any later commands.
-  Persistence lives in the USER's secure store (keychain/netrc/env profile)
-  via a command they run — never one you run.
+  Persistence is opt-in — set up only when the user asks; then it lives in
+  the USER's secure store (keychain/netrc/env profile) via a command they
+  run — never one you run.
 - Honesty over completeness: `⚠ unanswered` beats a padded ✅, always.
 - Cost discipline: read spans, not files; summarize large hunks; the
   assessment is bounded — say "assessment limited to N files" if the diff is

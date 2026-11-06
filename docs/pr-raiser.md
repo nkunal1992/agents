@@ -88,8 +88,10 @@ With a ticket link, the agent can fetch the ticket via `GET
 <host>/rest/api/2/issue/<KEY>?fields=summary,description` and compare its
 contents against the actual diff — real verification instead of attestation.
 
-**Store the PAT once, reuse forever** — the agent looks it up in this order
-and never asks again:
+**Optional: store the PAT once, reuse forever** — if you want persistence
+(say so during the interview), the agent guides you through storing it in
+one of these stores; afterwards the lookup finds it silently and never asks
+again:
 
 ```bash
 # 1. env var (add to your shell profile for persistence)
@@ -104,8 +106,8 @@ secret-tool store --label="JIRA PAT" service jira-pat       # Linux
 ```
 
 The agent never runs a store/write itself — it emits the command for you to
-run once (never-mutate rule). If none are configured it asks once and offers
-the store command; afterwards the lookup finds it silently.
+run once (never-mutate rule). Without persistence configured it asks for
+the PAT once per run and proceeds — no setup walkthrough unless you ask.
 
 The token is **single-purpose**: wherever it comes from — env, keychain,
 netrc, or pasted in chat — it authorizes only JIRA REST GETs: never echoed,
