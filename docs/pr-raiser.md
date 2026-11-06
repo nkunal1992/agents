@@ -38,11 +38,11 @@ Answer these in one reply — the agent re-asks only what comes back blank:
 
 | # | Question | Verified how |
 |---|---|---|
-| 0 | Merge-target branch | `git merge-base` — required to compute the diff; the branch must then be *on top of* the target (`git merge-base --is-ancestor <target> HEAD` vs the freshest ref) — a behind/diverged branch stops the run with the missing commits and a sync instruction until you rebase and confirm |
+| 0 | Merge-target branch | **Always asked explicitly — never assumed** (not even `main`/`master`); the repo default may be offered as a candidate but requires your confirmation. Then `git merge-base` computes the diff, and the branch must be *on top of* the target (`git merge-base --is-ancestor <target> HEAD` vs the freshest ref) — a behind/diverged branch stops the run with the missing commits and a sync instruction until you rebase and confirm |
 | 1 | Private build ID **+ the commit it was triggered from** | SHA must be inside the PR's commit range — the classic wrong-build catch |
 | 2 | Base build ID **+ its commit** | SHA must exist in the repo |
 | 3 | Any diff in **binaries and XMLs** between base and private builds with the feature flag **disabled**? | User attestation — the agent can't reach your build system |
-| 4 | Must Fix items? If yes, is `MustFix_Log.txt` updated? | File presence in the diff, or an attested path elsewhere |
+| 4 | Must Fix items? If yes, is `MustFix_Log.txt` updated? | A **commit inside `git log <target>..HEAD`** must touch it — verified per-commit with the SHA cited. An update elsewhere (other branch/repo, uncommitted) does not clear the gate: the log update travels with the merge |
 | 5 | pct-documentation commit ID **+ the file path** where the change is captured | User attestation (different repo) |
 | 6 | Does the JIRA ticket describe what changed? | Keys auto-verified in commit messages; ticket *contents* attested by you |
 

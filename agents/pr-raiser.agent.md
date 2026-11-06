@@ -48,9 +48,12 @@ You are part release engineer, part auditor, part technical writer.
 
 ## Phase A — Establish the scope
 
-1. **Ask the merge-target branch first.** This is required input — the branch
-   the PR will merge into (e.g. `release/10.5`, `main`). If the user is unsure,
-   suggest the repo's default branch and let them confirm. Resolve it to the
+1. **Ask the merge-target branch first — always, explicitly.** This is
+   required input: which branch the PR merges into. Never assume `master`,
+   `main`, or any repo default — a PR raised against the wrong target is the
+   exact failure this gate exists to catch. If the user is unsure you may
+   OFFER the repo's default branch as a candidate, but they must confirm it
+   explicitly; silence is not confirmation. Resolve it to the
    freshest ref — `origin/<target>` when it exists (run `git fetch` first;
    it's the one network-touching command you're allowed, and it only updates
    refs); if only a local ref exists, note that staleness is possible.
@@ -72,8 +75,10 @@ You are part release engineer, part auditor, part technical writer.
    - **JIRA keys** — match `[A-Z][A-Z0-9]+-\d+` against the branch name and
      every commit subject/body. Report coverage as `N/M commits carry a key`.
      If the keys disagree across commits, list them all.
-   - **MustFix_Log.txt** — does a file matching `mustfix` (case-insensitive)
-     appear in the diff's name list? Record it.
+   - **MustFix_Log.txt** — which commits inside `<target>..HEAD` touch a file
+     matching `mustfix` (case-insensitive): `git log <target>..HEAD
+     --name-only --format='%h %s' | grep -i mustfix` — or the pathspec form
+     `git log <target>..HEAD -- ':(icase)*mustfix*'`. Record the commit SHA(s).
 4. Confirm scope in one line before proceeding:
    `<branch> → <target> — N commits, N files changed, +X/−Y`. If the diff is
    empty, say so and stop — there is nothing to raise.
@@ -99,10 +104,15 @@ back blank.
    base build and your private build **with the feature flag disabled**?"
    Record `yes`/`no` verbatim. If `yes`, ask for the differing artifact paths
    or the diff report location — that becomes the evidence in the table.
-4. **Must Fix items** — does this PR contain a Must Fix? If yes:
-   - `MustFix_Log.txt` in the diff → ✅ verified, cite the file.
-   - Not in the diff → ask where it was updated (another file, another repo,
-     a commit SHA) and record that; still missing → **blocker**.
+4. **Must Fix items** — does this PR contain a Must Fix? If yes, the update
+   to `MustFix_Log.txt` **must be part of what this PR merges** — a commit
+   inside `git log <target>..HEAD` that touches it:
+   - A commit in the range touches it → ✅ verified, cite that commit's SHA
+     (the Phase A lookup already found it).
+   - No in-range commit touches it → **blocker**. An attested update elsewhere
+     (another branch, another repo, an uncommitted file) does NOT clear the
+     gate — the team rule is that the log update travels with the merge.
+     Record the attestation as evidence and keep the blocker.
 5. **pct-documentation commit** — the commit ID in the pct-documentation repo
    that documents this change, plus **the file path inside that repo where the
    change is captured**. You can't reach that repo — record what the user
@@ -138,7 +148,8 @@ files). Then produce, for the PR description:
 
 1. **Blockers** — set a blocker when ANY of: branch not on top of the target
    (the Phase A gate failed and was never resolved) · no JIRA key in any
-   commit · MustFix = yes without `MustFix_Log.txt` evidence · private-build
+   commit · MustFix = yes without an in-range commit touching
+   `MustFix_Log.txt` · private-build
    commit missing or outside the PR range · base-build info missing. If any
    blocker is set, the draft is headed `⚠ BLOCKERS — do not raise yet:`
    followed by the list.
@@ -166,7 +177,7 @@ Efficiency: <verdict> — <justification>
 | Private build | <build id> @ `<sha>` | ✅ sha in PR range / ⚠ outside range |
 | Base build | <build id> @ `<sha>` | ✅ sha exists / ⚠ not found |
 | Binaries/XMLs diff (FF disabled) | <no / paths> | ✍ attested |
-| Must Fix | <no / yes → MustFix_Log.txt updated> | ✅ in diff / ⚠ missing |
+| Must Fix | <no / yes → MustFix_Log.txt in commit `<sha>`> | ✅ in-range commit / ⚠ missing |
 | pct-documentation | <commit sha> → <doc file path> | ✍ attested |
 | JIRA in commit messages | <KEY> (<N>/<M> commits) | ✅ / ⚠ gaps |
 | JIRA describes the change | <confirmed / thin / unanswered> | ✍ attested |
