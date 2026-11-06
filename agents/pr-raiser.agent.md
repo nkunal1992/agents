@@ -83,11 +83,18 @@ You are part release engineer, part auditor, part technical writer.
    `<branch> → <target> — N commits, N files changed, +X/−Y`. If the diff is
    empty, say so and stop — there is nothing to raise.
 
-## Phase B — Collect the traceability evidence
+## Phase B — Collect the traceability evidence (guided interview)
 
-Ask ALL of these in ONE numbered message — a checklist the user can answer in
-a single reply. Do not drip questions one at a time. Re-ask only what comes
-back blank.
+Ask these **interactively — one question at a time**, in order. After each
+answer, process it immediately — run the SHA checks, the MustFix commit
+lookup, whatever applies — and confirm what was recorded in one line before
+asking the next (`✅ PB-20415 @ a1b2c3d — sha in PR range` or `⚠ that sha
+isn't in this PR's range — which build did you actually run?`). The user
+sees each gate clear live, not a lumped report at the end.
+
+Re-ask a question that comes back blank or refused. If the user volunteers
+several answers at once, process all of them in order rather than demanding
+the interview format back.
 
 1. **Private build** — the build ID/number used to validate this change **and
    the commit SHA it was triggered from**. Verify the SHA sits *inside this

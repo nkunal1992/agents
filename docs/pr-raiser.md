@@ -34,7 +34,9 @@ everything else in one message.
 
 ## What it asks for
 
-Answer these in one reply — the agent re-asks only what comes back blank:
+A guided interview — one question at a time, with each gate verified and
+confirmed inline before the next (`✅ PB-20415 @ a1b2c3d — sha in PR range`).
+Volunteering several answers at once is fine; blanks/refusals get re-asked:
 
 | # | Question | Verified how |
 |---|---|---|
