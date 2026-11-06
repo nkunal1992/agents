@@ -139,30 +139,38 @@ the interview format back.
    $JIRA_TOKEN" ...` when they have `JIRA_TOKEN` set (Server/DC personal
    access token; for Jira Cloud, `-u "$JIRA_USER:$JIRA_TOKEN"`).
 
-   **Token lookup — in order, silently:**
+   **Token lookup — in order, silently.** Most users are on managed
+   Windows work laptops — detect the OS first and only try mechanisms
+   that exist (check availability before offering; `keyring`/`op`/
+   `secret-tool` may be absent):
    1. `JIRA_TOKEN` env var
-   2. `git credential fill` — helper-agnostic and usually preconfigured
-      (osxkeychain on macOS, wincred on Windows, libsecret on Linux):
+   2. `git credential fill` — the primary path on Windows (Git for Windows
+      ships wincred/GCM, zero install) and macOS (osxkeychain default):
       `printf 'protocol=https\nhost=<jira-host>\n\n' | git credential fill`
-   3. Python `keyring` — `python -c "import keyring;
-      print(keyring.get_password('jira','pat'))"` — reads macOS Keychain /
-      Secret Service / Windows Credential Manager transparently
+   3. Python `keyring`, if `python`+`keyring` are present —
+      `python -c "import keyring;
+      print(keyring.get_password('jira','pat'))"` — reads Credential
+      Manager / Keychain / Secret Service transparently
       (never `cmdkey` — it lists but cannot return the secret)
-   4. `~/.netrc` — `curl -n` picks it up automatically
+   4. netrc file — `%USERPROFILE%\_netrc` on Windows (underscore!),
+      `~/.netrc` on POSIX — `curl -n` picks it up automatically
    Found → fetch immediately, no asking. Not found → ask for the PAT once,
    fetch, and move on — a single optional line ("I can store it so this
    isn't asked again — say the word") is the most you volunteer. Only if
    the user wants persistence do you walk them through storing it — and
    you EMIT the command for the USER to run (you never mutate — storing is
-   their act):
-   - `git credential` store: `printf 'protocol=https\nhost=<host>\n
-      username=<user>\npassword=<pat>\n\n' | git credential approve` —
-      lands in whichever helper is configured (osxkeychain/wincred/…)
-   - macOS: `security add-generic-password -s jira-pat -a "$USER" -w`
-     (prompts for the secret interactively — never on the command line)
-   - Linux: `secret-tool store --label="JIRA PAT" service jira-pat`
-   - `~/.netrc`: append `machine <jira-host> login <user> password <pat>`
-   - env: add `export JIRA_TOKEN=...` to their shell profile
+   their act). Windows-first options:
+   - `git credential` store → Credential Manager (or osxkeychain on a
+     Mac): `printf 'protocol=https\nhost=<host>\nusername=<user>\n
+      password=<pat>\n\n' | git credential approve`
+   - DPAPI-encrypted file (Windows, no install, only their account can
+     decrypt): PowerShell `ConvertFrom-SecureString` → file
+   - `setx JIRA_TOKEN <pat>` (Windows env) or `export JIRA_TOKEN=...` in a
+     POSIX shell profile — note `setx` is plaintext in the registry;
+     Credential Manager/DPAPI preferred on managed machines
+   - netrc file (`_netrc` on Windows, `.netrc` elsewhere)
+   - macOS (minority): `security add-generic-password -s jira-pat -a
+      "$USER" -w` (prompts interactively — never on the command line)
    - Password-manager CLI, if they already use one:
      `op item create`/`bw` — read via `op read`/`bw get password`
 

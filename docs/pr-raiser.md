@@ -93,27 +93,37 @@ contents against the actual diff — real verification instead of attestation.
 one of these stores; afterwards the lookup finds it silently and never asks
 again:
 
-Lookup order at fetch time: `JIRA_TOKEN` env → `git credential fill` →
-Python `keyring` → `~/.netrc` → password-manager CLIs if you use one.
-Pick any store; whichever resolves first is used silently:
+Most users are on **managed Windows work laptops** (a few on macOS) — the
+lookup order is `JIRA_TOKEN` env → `git credential fill` → `keyring` (if
+python+keyring exist) → netrc → password-manager CLIs. Pick any store;
+whichever resolves first is used silently:
 
-```bash
-# 1. git credential store — usually preconfigured (osxkeychain/wincred/libsecret)
+**Windows (primary):**
+```powershell
+# 1. Credential Manager via git credential — Git for Windows ships the
+#    wincred/GCM helper preconfigured, zero install. Run in Git Bash:
 printf 'protocol=https\nhost=<jira-host>\nusername=<user>\npassword=<pat>\n\n' \
   | git credential approve
 
-# 2. OS keychain — secret never touches a file or command line
-security add-generic-password -s jira-pat -a "$USER" -w     # macOS, prompts interactively
-secret-tool store --label="JIRA PAT" service jira-pat       # Linux
-# Windows: git credential (above) lands in Credential Manager via wincred;
-# or `keyring set_password jira pat` with the Python keyring package
+# 2. DPAPI-encrypted file — no install, only YOUR account can decrypt:
+$pat = Read-Host -AsSecureString "JIRA PAT"
+$pat | ConvertFrom-SecureString | Set-Content ~\jira-pat.sec
 
-# 3. env var (add to your shell profile for persistence)
-export JIRA_TOKEN=<personal-access-token>            # JIRA Server/DC: Bearer PAT
-export JIRA_USER=<you@corp> JIRA_TOKEN=<api-token>   # Jira Cloud: basic auth
+# 3. Persistent env var — simplest but plaintext in the registry
+#    (HKCU\Environment); prefer Credential Manager/DPAPI on managed machines:
+setx JIRA_TOKEN "<pat>"
 
-# 4. ~/.netrc — append:  machine <jira-host> login <user> password <pat>
-# 5. password-manager CLI — `op read` (1Password) / `bw get password` (Bitwarden)
+# 4. %USERPROFILE%\_netrc — NOTE: underscore filename on Windows:
+#    machine <jira-host> login <user> password <pat>
+
+# 5. Python keyring, if python+keyring are installed:
+python -c "import keyring; keyring.set_password('jira','pat','<pat>')"
+```
+
+**macOS (minority):**
+```bash
+security add-generic-password -s jira-pat -a "$USER" -w   # prompts interactively
+# or the same git credential approve one-liner — osxkeychain is the default helper
 ```
 
 Note: `cmdkey` alone is NOT a working store — it can create/list Windows
