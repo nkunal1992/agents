@@ -102,8 +102,12 @@ back blank.
    --verify`) — an SHA that doesn't exist in the repo gets a ⚠.
 3. **Binaries/XMLs diff** — "Is there any diff in binaries and XMLs between the
    base build and your private build **with the feature flag disabled**?"
-   Record `yes`/`no` verbatim. If `yes`, ask for the differing artifact paths
-   or the diff report location — that becomes the evidence in the table.
+   Record `yes`/`no` verbatim. **Either way, require the user to attach a
+   screenshot of the build-diff comparison** — a `no` is precisely the claim
+   that needs proof. A `yes` additionally needs the differing artifact paths
+   or the diff report location. If no screenshot/evidence is provided, re-ask
+   once; still missing → the row reads `⚠ <answer> — no evidence` and it
+   counts as a required attestation refused → **blocker**.
 4. **Must Fix items** — does this PR contain a Must Fix? If yes, the update
    to `MustFix_Log.txt` **must be part of what this PR merges** — a commit
    inside `git log <target>..HEAD` that touches it:
@@ -119,10 +123,15 @@ back blank.
    attests; if the commit exists but doesn't actually describe the change,
    that's their call to flag, not yours to guess.
 6. **JIRA** — report the auto-extracted key(s) and per-commit coverage from
-   Phase A. Then ask: "Does the JIRA ticket itself describe what changed in
-   this PR?" — the ticket existing in a message and the ticket *containing*
-   the change details are different things; you verify the first, they attest
-   the second. If they say it's thin, offer the `jira-ticket-writer` handoff.
+   Phase A. Then ask the user to **verify, not assume**: "Open the ticket now
+   and check whether it actually contains the details of what changed in this
+   PR — then reply explicitly that you have verified it." The ticket existing
+   in a message and the ticket *containing* the change details are different
+   things; you verify the first, they confirm the second **in writing** —
+   record their confirmation verbatim in the table. If they haven't checked,
+   they check now; if the ticket is thin or they say no, offer the
+   `jira-ticket-writer` handoff and flag the row ⚠. Unconfirmed after
+   re-ask → required attestation refused → **blocker**.
 
 ## Phase C — Assess the change (read-only)
 
@@ -150,7 +159,9 @@ files). Then produce, for the PR description:
    (the Phase A gate failed and was never resolved) · no JIRA key in any
    commit · MustFix = yes without an in-range commit touching
    `MustFix_Log.txt` · private-build
-   commit missing or outside the PR range · base-build info missing. If any
+   commit missing or outside the PR range · base-build info missing · a
+   required attestation refused or left blank after re-ask (JIRA-detail
+   confirmation, build-diff screenshot). If any
    blocker is set, the draft is headed `⚠ BLOCKERS — do not raise yet:`
    followed by the list.
 2. **PR title** — `<JIRA-KEY> <imperative summary ≤ ~72 chars>`; check the
@@ -176,11 +187,11 @@ Efficiency: <verdict> — <justification>
 | Branch on top of target | <target> tip is ancestor of HEAD | ✅ verified / ⚠ diverged |
 | Private build | <build id> @ `<sha>` | ✅ sha in PR range / ⚠ outside range |
 | Base build | <build id> @ `<sha>` | ✅ sha exists / ⚠ not found |
-| Binaries/XMLs diff (FF disabled) | <no / paths> | ✍ attested |
+| Binaries/XMLs diff (FF disabled) | <no + screenshot / yes + paths> | ✍ attested + evidence / ⚠ no evidence |
 | Must Fix | <no / yes → MustFix_Log.txt in commit `<sha>`> | ✅ in-range commit / ⚠ missing |
 | pct-documentation | <commit sha> → <doc file path> | ✍ attested |
 | JIRA in commit messages | <KEY> (<N>/<M> commits) | ✅ / ⚠ gaps |
-| JIRA describes the change | <confirmed / thin / unanswered> | ✍ attested |
+| JIRA describes the change | <user's verbatim confirmation> | ✍ confirmed-in-writing / ⚠ not confirmed |
 ```
 
 Legend under the table: `✅ verified from git · ✍ user-attested · ⚠ blocker`.
