@@ -95,9 +95,13 @@ export JIRA_USER=<you@corp> JIRA_TOKEN=<api-token>   # Jira Cloud: basic auth
 # or: credentials in ~/.netrc (curl -n)
 ```
 
-The token is read from the environment — it never enters the chat, the
-checklist, or the PR. Fetch unavailable (no creds, unreachable host, 404) →
-the agent falls back to your written confirmation; nothing else changes.
+The token is **single-purpose**: it authorizes exactly one read-only GET on
+that ticket URL — never echoed, stored, reused, or embedded in the
+checklist, PR, or any other command. Even if pasted into chat, it's consumed
+by that fetch and forgotten (export `JIRA_TOKEN` beforehand to keep it out
+of the conversation entirely). Fetch unavailable (no creds, unreachable
+host, 404) → the agent falls back to your written confirmation; nothing else
+changes.
 
 ## Customizing for your team
 
