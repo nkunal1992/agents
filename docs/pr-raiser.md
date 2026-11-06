@@ -87,21 +87,31 @@ curl -u <user>:<pass> -H "Content-Type: application/json" -X POST \
 With a ticket link, the agent can fetch the ticket via `GET
 <host>/rest/api/2/issue/<KEY>?fields=summary,description` and compare its
 contents against the actual diff — real verification instead of attestation.
-Configure one of:
+
+**Store the PAT once, reuse forever** — the agent looks it up in this order
+and never asks again:
 
 ```bash
-export JIRA_TOKEN=<personal-access-token>     # JIRA Server/DC: Bearer PAT
+# 1. env var (add to your shell profile for persistence)
+export JIRA_TOKEN=<personal-access-token>            # JIRA Server/DC: Bearer PAT
 export JIRA_USER=<you@corp> JIRA_TOKEN=<api-token>   # Jira Cloud: basic auth
-# or: credentials in ~/.netrc (curl -n)
+
+# 2. OS keychain (most secure — the secret never touches a file or command line)
+security add-generic-password -s jira-pat -a "$USER" -w     # macOS, prompts interactively
+secret-tool store --label="JIRA PAT" service jira-pat       # Linux
+
+# 3. ~/.netrc — append:  machine <jira-host> login <user> password <pat>
 ```
 
-The token is **single-purpose**: it authorizes exactly one read-only GET on
-that ticket URL — never echoed, stored, reused, or embedded in the
-checklist, PR, or any other command. Even if pasted into chat, it's consumed
-by that fetch and forgotten (export `JIRA_TOKEN` beforehand to keep it out
-of the conversation entirely). Fetch unavailable (no creds, unreachable
-host, 404) → the agent falls back to your written confirmation; nothing else
-changes.
+The agent never runs a store/write itself — it emits the command for you to
+run once (never-mutate rule). If none are configured it asks once and offers
+the store command; afterwards the lookup finds it silently.
+
+The token is **single-purpose**: wherever it comes from — env, keychain,
+netrc, or pasted in chat — it authorizes only JIRA REST GETs: never echoed,
+never embedded in the checklist/PR/any other command, never attached to any
+other endpoint. Fetch unavailable (no creds, unreachable host, 404) → the
+agent falls back to your written confirmation; nothing else changes.
 
 ## Customizing for your team
 
