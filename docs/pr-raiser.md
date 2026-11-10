@@ -45,7 +45,7 @@ Volunteering several answers at once is fine; blanks/refusals get re-asked:
 | 2 | Base build ID **+ its commit** | SHA must exist in the repo |
 | 3 | Any diff in **binaries and XMLs** between base and private builds with the feature flag **disabled**? | User attestation — **screenshot of the comparison required for both `yes` and `no`** (`yes` additionally needs the differing paths/report). Refused after re-ask → blocker |
 | 4 | Must Fix items? If yes, is `MustFix_Log.txt` updated? | A **commit inside `git log <target>..HEAD`** must touch it — verified per-commit with the SHA cited. An update elsewhere (other branch/repo, uncommitted) does not clear the gate: the log update travels with the merge |
-| 5 | pct-documentation commit ID **+ the file path** where the change is captured | User attestation (different repo) |
+| 5 | pct-documentation commit ID | User attestation (different repo) |
 | 6 | Provide the ticket link **or** open it yourself and confirm in writing | With a link the agent **fetches it via JIRA REST and verifies the contents against the diff** (needs `JIRA_TOKEN` or `~/.netrc` — see setup below); without one, your verbatim written confirmation is recorded. Unverified after re-ask → blocker |
 
 ## What you get

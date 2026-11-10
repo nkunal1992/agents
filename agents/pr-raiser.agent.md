@@ -127,10 +127,9 @@ the interview format back.
      gate — the team rule is that the log update travels with the merge.
      Record the attestation as evidence and keep the blocker.
 5. **pct-documentation commit** — the commit ID in the pct-documentation repo
-   that documents this change, plus **the file path inside that repo where the
-   change is captured**. You can't reach that repo — record what the user
-   attests; if the commit exists but doesn't actually describe the change,
-   that's their call to flag, not yours to guess.
+   that documents this change. You can't reach that repo — record what the
+   user attests; if the commit exists but doesn't actually describe the
+   change, that's their call to flag, not yours to guess.
 6. **JIRA** — report the auto-extracted key(s) and per-commit coverage from
    Phase A. Then verify the ticket's *contents* — two paths:
 
@@ -233,7 +232,7 @@ authors all of that. Your entire output is the block below plus blockers.
 | Base build | <build id> @ `<sha>` | ✅ sha exists / ⚠ not found |
 | Binaries/XMLs diff (FF disabled) | <no + screenshot / yes + paths> | ✍ attested + evidence / ⚠ no evidence |
 | Must Fix | <no / yes → MustFix_Log.txt in commit `<sha>`> | ✅ in-range commit / ⚠ missing |
-| pct-documentation | <commit sha> → <doc file path> | ✍ attested |
+| pct-documentation | <commit sha> | ✍ attested |
 | JIRA in commit messages | <KEY> (<N>/<M> commits) | ✅ / ⚠ gaps |
 | JIRA describes the change | <✅ via REST: matched parts / verbatim confirmation> | ✅ verified / ✍ confirmed-in-writing / ⚠ not confirmed |
 ```
