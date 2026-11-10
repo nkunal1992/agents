@@ -43,7 +43,7 @@ Volunteering several answers at once is fine; blanks/refusals get re-asked:
 | 0 | Merge-target branch | **Always asked explicitly — never assumed** (not even `main`/`master`); the repo default may be offered as a candidate but requires your confirmation. Then `git merge-base` computes the diff, and the branch must be *on top of* the target (`git merge-base --is-ancestor <target> HEAD` vs the freshest ref) — a behind/diverged branch stops the run with the missing commits and a sync instruction until you rebase and confirm |
 | 1 | Private build ID **+ the commit it was triggered from** | SHA must be inside the PR's commit range — the classic wrong-build catch |
 | 2 | Base build ID **+ its commit** | SHA must exist in the repo |
-| 3 | Any diff in **binaries and XMLs** between base and private builds with the feature flag **disabled**? | User attestation — **screenshot of the comparison required for both `yes` and `no`** (`yes` additionally needs the differing paths/report). Refused after re-ask → blocker |
+| 3 | Any diff in **binaries and XMLs** between base and private builds with the feature flag **disabled**? | User attestation — **the HTML comparison report (generated through the GUI on VDI) is required for both `yes` and `no`** (`yes` additionally calls out the differing paths from the report). Refused after re-ask → blocker |
 | 4 | Must Fix items? If yes, is `MustFix_Log.txt` updated? | A **commit inside `git log <target>..HEAD`** must touch it — verified per-commit with the SHA cited. An update elsewhere (other branch/repo, uncommitted) does not clear the gate: the log update travels with the merge |
 | 5 | pct-documentation commit ID | User attestation (different repo) |
 | 6 | Provide the ticket link **or** open it yourself and confirm in writing | With a link the agent **fetches it via JIRA REST and verifies the contents against the diff** (needs `JIRA_TOKEN` or `~/.netrc` — see setup below); without one, your verbatim written confirmation is recorded. Unverified after re-ask → blocker |
@@ -54,7 +54,7 @@ Volunteering several answers at once is fine; blanks/refusals get re-asked:
 ## Process checklist
 | Check | Evidence | Status |   ← ✅ git-verified · ✍ attested · ⚠ blocker
 
-**Attach before raising:** <screenshot file(s)>   ← when diff evidence was collected
+**Attach before raising:** <report .html>   ← when diff evidence was collected
 ```
 
 That's the whole output — the agent writes no summary, impact, or title;
@@ -63,7 +63,7 @@ you author those and paste this block into your PR description.
 If a gate fails — branch behind the merge target, no JIRA key in any commit,
 MustFix without the log update, private build triggered outside the PR range,
 missing build info, or a required attestation refused after re-ask (diff
-screenshot, JIRA-detail confirmation) — the draft is still produced but
+report, JIRA-detail confirmation) — the output is still produced but
 headed `⚠ BLOCKERS — do not raise yet:` with the list.
 
 ### Follow-up replies

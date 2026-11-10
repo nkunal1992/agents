@@ -111,12 +111,13 @@ the interview format back.
    --verify`) — an SHA that doesn't exist in the repo gets a ⚠.
 3. **Binaries/XMLs diff** — "Is there any diff in binaries and XMLs between the
    base build and your private build **with the feature flag disabled**?"
-   Record `yes`/`no` verbatim. **Either way, require the user to attach a
-   screenshot of the build-diff comparison** — a `no` is precisely the claim
-   that needs proof. A `yes` additionally needs the differing artifact paths
-   or the diff report location. If no screenshot/evidence is provided, re-ask
-   once; still missing → the row reads `⚠ <answer> — no evidence` and it
-   counts as a required attestation refused → **blocker**.
+   Record `yes`/`no` verbatim. **Either way, require the user to attach the
+   build comparison report — the HTML file generated through the GUI on the
+   VDI** — a `no` is precisely the claim that needs proof. A `yes`
+   additionally needs the differing artifact paths called out from the
+   report. If no report is provided, re-ask once; still missing → the row
+   reads `⚠ <answer> — no report` and it counts as a required attestation
+   refused → **blocker**.
 4. **Must Fix items** — does this PR contain a Must Fix? If yes, the update
    to `MustFix_Log.txt` **must be part of what this PR merges** — a commit
    inside `git log <target>..HEAD` that touches it:
@@ -216,7 +217,7 @@ authors all of that. Your entire output is the block below plus blockers.
    `MustFix_Log.txt` · private-build
    commit missing or outside the PR range · base-build info missing · a
    required attestation refused or left blank after re-ask (JIRA content
-   unverified on both paths, build-diff screenshot missing). If any
+   unverified on both paths, build-diff report missing). If any
    blocker is set, the output is headed `⚠ BLOCKERS — do not raise yet:`
    followed by the list.
 2. **Process checklist** — paste-ready Markdown the user drops into their
@@ -230,7 +231,7 @@ authors all of that. Your entire output is the block below plus blockers.
 | Branch on top of target | <target> tip is ancestor of HEAD | ✅ verified / ⚠ diverged |
 | Private build | <build id> @ `<sha>` | ✅ sha in PR range / ⚠ outside range |
 | Base build | <build id> @ `<sha>` | ✅ sha exists / ⚠ not found |
-| Binaries/XMLs diff (FF disabled) | <no + screenshot / yes + paths> | ✍ attested + evidence / ⚠ no evidence |
+| Binaries/XMLs diff (FF disabled) | <no + HTML report / yes + report + paths> | ✍ attested + report / ⚠ no report |
 | Must Fix | <no / yes → MustFix_Log.txt in commit `<sha>`> | ✅ in-range commit / ⚠ missing |
 | pct-documentation | <commit sha> | ✍ attested |
 | JIRA in commit messages | <KEY> (<N>/<M> commits) | ✅ / ⚠ gaps |
@@ -238,8 +239,8 @@ authors all of that. Your entire output is the block below plus blockers.
 ```
 
 Legend under the table: `✅ verified from git · ✍ user-attested · ⚠ blocker`.
-After the table, one line: `**Attach before raising:** <screenshot file(s)>`
-whenever build-diff evidence was collected — the screenshot must travel
+After the table, one line: `**Attach before raising:** <report .html>`
+whenever build-diff evidence was collected — the HTML report must travel
 with the PR.
 
 3. **Optional Bitbucket Server creation** — offer a ready-to-fill command the
