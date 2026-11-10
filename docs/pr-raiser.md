@@ -2,9 +2,9 @@
 
 Raise a pull request only after the team's traceability checklist is
 satisfied. It collects the build/JIRA/documentation evidence interactively,
-verifies whatever git can prove, assesses the change read-only, and emits a
-paste-ready PR title and description for Bitbucket Server/DC — with the
-process checklist embedded in the PR itself.
+verifies whatever git can prove, and emits the process checklist — nothing
+else: **you write the PR title, summary, and impact yourself** and paste the
+checklist in. For Bitbucket Server/DC.
 
 - **Enforces the process every time**: the same evidence is collected on every
   PR — builds, binary/XML diff, MustFix, documentation commit, JIRA — so
@@ -29,8 +29,8 @@ scripts/install.sh --only pr-raiser --only jira-ticket-writer --only code-review
 ```
 
 Pick **pr-raiser** in the Copilot Chat agent dropdown, or use the slash
-command `/pr-raise`. It asks for the merge-target branch first, then collects
-everything else in one message.
+command `/pr-raise`. It asks for the merge-target branch first, then
+interviews you — one question at a time.
 
 ## What it asks for
 
@@ -51,12 +51,14 @@ Volunteering several answers at once is fine; blanks/refusals get re-asked:
 ## What you get
 
 ```markdown
-## Summary            change grouped by concern (feature/fix/refactor/test/config)
-## Impact             systems touched, compat/migration surface, flag gating
-## Change assessment  efficiency verdict — clean / acceptable-with-notes / needs-attention
-                      + recommendations, flagged never applied, only when warranted
-## Process checklist  | Check | Evidence | Status | — ✅ git-verified · ✍ attested · ⚠ blocker
+## Process checklist
+| Check | Evidence | Status |   ← ✅ git-verified · ✍ attested · ⚠ blocker
+
+**Attach before raising:** <screenshot file(s)>   ← when diff evidence was collected
 ```
+
+That's the whole output — the agent writes no summary, impact, or title;
+you author those and paste this block into your PR description.
 
 If a gate fails — branch behind the merge target, no JIRA key in any commit,
 MustFix without the log update, private build triggered outside the PR range,
@@ -143,7 +145,7 @@ agent falls back to your written confirmation; nothing else changes.
 ## Customizing for your team
 
 The checklist lives inside `agents/pr-raiser.agent.md` — Phase B is the
-question list, Phase D the emitted table. To rename or add gates (build
+question list, Phase C the emitted table. To rename or add gates (build
 naming, `MustFix_Log.txt`, `pct-documentation`, extra rows), edit those two
 sections in lock-step so what's asked and what's reported stay aligned.
 

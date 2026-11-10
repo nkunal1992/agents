@@ -28,7 +28,7 @@ slash commands such as `/cve-fix` once copied to `.github/prompts/`.
 | [cve-remediator](agents/cve-remediator.agent.md) | Fixes CVEs with the smallest safe upgrade and audits CVE whitelists for entries that can be removed — [guide](docs/cve-remediator.md) |
 | [codebase-guide](agents/codebase-guide.agent.md) | Read-only codebase explainer — how/where/why answers and repo tours with file:line evidence, tuned for large repos — [guide](docs/codebase-guide.md) |
 | [jira-ticket-writer](agents/jira-ticket-writer.agent.md) | Generates paste-ready JIRA ticket details from worktree diffs, commits, or ranges — [guide](docs/jira-ticket-writer.md) |
-| [pr-raiser](agents/pr-raiser.agent.md) | Raises PRs only after the team's traceability checklist passes — build/JIRA/doc evidence, MustFix gate, read-only change assessment — [guide](docs/pr-raiser.md) |
+| [pr-raiser](agents/pr-raiser.agent.md) | Raises PRs only after the team's traceability checklist passes — build/JIRA/doc evidence, MustFix gate — emits just the checklist for your PR — [guide](docs/pr-raiser.md) |
 | [architecture-mapper](agents/architecture-mapper.agent.md) | Maps repo/package architecture into mermaid diagrams + a self-contained explainer site — [guide](docs/architecture-mapper.md) |
 | [code-to-requirements](agents/code-to-requirements.agent.md) | Reverse-engineers code into an audit-ready .adoc functional spec — slicing, exhaustive paths, verification loop — [guide](docs/code-to-requirements.md) |
 | [confluence-knowledge](agents/confluence-knowledge.agent.md) | Single-file grounded Q&A over one Confluence page + its descendant pages — self-installs its local MCP service on first run (bundled zip available via `scripts/bundle-confluence.sh`), per-claim citations, explicit "not documented" refusals — [guide](docs/confluence-knowledge.md) |
@@ -110,8 +110,8 @@ nothing back to JIRA, so no credentials or permissions needed. *Try:*
 Raises a pull request only after your team's traceability checklist is
 satisfied — merge target, private/base builds and their commits, binary/XML
 diff attestation, MustFix_Log.txt gate, documentation-repo commit, JIRA
-linkage — and appends a read-only change assessment (what changed, impact,
-efficiency verdict) to the PR description. *Why:* process compliance stops
+linkage — and emits the paste-ready process checklist; you write the title,
+summary, and impact yourself. *Why:* process compliance stops
 depending on reviewer vigilance — the checklist is collected every time,
 git-verifiable items are verified not taken on faith, and unsatisfied gates
 surface as blockers instead of slipping through. *Try:* `/pr-raise` on a
