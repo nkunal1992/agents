@@ -28,9 +28,12 @@ scripts/install.sh --only pr-raiser /path/to/your-repo
 scripts/install.sh --only pr-raiser --only jira-ticket-writer --only code-reviewer /path/to/your-repo
 ```
 
-Pick **pr-raiser** in the Copilot Chat agent dropdown, or use the slash
-command `/pr-raise`. It asks for the merge-target branch first, then
-interviews you — one question at a time.
+Pick **pr-raiser** in the Copilot Chat agent dropdown — no prompt needed,
+it immediately asks *"Which branch should this PR merge into?"* and starts
+the interview (one question at a time). `/pr-raise` is an optional shortcut
+that does the same thing; it accepts a target name upfront (`/pr-raise into
+release/10.5`). The agent is scope-locked — it only runs this checklist
+flow and redirects anything else.
 
 ## What it asks for
 
