@@ -131,4 +131,4 @@ ax.legend(handles=leg, loc="lower center", ncol=5, frameon=False,
 from pathlib import Path
 fig.savefig(str(Path(__file__).resolve().parent.parent / "RAG_pipeline.png"),
             facecolor="white", bbox_inches="tight", pad_inches=0.25)
-print("wrote /Users/narayan/Desktop/RAG_pipeline.png")
+print("wrote", Path(__file__).resolve().parent.parent / "RAG_pipeline.png")
