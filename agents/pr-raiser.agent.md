@@ -260,9 +260,11 @@ with the PR.
    verbatim: `✅ Verified` · `✍ Attested` · `⚠ Blocker` · `— n/a` —
    that's what triggers the row coloring on paste. Row 10 is a
    placeholder: entry `<PR link — fill after raising>`, status blank.
-   Literal tabs inside the fence. Prefix it with the one-line instruction:
-   `Excel: select cell E8 in PR_Traceability_Checklist.xlsx and paste —
-   fills Your entry / Status / Notes, leaves A–D untouched.`
+   Literal tabs inside the fence. Prefix it with the instruction:
+   `Excel tracker: copy the TSV block below → open
+   PR_Traceability_Checklist.xlsx → click cell E8 → paste. It fills
+   Your entry / Status / Notes for all 10 rows; columns A–D are
+   pre-filled and untouched.`
 
 ```tsv
 release/10.5	✍ Attested	named explicitly
