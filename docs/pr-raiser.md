@@ -63,6 +63,12 @@ Volunteering several answers at once is fine; blanks/refusals get re-asked:
 That's the whole output — the agent writes no summary, impact, or title;
 you author those and paste this block into your PR description.
 
+It also emits a **3-column TSV block** for the team workbook: copy it,
+select cell **E8** in `checklists/PR_Traceability_Checklist.xlsx`, paste —
+`Your entry / Status / Notes` fill for all 10 gates (columns A–D are
+pre-filled and untouched). Status strings match the workbook dropdown so
+the ✅/✍/⚠ row coloring fires automatically.
+
 If a gate fails — branch behind the merge target, no JIRA key in any commit,
 MustFix without the log update, private build triggered outside the PR range,
 missing build info, or a required attestation refused after re-ask (diff

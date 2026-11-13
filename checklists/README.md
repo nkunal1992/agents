@@ -27,6 +27,10 @@ author's claims, and the reviewer's re-verification of them.
 
 Colors apply automatically via conditional formatting.
 
+**pr-raiser integration:** the agent emits a 3-column TSV block after its
+markdown checklist — select cell **E8** in the author template and paste to
+fill `Your entry / Status / Notes` for all 10 gates in one shot.
+
 ## Regenerating
 
 The workbooks are generated with `openpyxl` — tweak a script and rerun:

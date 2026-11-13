@@ -250,7 +250,34 @@ After the table, one line: `**Attach before raising:** <report .html>`
 whenever build-diff evidence was collected — the HTML report must travel
 with the PR.
 
-3. **Optional Bitbucket Server creation** — offer a ready-to-fill command the
+3. **Excel-paste block** — after the table, emit the same evidence as a
+   fenced TSV block the user drops into the team's workbook
+   (`PR_Traceability_Checklist.xlsx`): exactly **3 columns × 10 rows**
+   (`Your entry` / `Status` / `Notes`), one row per gate in template order
+   — merge target, branch-on-top, private build, base build, binaries/XMLs
+   diff, Must Fix, pct-documentation, JIRA in commits, JIRA describes the
+   change, raise-the-PR. Status strings must match the workbook's dropdown
+   verbatim: `✅ Verified` · `✍ Attested` · `⚠ Blocker` · `— n/a` —
+   that's what triggers the row coloring on paste. Row 10 is a
+   placeholder: entry `<PR link — fill after raising>`, status blank.
+   Literal tabs inside the fence. Prefix it with the one-line instruction:
+   `Excel: select cell E8 in PR_Traceability_Checklist.xlsx and paste —
+   fills Your entry / Status / Notes, leaves A–D untouched.`
+
+```tsv
+release/10.5	✍ Attested	named explicitly
+rebased onto release/10.5 tip 9f8e7d6	✅ Verified	merge-base passed
+PB-20415 @ a1b2c3d	✅ Verified	sha inside PR range
+BB-20410 @ e4f5g6h	✅ Verified	sha exists in repo
+No — build-compare-report.html attached	✍ Attested	report attached to PR
+Yes — MustFix_Log.txt in commit f7e8d9a	✅ Verified	in-range commit
+pct-doc@9a8b7c6	✍ Attested	
+PROJ-1234 (3/3 commits)	✅ Verified	full coverage
+<verbatim confirmation> — <name>, <date>	✍ Attested	written confirmation
+<PR link — fill after raising>		
+```
+
+4. **Optional Bitbucket Server creation** — offer a ready-to-fill command the
    USER runs (you never hold credentials or call the API yourself):
 
 ```bash
